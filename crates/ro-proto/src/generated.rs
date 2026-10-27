@@ -207,7 +207,8 @@ pub static SERVER: &[(u16, i32)] = &[
     (0x01c3, -1), // ZC_BROADCAST2
     (0x01c6, 4),
     (0x01c7, 2),
-    (0x01c8, 15),
+    (0x01c8, 15), // ZC_USE_ITEM_ACK
+    (0x01c9, 97), // packet_graffiti_entry
     (0x01ca, 3),
     (0x01cb, 9),
     (0x01cc, 9),
@@ -218,7 +219,7 @@ pub static SERVER: &[(u16, i32)] = &[
     (0x01d3, 35), // ZC_SOUND
     (0x01d4, 6), // ZC_OPEN_EDITDLGSTR
     (0x01d6, 4), // ZC_NOTIFY_MAPPROPERTY2
-    (0x01d7, 11),
+    (0x01d7, 15), // ZC_SPRITE_CHANGE
     (0x01d8, 54),
     (0x01d9, 53),
     (0x01da, 60),
@@ -603,6 +604,7 @@ pub static SERVER: &[(u16, i32)] = &[
     (0x07f9, -1),
     (0x07fa, 8), // ZC_DELETE_ITEM_FROM_BODY
     (0x07fc, 10),
+    (0x07fd, -1), // packet_item_drop_announce
     (0x0803, 4),
     (0x0804, 8),
     (0x0805, -1),
@@ -729,34 +731,34 @@ pub static SERVER: &[(u16, i32)] = &[
     (0x09de, -1), // ZC_WHISPER
     (0x09df, 7), // ZC_ACK_WHISPER
     (0x09e5, 18), // ZC_DELETEITEM_FROM_MCSTORE
-    (0x09e6, 22),
-    (0x09e7, 3),
-    (0x09ed, 3),
+    (0x09e6, 24), // ZC_UPDATE_ITEM_FROM_BUYING_STORE
+    (0x09e7, 3), // ZC_NOTIFY_UNREADMAIL
+    (0x09ed, 3), // ZC_WRITE_MAIL_RESULT
     (0x09f0, -1),
     (0x09f2, 12),
     (0x09f4, 12),
-    (0x09f6, 11),
+    (0x09f6, 11), // ZC_ACK_DELETE_MAIL
     (0x09f7, 75),
     (0x09f8, -1),
     (0x09f9, 143),
     (0x09fa, -1),
     (0x09fc, 6),
-    (0x09fd, -1),
-    (0x09fe, -1),
-    (0x09ff, -1),
+    (0x09fd, -1), // packet_unit_walking
+    (0x09fe, -1), // packet_spawn_unit
+    (0x09ff, -1), // packet_idle_unit
     (0x0a00, 269),
     (0x0a02, 4), // ZC_DRESSROOM_OPEN
-    (0x0a07, 9),
+    (0x0a07, 9), // ZC_ACK_REMOVE_ITEM_MAIL
     (0x0a0e, 14), // ZC_BATTLEFIELD_NOTIFY_HP
-    (0x0a12, 27),
+    (0x0a12, 27), // ZC_ACK_OPEN_WRITE_MAIL
     (0x0a14, 10),
     (0x0a15, 12), // ZC_GOLDPCCAFE_POINT
     (0x0a17, 6), // ZC_DYNAMICNPC_CREATE_RESULT
     (0x0a1a, 23),
-    (0x0a1c, -1),
+    (0x0a1c, -1), // packet_roulette_info_ack
     (0x0a1e, 3), // ZC_ACK_CLOSE_ROULETTE
-    (0x0a20, 23),
-    (0x0a22, 5),
+    (0x0a20, 23), // packet_roulette_generate_ack
+    (0x0a22, 7), // packet_roulette_itemrecv_ack
     (0x0a23, -1),
     (0x0a24, 66),
     (0x0a26, 7),
@@ -767,6 +769,7 @@ pub static SERVER: &[(u16, i32)] = &[
     (0x0a32, 2),
     (0x0a3b, -1), // ZC_EQUIPMENT_EFFECT
     (0x0a3f, 11), // ZC_UPDATE_CARDSLOT
+    (0x0a41, 18), // ZC_SKILL_SCALE
     (0x0a44, -1),
     (0x0a47, 3), // ZC_STYLE_CHANGE_RES
     (0x0a4a, 6),
@@ -807,10 +810,12 @@ pub static SERVER: &[(u16, i32)] = &[
     (0x0acc, 18),
     (0x0ada, 32), // ZC_BROADCAST_ITEMREFINING_RESULT
     (0x0adb, -1), // ZC_DEBUGMSG
-    (0x0add, 22),
+    (0x0add, 24), // packet_dropflooritem
     (0x0ade, 6),
     (0x0adf, 58), // ZC_ACK_REQNAMEALL_NPC
     (0x0ae2, 7), // ZC_UI_OPEN
+    (0x0ae4, 89), // ZC_ADD_MEMBER_TO_GROUP
+    (0x0ae5, -1), // ZC_GROUP_LIST
     (0x0ae7, 38), // ZC_PARTY_REQ_MASTER_TO_JOIN
     (0x0af0, 10),
     (0x0af6, 88), // ZC_ACK_RANKING2
@@ -819,7 +824,7 @@ pub static SERVER: &[(u16, i32)] = &[
     (0x0afb, -1), // ZC_AUTOSPELLLIST
     (0x0afd, -1), // ZC_GUILD_POSITION
     (0x0b08, -1), // ZC_INVENTORY_START
-    (0x0b09, -1),
+    (0x0b09, -1), // packet_itemlist_normal
     (0x0b0b, 4), // ZC_INVENTORY_END
     (0x0b0d, 10), // ZC_REMOVE_EFFECT
     (0x0b15, 7), // ZC_ACK_OPEN_MSGBOX_EXTEND_BODYITEM_SIZE
@@ -834,7 +839,7 @@ pub static SERVER: &[(u16, i32)] = &[
     (0x0b2e, 4), // ZC_REQ_ACK_MOVE_GUILD_AGIT
     (0x0b36, -1), // ZC_GUILD_EMBLEM_IMG
     (0x0b37, -1), // ZC_EQUIPWIN_MICROSCOPE
-    (0x0b39, -1),
+    (0x0b39, -1), // packet_itemlist_equip
     (0x0b3d, -1), // ZC_PC_PURCHASE_ITEMLIST_FROMMC
     (0x0b3f, 64), // ZC_ACK_ADD_ITEM_RODEX
     (0x0b40, -1), // ZC_PC_PURCHASE_MYITEMLIST
@@ -1553,6 +1558,7 @@ pub mod id {
     pub const ZC_ACK_CLOSE_ROULETTE: u16 = 0x0a1e;
     pub const ZC_ACK_COUNT_BARGAIN_SALE_ITEM: u16 = 0x09c4;
     pub const ZC_ACK_CREATE_CHATROOM: u16 = 0x00d6;
+    pub const ZC_ACK_DELETE_MAIL: u16 = 0x09f6;
     pub const ZC_ACK_DISORGANIZE_GUILD_RESULT: u16 = 0x015e;
     pub const ZC_ACK_EXCHANGE_ITEM: u16 = 0x01f5;
     pub const ZC_ACK_EXTEND_BODYITEM_SIZE: u16 = 0x0b17;
@@ -1568,6 +1574,7 @@ pub mod id {
     pub const ZC_ACK_OPENSTORE2: u16 = 0x0a28;
     pub const ZC_ACK_OPEN_BANKING: u16 = 0x09b7;
     pub const ZC_ACK_OPEN_MSGBOX_EXTEND_BODYITEM_SIZE: u16 = 0x0b15;
+    pub const ZC_ACK_OPEN_WRITE_MAIL: u16 = 0x0a12;
     pub const ZC_ACK_PLAYER_AID_IN_RANGE: u16 = 0x0a6d;
     pub const ZC_ACK_PREVIEW_MACRO_DETECTOR: u16 = 0x0a6a;
     pub const ZC_ACK_RANDOM_COMBINE_ITEM: u16 = 0x0a50;
@@ -1576,6 +1583,7 @@ pub mod id {
     pub const ZC_ACK_RANKING2: u16 = 0x0af6;
     pub const ZC_ACK_READ_RODEX: u16 = 0x0b63;
     pub const ZC_ACK_REMEMBER_WARPPOINT: u16 = 0x011e;
+    pub const ZC_ACK_REMOVE_ITEM_MAIL: u16 = 0x0a07;
     pub const ZC_ACK_REQMAKINGITEM: u16 = 0x018f;
     pub const ZC_ACK_REQNAMEALL: u16 = 0x0a30;
     pub const ZC_ACK_REQNAMEALL_NPC: u16 = 0x0adf;
@@ -1595,6 +1603,7 @@ pub mod id {
     pub const ZC_ADD_EXCHANGE_ITEM: u16 = 0x0b42;
     pub const ZC_ADD_ITEM_TO_CART: u16 = 0x0b45;
     pub const ZC_ADD_ITEM_TO_STORE: u16 = 0x0b44;
+    pub const ZC_ADD_MEMBER_TO_GROUP: u16 = 0x0ae4;
     pub const ZC_ADD_SKILL: u16 = 0x0111;
     pub const ZC_ADVENTURER_AGENCY_JOIN_REQ: u16 = 0x0ae7;
     pub const ZC_ADVENTURER_AGENCY_JOIN_RESULT: u16 = 0x0afa;
@@ -1684,6 +1693,7 @@ pub mod id {
     pub const ZC_GRADE_ENCHANT_BROADCAST_RESULT: u16 = 0x0b5e;
     pub const ZC_GRADE_ENCHANT_MATERIAL_LIST: u16 = 0x0b5a;
     pub const ZC_GROUP_ISALIVE: u16 = 0x0ab2;
+    pub const ZC_GROUP_LIST: u16 = 0x0ae5;
     pub const ZC_GUILD_AGIT_INFO: u16 = 0x0b27;
     pub const ZC_GUILD_CHAT: u16 = 0x017f;
     pub const ZC_GUILD_EMBLEM_IMG: u16 = 0x0b36;
@@ -1753,6 +1763,7 @@ pub mod id {
     pub const ZC_NOTIFY_SKILL_POSITION: u16 = 0x0115;
     pub const ZC_NOTIFY_STOREITEM_COUNTINFO: u16 = 0x00f2;
     pub const ZC_NOTIFY_TIME: u16 = 0x007f;
+    pub const ZC_NOTIFY_UNREADMAIL: u16 = 0x09e7;
     pub const ZC_NOTIFY_VANISH: u16 = 0x0080;
     pub const ZC_NOTIFY_WEAPONITEMLIST: u16 = 0x0221;
     pub const ZC_NPCACK_MAPMOVE: u16 = 0x0091;
@@ -1834,6 +1845,7 @@ pub mod id {
     pub const ZC_SKILLMSG: u16 = 0x0215;
     pub const ZC_SKILL_DISAPPEAR: u16 = 0x0120;
     pub const ZC_SKILL_POSTDELAY: u16 = 0x043d;
+    pub const ZC_SKILL_SCALE: u16 = 0x0a41;
     pub const ZC_SKILL_SELECT_REQUEST: u16 = 0x0442;
     pub const ZC_SKILL_UPDATE: u16 = 0x01ac;
     pub const ZC_SOULENERGY: u16 = 0x0b73;
@@ -1842,6 +1854,7 @@ pub mod id {
     pub const ZC_SPIRITS: u16 = 0x01d0;
     pub const ZC_SPIRITS2: u16 = 0x01e1;
     pub const ZC_SPIRITS_ATTRIBUTE: u16 = 0x08cf;
+    pub const ZC_SPRITE_CHANGE: u16 = 0x01d7;
     pub const ZC_SSILIST_ITEM_CLICK_ACK: u16 = 0x083d;
     pub const ZC_START_CAPTURE: u16 = 0x019e;
     pub const ZC_STATE_CHANGE: u16 = 0x0229;
@@ -1865,10 +1878,12 @@ pub mod id {
     pub const ZC_UPDATE_CARDSLOT: u16 = 0x0a3f;
     pub const ZC_UPDATE_CHARSTAT: u16 = 0x01f2;
     pub const ZC_UPDATE_GDID: u16 = 0x02f7;
+    pub const ZC_UPDATE_ITEM_FROM_BUYING_STORE: u16 = 0x09e6;
     pub const ZC_UPDATE_MAPINFO: u16 = 0x0192;
     pub const ZC_UPDATE_RANKING_POINT: u16 = 0x097e;
     pub const ZC_USER_COUNT: u16 = 0x00c2;
     pub const ZC_USESKILL_ACK: u16 = 0x0b1a;
+    pub const ZC_USE_ITEM_ACK: u16 = 0x01c8;
     pub const ZC_USE_SKILL: u16 = 0x09cb;
     pub const ZC_VIEW_CAMERAINFO: u16 = 0x0a78;
     pub const ZC_WAIT_DIALOG: u16 = 0x00b5;
@@ -1876,4 +1891,16 @@ pub mod id {
     pub const ZC_WARPLIST: u16 = 0x0abe;
     pub const ZC_WHISPER: u16 = 0x09de;
     pub const ZC_WHISPER_LIST: u16 = 0x00d4;
+    pub const ZC_WRITE_MAIL_RESULT: u16 = 0x09ed;
+    pub const packet_dropflooritem: u16 = 0x0add;
+    pub const packet_graffiti_entry: u16 = 0x01c9;
+    pub const packet_idle_unit: u16 = 0x09ff;
+    pub const packet_item_drop_announce: u16 = 0x07fd;
+    pub const packet_itemlist_equip: u16 = 0x0b39;
+    pub const packet_itemlist_normal: u16 = 0x0b09;
+    pub const packet_roulette_generate_ack: u16 = 0x0a20;
+    pub const packet_roulette_info_ack: u16 = 0x0a1c;
+    pub const packet_roulette_itemrecv_ack: u16 = 0x0a22;
+    pub const packet_spawn_unit: u16 = 0x09fe;
+    pub const packet_unit_walking: u16 = 0x09fd;
 }

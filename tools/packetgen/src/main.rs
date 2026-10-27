@@ -80,14 +80,28 @@ namespace cpk {
 #include "map/packets.hpp"
 "#;
     let mut structs: BTreeMap<String, (bool, &str)> = BTreeMap::new();
+    let mut variable: BTreeMap<String, bool> = BTreeMap::new();
+    let mut map_pp = String::new();
     for (header, ns) in [("map/packets.hpp", ""), ("common/packets.hpp", "cpk::")] {
         std::fs::write(work.join("pp.cpp"), format!("#include \"{header}\"\n"))?;
         let pp = run_cl(&work, &[&flags[..], &["/EP".into(), "pp.cpp".into()]].concat())?;
-        for (name, var) in scan_structs(&pp) {
-            structs.entry(name).or_insert((var, ns));
+        let (all, headers) = scan_structs(&pp);
+        for (name, var) in all {
+            if headers.contains(&name) {
+                structs.entry(name.clone()).or_insert((var, ns));
+            }
+            variable.entry(name).or_insert(var);
+        }
+        if ns.is_empty() {
+            map_pp = pp;
         }
     }
     eprintln!("packetgen: {} packet structs with headers at PACKETVER {packetver}", structs.len());
+
+    // Older packets (packets_struct.hpp) take their id from the `packet_headers` enum,
+    // assigned in the map server sources: `p.packetType = sendLookType;`.
+    let legacy = scan_legacy_ids(&src.join("map"), &map_pp, &variable, &structs)?;
+    eprintln!("packetgen: {} legacy enum-id packets", legacy.len());
 
     // 2. dump sizes and packet db
     let mut dump = String::from("#include <cstdio>\n");
@@ -103,6 +117,10 @@ int main() {
 "#;
     for (name, (_, ns)) in &structs {
         writeln!(dump, "    std::printf(\"st {name} %d %d\\n\", (int)(uint16){ns}HEADER_{name}, (int)sizeof({ns}PACKET_{name}));")?;
+    }
+    // packet_headers ids are all server -> client; reported under the enum id's name.
+    for (ident, name) in &legacy {
+        writeln!(dump, "    std::printf(\"lg {name} %d %d {ident}\\n\", (int)(uint16){ident}, (int)sizeof({}));", ctype(name))?;
     }
     dump += "    return 0;\n}\n";
     std::fs::write(work.join("dump.cpp"), dump)?;
@@ -140,13 +158,14 @@ int main() {
                     client.insert(cmd, (len, func, pos, seq));
                 }
             }
-            Some("st") => {
+            Some(tag @ ("st" | "lg")) => {
                 let name = it.next().unwrap().to_string();
                 let id: i32 = it.next().unwrap().parse()?;
-                let size: i32 = it.next().unwrap().parse()?;
+                let mut rest = it.next().unwrap().split(' ');
+                let size: i32 = rest.next().unwrap().parse()?;
                 let id = id as u16;
-                let len = if structs[&name].0 { -1 } else { size };
-                if SERVER_PREFIXES.iter().any(|p| name.starts_with(p)) {
+                let len = if variable[&name] { -1 } else { size };
+                if tag == "lg" || SERVER_PREFIXES.iter().any(|p| name.starts_with(p)) {
                     if let Some((old, _)) = server.get(&id) {
                         if *old != len {
                             eprintln!("packetgen: note {id:#06x} {name}: packet db says {old}, struct says {len} (using struct)");
@@ -203,25 +222,71 @@ int main() {
     Ok(())
 }
 
-/// Returns struct name -> is_variable for every PACKET_X that also has a HEADER_X.
-fn scan_structs(pp: &str) -> BTreeMap<String, bool> {
-    let header = Regex::new(r"const\s+int16\s+HEADER_(\w+)\s*=").unwrap();
-    let headers: BTreeSet<&str> = header.captures_iter(pp).map(|c| c.get(1).unwrap().as_str()).collect();
-    let st = Regex::new(r"struct\s+PACKET_(\w+)\s*\{([^}]*)\}").unwrap();
-    let mut out = BTreeMap::new();
-    for c in st.captures_iter(pp) {
-        let name = &c[1];
-        if !headers.contains(name) {
+/// Pairs `packet_headers` enum ids with the struct sent under them, by finding
+/// `<var>.packetType = <ident>;` and the nearest preceding `PACKET_<NAME> <var>` declaration.
+/// Only pairs whose enum id and struct both survive preprocessing are returned.
+fn scan_legacy_ids(
+    map_dir: &Path,
+    map_pp: &str,
+    variable: &BTreeMap<String, bool>,
+    structs: &BTreeMap<String, (bool, &str)>,
+) -> anyhow::Result<BTreeSet<(String, String)>> {
+    let enum_body = Regex::new(r"enum\s+packet_headers\s*\{([^}]*)\}").unwrap();
+    let body = enum_body.captures(map_pp).context("packet_headers enum not found")?;
+    let ident_re = Regex::new(r"(\w+)\s*=").unwrap();
+    let idents: BTreeSet<&str> = ident_re.captures_iter(body.get(1).unwrap().as_str()).map(|c| c.get(1).unwrap().as_str()).collect();
+
+    let assign = Regex::new(r"(\w+)\s*(?:\.|->)\s*[Pp]acketType\s*=\s*(\w+)\s*;").unwrap();
+    let mut out = BTreeSet::new();
+    for entry in std::fs::read_dir(map_dir)? {
+        let path = entry?.path();
+        if path.extension().is_none_or(|e| e != "cpp") {
             continue;
         }
-        let body = &c[2];
+        let text = std::fs::read_to_string(&path)?;
+        for c in assign.captures_iter(&text) {
+            let (var, ident) = (&c[1], &c[2]);
+            if !idents.contains(ident) {
+                continue;
+            }
+            let start = c.get(0).unwrap().start();
+            let before = &text[start.saturating_sub(4000)..start];
+            let decl = Regex::new(&format!(r"\b(PACKET_|packet_)(\w+)\s*\*?\s*\b{}\b", regex::escape(var))).unwrap();
+            let Some(name) = decl.captures_iter(before).last().map(|d| struct_key(&d[1], &d[2])) else { continue };
+            if variable.contains_key(&name) && !structs.contains_key(&name) {
+                out.insert((ident.to_string(), name));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// `PACKET_ZC_X` is keyed as `ZC_X` (matching `HEADER_ZC_X`); lowercase `packet_x` keeps its full name.
+fn struct_key(prefix: &str, rest: &str) -> String {
+    if prefix == "PACKET_" { rest.to_string() } else { format!("{prefix}{rest}") }
+}
+
+/// C++ type name for a struct key.
+fn ctype(key: &str) -> String {
+    if key.starts_with("packet_") { key.to_string() } else { format!("PACKET_{key}") }
+}
+
+/// Returns (struct name -> is_variable for every PACKET_X, names that also have a HEADER_X).
+fn scan_structs(pp: &str) -> (BTreeMap<String, bool>, BTreeSet<String>) {
+    let header = Regex::new(r"const\s+int16\s+HEADER_(\w+)\s*=").unwrap();
+    let headers: BTreeSet<String> = header.captures_iter(pp).map(|c| c[1].to_string()).collect();
+    let st = Regex::new(r"struct\s+(PACKET_|packet_)(\w+)\s*\{([^}]*)\}").unwrap();
+    let mut out = BTreeMap::new();
+    for c in st.captures_iter(pp) {
+        let name = &struct_key(&c[1], &c[2]);
+        let body = &c[3];
         let mut fields = body.split(';').map(str::trim).filter(|s| !s.is_empty());
         let _ty = fields.next();
         let second = fields.next().unwrap_or("");
         let var = second.ends_with("ength") || second.ends_with("Len") || second.ends_with(" len") || body.contains("[]");
         out.insert(name.to_string(), var);
     }
-    out
+    (out, headers)
 }
 
 /// canonicalize() without the `\\?\` prefix cl.exe rejects.

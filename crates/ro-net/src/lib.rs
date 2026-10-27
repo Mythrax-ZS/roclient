@@ -155,6 +155,8 @@ impl MapSession {
         let deadline = tokio::time::Instant::now() + dur;
         let mut keepalive = tokio::time::interval(KEEPALIVE);
         let mut seen = BTreeMap::new();
+        // Recent frames, to name the culprit when framing breaks.
+        let mut recent: std::collections::VecDeque<(u16, usize)> = Default::default();
         loop {
             tokio::select! {
                 _ = tokio::time::sleep_until(deadline) => return Ok(seen),
@@ -164,8 +166,15 @@ impl MapSession {
                 }
                 f = self.conn.next() => match f {
                     None => bail!("map server closed the connection"),
-                    Some(Err(e)) => return Err(e.into()),
+                    Some(Err(e)) => {
+                        let recent: Vec<String> = recent.iter().map(|(op, len)| format!("{op:#06x}({len})")).collect();
+                        bail!("{e}\nlast frames: {}", recent.join(" "));
+                    }
                     Some(Ok(Frame::Packet { opcode, data })) => {
+                        if recent.len() == 8 {
+                            recent.pop_front();
+                        }
+                        recent.push_back((opcode, data.len()));
                         if opcode == id::SC_NOTIFY_BAN {
                             bail!("disconnected by map server, code {}", data[2]);
                         }
