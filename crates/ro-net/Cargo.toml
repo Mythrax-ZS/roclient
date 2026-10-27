@@ -1,0 +1,13 @@
+[package]
+name = "ro-net"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+ro-proto = { path = "../ro-proto" }
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true

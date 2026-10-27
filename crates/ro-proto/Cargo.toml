@@ -1,0 +1,10 @@
+[package]
+name = "ro-proto"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+bytes.workspace = true
+thiserror.workspace = true
+tokio-util.workspace = true
+encoding_rs.workspace = true

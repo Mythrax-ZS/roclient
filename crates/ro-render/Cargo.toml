@@ -1,0 +1,10 @@
+[package]
+name = "ro-render"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+wgpu = "30.0.1"
+winit = "0.30.13"

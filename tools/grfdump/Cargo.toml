@@ -1,0 +1,9 @@
+[package]
+name = "grfdump"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+ro-vfs = { path = "../../crates/ro-vfs" }
+anyhow.workspace = true
+tracing-subscriber.workspace = true

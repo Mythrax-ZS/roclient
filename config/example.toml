@@ -1,0 +1,9 @@
+# Copy to config/local.toml (gitignored).
+login_addr = "127.0.0.1:6900"
+username = "test"
+password = "test"
+char_slot = 0
+# vulkan | dx12 | gl | metal | auto
+backend = "vulkan"
+# --headless: seconds to stay on the map after entering
+soak_secs = 30
