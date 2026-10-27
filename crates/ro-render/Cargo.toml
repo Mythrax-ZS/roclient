@@ -5,6 +5,8 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+bytemuck = { version = "1.25.2", features = ["derive"] }
+glam = "0.34.1"
 tracing.workspace = true
 wgpu = "30.0.1"
 winit = "0.30.13"

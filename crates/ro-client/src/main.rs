@@ -9,7 +9,7 @@ use anyhow::Context;
 use serde::Deserialize;
 use winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
+    event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     window::{Window, WindowId},
 };
@@ -26,6 +26,13 @@ struct Config {
     /// --headless: how long to stay on the map after entering.
     #[serde(default = "default_soak")]
     soak_secs: u64,
+    /// MSAA sample count (1, 2, 4); falls back to what the GPU supports.
+    #[serde(default = "default_msaa")]
+    msaa: u32,
+}
+
+fn default_msaa() -> u32 {
+    4
 }
 
 fn default_soak() -> u64 {
@@ -69,8 +76,36 @@ async fn headless(cfg: &Config) -> anyhow::Result<()> {
 
 struct App {
     backend: String,
+    msaa: u32,
     window: Option<Arc<Window>>,
     renderer: Option<ro_render::Renderer>,
+    /// Right mouse button held: dragging rotates the camera.
+    rotating: bool,
+    last_cursor: Option<(f64, f64)>,
+    fps: FpsCounter,
+}
+
+#[derive(Default)]
+struct FpsCounter {
+    frames: u32,
+    since: Option<std::time::Instant>,
+}
+
+impl FpsCounter {
+    /// Returns frames per second roughly once a second.
+    fn tick(&mut self) -> Option<f64> {
+        let now = std::time::Instant::now();
+        let since = *self.since.get_or_insert(now);
+        self.frames += 1;
+        let dt = now - since;
+        if dt.as_secs_f64() < 1.0 {
+            return None;
+        }
+        let fps = self.frames as f64 / dt.as_secs_f64();
+        self.frames = 0;
+        self.since = Some(now);
+        Some(fps)
+    }
 }
 
 impl ApplicationHandler for App {
@@ -78,29 +113,63 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             return;
         }
-        let window = Arc::new(el.create_window(Window::default_attributes().with_title("roclient")).unwrap());
+        let attrs = Window::default_attributes()
+            .with_title("roclient")
+            .with_inner_size(winit::dpi::LogicalSize::new(1600.0, 900.0))
+            .with_min_inner_size(winit::dpi::LogicalSize::new(640.0, 360.0));
+        let window = Arc::new(el.create_window(attrs).unwrap());
         let backends = ro_render::parse_backends(&self.backend);
-        match pollster::block_on(ro_render::Renderer::new(window.clone(), backends)) {
-            Ok(r) => self.renderer = Some(r),
+        match pollster::block_on(ro_render::Renderer::new(window.clone(), backends, self.msaa)) {
+            Ok(mut r) => {
+                // Prontera spawn until the world is wired to the network session.
+                r.camera.look_at_cell(156, 191);
+                self.renderer = Some(r);
+            }
             Err(e) => {
                 tracing::error!("renderer init failed: {e:#}");
                 el.exit();
             }
         }
+        window.request_redraw();
         self.window = Some(window);
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let Some(r) = self.renderer.as_mut() else { return };
+        let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         match event {
             WindowEvent::CloseRequested => el.exit(),
-            WindowEvent::Resized(s) => r.resize(s.width, s.height),
+            WindowEvent::Resized(s) => {
+                r.resize(s.width, s.height);
+                window.request_redraw();
+            }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => r.scale_factor = scale_factor,
+            WindowEvent::MouseWheel { delta, .. } => {
+                let steps = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y,
+                    MouseScrollDelta::PixelDelta(p) => (p.y / 60.0) as f32,
+                };
+                r.camera.zoom(steps);
+            }
+            WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
+                self.rotating = state == ElementState::Pressed;
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if let (true, Some((lx, ly))) = (self.rotating, self.last_cursor) {
+                    // Scale by DPI so rotation speed matches across monitors.
+                    let s = 0.005 / r.scale_factor as f32;
+                    r.camera.rotate((position.x - lx) as f32 * s, (position.y - ly) as f32 * s);
+                }
+                self.last_cursor = Some((position.x, position.y));
+            }
             WindowEvent::RedrawRequested => {
                 if let Err(e) = r.frame() {
                     tracing::error!("frame: {e:#}");
                 }
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(fps) = self.fps.tick() {
+                    let (w, h) = r.size();
+                    window.set_title(&format!("roclient — {w}x{h} ({:.2}:1) — {fps:.0} fps", w as f32 / h as f32));
+                }
+                window.request_redraw();
             }
             _ => {}
         }
@@ -119,7 +188,15 @@ fn main() -> anyhow::Result<()> {
     }
 
     let event_loop = EventLoop::new()?;
-    let mut app = App { backend: cfg.backend, window: None, renderer: None };
+    let mut app = App {
+        backend: cfg.backend,
+        msaa: cfg.msaa,
+        window: None,
+        renderer: None,
+        rotating: false,
+        last_cursor: None,
+        fps: FpsCounter::default(),
+    };
     event_loop.run_app(&mut app)?;
     Ok(())
 }
