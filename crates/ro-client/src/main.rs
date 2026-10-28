@@ -464,6 +464,7 @@ fn inv_item(d: ro_net::ItemData) -> ro_game::items::InvItem {
         equipped: d.equipped,
         refine: d.refine,
         grade: d.grade,
+        switch: 0,
         identified: d.identified,
         cards: d.cards,
         look: d.look,
@@ -2551,6 +2552,30 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            SwitchList(list) => {
+                for it in self.inventory.items.values_mut() {
+                    it.switch = 0;
+                }
+                for (index, pos) in list {
+                    if let Some(it) = self.inventory.items.get_mut(&index) {
+                        it.switch = pos;
+                    }
+                }
+            }
+            SwitchChanged { index, location, ok } => {
+                if ok {
+                    if let Some(it) = self.inventory.items.get_mut(&index) {
+                        it.switch = location;
+                    }
+                } else {
+                    self.hud.push_chat(ro_net::ChatKind::System, "That item can't go in the switch set.".into());
+                }
+            }
+            SwitchDone(ok) => {
+                if !ok {
+                    self.hud.push_chat(ro_net::ChatKind::System, "The equipment switch failed.".into());
+                }
+            }
             Reputation(list) => self.reputation.points.extend(list),
             ReputationOpen => {
                 self.reputation.load(self.vfs.as_ref());
@@ -2741,6 +2766,9 @@ impl App {
             UseItem(index) => self.send(Command::Item(ItemRequest::Use { index, account_id: self.account_id })),
             Equip { index, location } => self.send(Command::Item(ItemRequest::Equip { index, location })),
             Unequip(index) => self.send(Command::Item(ItemRequest::Unequip { index })),
+            SwitchAdd { index, location } => self.send(Command::Switch(ro_net::SwitchRequest::Add { index, location })),
+            SwitchRemove(index) => self.send(Command::Switch(ro_net::SwitchRequest::Remove(index))),
+            SwitchAll => self.send(Command::Switch(ro_net::SwitchRequest::All)),
             Drop { index, amount } => self.send(Command::Item(ItemRequest::Drop { index, amount })),
             RaiseStat(i) => self.send(Command::Stat(StatRequest::Raise(13 + i as u16))),
             CardTargets(card) => {
@@ -4063,6 +4091,8 @@ impl App {
                         }
                         None
                     }
+                    Some(("swadd", id)) => id.parse().ok().and_then(item).map(|(index, location)| windows::UiAction::SwitchAdd { index, location: location & 0x3ff }),
+                    Some(("swap", _)) => Some(windows::UiAction::SwitchAll),
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None

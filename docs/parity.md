@@ -66,3 +66,4 @@ Ticked items are handled and tested in game against the local server.
 - Note: `setnpcdisplay` to a monster class makes rAthena send class 0 (a Novice); the original client shows the same
 - [x] ZC_ACK_REQNAMEALL: party, guild and rank under player names
 - [x] ZC_EQUIPMENT_EFFECT: hat effects (145 from hateffectinfo), following the wearer
+- [x] Equipment switch set (Switch tab: add, remove, swap; ZC_EQUIPSWITCH_LIST/ADD/REMOVE/REPLY)

@@ -120,6 +120,8 @@ pub struct InvItem {
     pub cards: [u32; 4],
     /// Sprite id when worn (headgear view / weapon class).
     pub look: u16,
+    /// Slots this item takes in the equipment-switch set (0: not in it).
+    pub switch: u32,
 }
 
 impl InvItem {

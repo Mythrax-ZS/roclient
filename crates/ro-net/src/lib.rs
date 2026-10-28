@@ -12,7 +12,7 @@ use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
 pub use ro_proto::packets::{sp, Act, CharInfo, CharRequest, ChatKind, Look, NpcDialog, NpcReply, UnitInfo, UnitPos};
-pub use ro_proto::items::{Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
+pub use ro_proto::items::{SwitchRequest, Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
 pub use ro_proto::guild::{GuildInfo, GuildMember, GuildRequest, GuildSkill, Position};
 use ro_proto::guild::*;
@@ -373,6 +373,10 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// Equipment switch set: the full list (index, slots), an item added / removed, a swap done.
+    SwitchList(Vec<(u16, u32)>),
+    SwitchChanged { index: u16, location: u32, ok: bool },
+    SwitchDone(bool),
     /// ZC_REPUTE_INFO: (faction, points).
     Reputation(Vec<(u64, i64)>),
     ReputationOpen,
@@ -579,6 +583,7 @@ pub enum Command {
     Castle(CastleRequest),
     Style(StyleRequest),
     Option(OptionRequest),
+    Switch(SwitchRequest),
     Market(MarketRequest),
     Search(SearchRequest),
     Bank(BankRequest),
@@ -732,6 +737,7 @@ impl MapSession {
                     Some(Command::Castle(r)) => self.send(r).await?,
                     Some(Command::Style(r)) => self.send(r).await?,
                     Some(Command::Option(r)) => self.send(r).await?,
+                    Some(Command::Switch(r)) => self.send(r).await?,
                     Some(Command::Market(r)) => self.send(r).await?,
                     Some(Command::Search(r)) => self.send(r).await?,
                     Some(Command::Bank(r)) => self.send(r).await?,
@@ -840,6 +846,10 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0a9b => Some(Event::SwitchList(data.get(4..).unwrap_or_default().chunks_exact(6).map(|c| (u16::from_le_bytes([c[0], c[1]]), u32::from_le_bytes([c[2], c[3], c[4], c[5]]))).collect())),
+                        0x0a98 if data.len() >= 10 => Some(Event::SwitchChanged { index: u16::from_le_bytes([data[2], data[3]]), location: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), ok: data[8] == 0 }),
+                        0x0a9a if data.len() >= 10 => Some(Event::SwitchChanged { index: u16::from_le_bytes([data[2], data[3]]), location: 0, ok: data[8] == 0 }),
+                        0x0a9d if data.len() >= 4 => Some(Event::SwitchDone(data[2] == 0)),
                         0x0b8e => Some(Event::ReputationOpen),
                         0x0b8d if data.len() >= 5 => Some(Event::Reputation(data[5..].chunks_exact(16).map(|c| (u64::from_le_bytes(c[..8].try_into().unwrap()), i64::from_le_bytes(c[8..].try_into().unwrap()))).collect())),
                         0x02d9 if data.len() >= 10 && data[2..6] != [0, 0, 0, 0] => Some(Event::Config { kind: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), on: data[6] != 0 }),

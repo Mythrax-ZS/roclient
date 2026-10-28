@@ -523,3 +523,29 @@ impl Encode for CzShowEquip {
         d.put_u32_le(self.0 as u32);
     }
 }
+
+/// Equipment switch set: add (index, slots), remove, swap all.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SwitchRequest {
+    Add { index: u16, location: u32 },
+    Remove(u16),
+    All,
+}
+
+impl crate::codec::Encode for SwitchRequest {
+    fn encode(&self, d: &mut bytes::BytesMut) {
+        use bytes::BufMut;
+        match self {
+            SwitchRequest::Add { index, location } => {
+                d.put_u16_le(0x0a97);
+                d.put_u16_le(*index);
+                d.put_u32_le(*location);
+            }
+            SwitchRequest::Remove(index) => {
+                d.put_u16_le(0x0a99);
+                d.put_u16_le(*index);
+            }
+            SwitchRequest::All => d.put_u16_le(0x0a9c),
+        }
+    }
+}

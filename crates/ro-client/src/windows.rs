@@ -13,6 +13,10 @@ pub enum UiAction {
     UseItem(u16),
     Equip { index: u16, location: u32 },
     Unequip(u16),
+    /// Equipment switch set: add an item, remove one, swap the whole set.
+    SwitchAdd { index: u16, location: u32 },
+    SwitchRemove(u16),
+    SwitchAll,
     Drop { index: u16, amount: u16 },
     /// Raise a base stat; 0..6 = str, agi, vit, int, dex, luk.
     RaiseStat(usize),
@@ -245,7 +249,7 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
 
 /// Equipment slots in display order: (bits, label).
 /// The equipment window's tabs: worn gear, costumes, shadow gear.
-const EQUIP_TABS: [&str; 3] = ["Equip", "Costume", "Shadow"];
+const EQUIP_TABS: [&str; 4] = ["Equip", "Costume", "Shadow", "Switch"];
 
 /// Moves costume and shadow slot bits onto the normal slot each one stands in for, so
 /// every tab can use the same layout; bits that belong to another tab are dropped.
@@ -253,7 +257,7 @@ fn tab_bits(equipped: u32, tab: u8) -> u32 {
     const COSTUME: [(u32, u32); 4] = [(0x400, 0x100), (0x800, 0x200), (0x1000, 0x001), (0x2000, 0x004)];
     const SHADOW: [(u32, u32); 6] = [(0x10000, 0x010), (0x20000, 0x002), (0x40000, 0x020), (0x80000, 0x040), (0x100000, 0x008), (0x200000, 0x080)];
     let map: &[(u32, u32)] = match tab {
-        0 => return equipped & 0x3ff,
+        0 | 3 => return equipped & 0x3ff,
         1 => &COSTUME,
         _ => &SHADOW,
     };
@@ -263,7 +267,7 @@ fn tab_bits(equipped: u32, tab: u8) -> u32 {
 /// The slots a tab has (costumes have no weapon, armor, shoes or accessories).
 fn tab_slots(tab: u8) -> u32 {
     match tab {
-        0 => 0x3ff,
+        0 | 3 => 0x3ff,
         1 => 0x100 | 0x200 | 0x001 | 0x004,
         _ => 0x002 | 0x010 | 0x020 | 0x040 | 0x008 | 0x080,
     }
@@ -826,7 +830,7 @@ impl Windows {
                             p.rect_filled(egui::Rect::from_min_max(egui::pos2(area.min.x + if left { 3.0 } else { 176.0 }, y - 10.0), egui::pos2(area.min.x + if left { 104.0 } else { 277.0 }, y + 10.0)), 0.0, Color32::WHITE);
                             continue;
                         }
-                        let Some(it) = v.items.iter().find(|it| tab_bits(it.equipped, tab) & bits != 0 && !used_acc.contains(&it.index)) else { continue };
+                        let Some(it) = v.items.iter().find(|it| tab_bits(if tab == 3 { it.switch } else { it.equipped }, tab) & bits != 0 && !used_acc.contains(&it.index)) else { continue };
                         if bits & 0x88 != 0 {
                             used_acc.push(it.index);
                         }
@@ -853,7 +857,7 @@ impl Windows {
                             picked = Some(UiAction::ItemInfo { id: it.id, refine: it.refine, cards: it.cards });
                         }
                         if resp.double_clicked() {
-                            picked = Some(UiAction::Unequip(it.index));
+                            picked = Some(if tab == 3 { UiAction::SwitchRemove(it.index) } else { UiAction::Unequip(it.index) });
                         }
                     }
                 },
@@ -926,7 +930,7 @@ impl Windows {
                         continue;
                     }
                     p.rect_filled(icon, 5.0, Color32::from_white_alpha(14));
-                    let worn = v.items.iter().find(|it| tab_bits(it.equipped, self.equip_tab) & bits != 0 && !used_acc.contains(&it.index));
+                    let worn = v.items.iter().find(|it| tab_bits(if self.equip_tab == 3 { it.switch } else { it.equipped }, self.equip_tab) & bits != 0 && !used_acc.contains(&it.index));
                     let Some(it) = worn else {
                         p.text(text_at, align, label, egui::FontId::proportional(12.0), crate::classic::ink(Color32::from_gray(110)));
                         continue;
@@ -956,8 +960,22 @@ impl Windows {
                         action = Some(UiAction::ItemInfo { id: it.id, refine: it.refine, cards: it.cards });
                     }
                     if resp.double_clicked() {
-                        action = Some(UiAction::Unequip(it.index));
+                        action = Some(if self.equip_tab == 3 { UiAction::SwitchRemove(it.index) } else { UiAction::Unequip(it.index) });
                     }
+                }
+                if self.equip_tab == 3 {
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt("switch_add").selected_text("Add equipment...").width(220.0).show_ui(ui, |ui| {
+                            for it in v.items.iter().filter(|i| i.is_equipment() && i.equipped == 0 && i.switch == 0 && i.location & 0x3ff != 0) {
+                                if ui.selectable_label(false, item_name(v.db, it)).clicked() {
+                                    action = Some(UiAction::SwitchAdd { index: it.index, location: it.location & 0x3ff });
+                                }
+                            }
+                        });
+                        if ui.button("Swap").on_hover_text("Wear this set (what you wear now goes into it)").clicked() {
+                            action = Some(UiAction::SwitchAll);
+                        }
+                    });
                 }
                 ui.label(RichText::new("Double-click to take off, right-click for details").size(11.0).color(crate::classic::ink(Color32::GRAY)));
             });
