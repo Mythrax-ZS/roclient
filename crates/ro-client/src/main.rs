@@ -400,7 +400,7 @@ impl Mob {
     /// Action group for a pose: player sprites and monster sprites order them differently.
     fn action_for(&self, pose: Pose) -> usize {
         match (self.human, pose) {
-            (true, Pose::Attack) => 5,
+            (true, Pose::Attack) => 10,
             (true, Pose::Hurt) => 6,
             (true, Pose::Dead) => 8,
             (false, Pose::Attack) => 2,
@@ -1417,7 +1417,9 @@ impl App {
         if let Some(w) = self.world.as_ref() {
             let octant = (r.camera.yaw / std::f32::consts::FRAC_PI_4).round() as i32;
             if let Some(p) = self.player.as_mut() {
-                let a = p.update(dt, w, octant, self.action);
+                // Combat stance (weapon drawn) while attacking something.
+                let idle = if self.attack.is_some() && self.action == 0 { 4 } else { self.action };
+                let a = p.update(dt, w, octant, idle);
                 r.camera.target = a.pos;
                 r.actors.push(a);
             }
@@ -1753,7 +1755,7 @@ fn main() -> anyhow::Result<()> {
         still: args.iter().any(|a| a == "--still"),
         distance: arg("--distance").and_then(|d| d.parse().ok()),
         yaw: arg("--yaw").and_then(|d| d.parse().ok()),
-        look: Look { job: arg("--job").unwrap_or_else(|| "초보자".into()), male: arg("--sex").is_none_or(|s| s != "f"), hair: 1, hair_color: 0, gear: Default::default() },
+        look: Look { job: arg("--job").unwrap_or_else(|| "초보자".into()), male: arg("--sex").is_none_or(|s| s != "f"), hair: 1, hair_color: 0, gear: ro_net::Look { weapon: arg("--weapon").and_then(|w| w.parse().ok()).unwrap_or(0), ..Default::default() } },
         action: arg("--action").and_then(|a| a.parse().ok()).unwrap_or(0),
         dir: arg("--dir").and_then(|d| d.parse::<usize>().ok()).unwrap_or(0) % 8,
         capture_after: arg("--capture-after").and_then(|d| d.parse().ok()).unwrap_or(0.0),

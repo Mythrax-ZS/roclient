@@ -56,9 +56,12 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let t = textureSample(tex, samp, in.uv) * in.color;
+    // Premultiplied texture: tint colour, scale everything by the layer alpha.
+    let s = textureSample(tex, samp, in.uv);
+    let t = vec4(s.rgb * in.color.rgb * in.color.a, s.a * in.color.a);
     if t.a < 0.02 {
         discard;
     }
-    return vec4(srgb_to_linear(t.rgb), t.a);
+    // Convert the straight colour to linear, then premultiply again.
+    return vec4(srgb_to_linear(t.rgb / t.a) * t.a, t.a);
 }

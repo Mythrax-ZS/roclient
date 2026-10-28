@@ -376,7 +376,7 @@ impl Renderer {
             include_str!("sprite.wgsl"),
             &[Some(&globals_layout), Some(&sprite_layout)],
             &[Some(sprite::Vertex::layout())],
-            Some(wgpu::BlendState::ALPHA_BLENDING),
+            Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
         );
 
         let ui_renderer = egui_wgpu::Renderer::new(&device, config.format.remove_srgb_suffix(), Default::default());

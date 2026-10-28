@@ -88,7 +88,7 @@ impl Spr {
         Ok(Self { version, indexed, rgba, palette })
     }
 
-    /// All frames as RGBA: indexed frames (through `palette`, or the sprite's own)
+    /// All frames as premultiplied RGBA: indexed frames (through `palette`, or the sprite's own)
     /// followed by the RGBA frames. ACT layers index into this list by type.
     pub fn images(&self, palette: Option<&[[u8; 4]; 256]>) -> (Vec<Rgba>, Vec<Rgba>) {
         let pal = palette.unwrap_or(&self.palette);
@@ -99,12 +99,27 @@ impl Spr {
                 let mut pixels = Vec::with_capacity(img.pixels.len() * 4);
                 for &i in &img.pixels {
                     let c = pal[i as usize];
-                    pixels.extend([c[0], c[1], c[2], if i == 0 { 0 } else { 255 }]);
+                    // Premultiplied: transparent texels are all zero so filtering can't
+                    // bleed the colour key into sprite edges.
+                    pixels.extend(if i == 0 { [0; 4] } else { [c[0], c[1], c[2], 255] });
                 }
                 Rgba { width: img.width as u32, height: img.height as u32, pixels }
             })
             .collect();
-        let rgba = self.rgba.iter().map(|i| Rgba { width: i.width, height: i.height, pixels: i.pixels.clone() }).collect();
+        let rgba = self
+            .rgba
+            .iter()
+            .map(|i| {
+                let mut pixels = i.pixels.clone();
+                for p in pixels.chunks_exact_mut(4) {
+                    let a = p[3] as u16;
+                    for c in &mut p[..3] {
+                        *c = (*c as u16 * a / 255) as u8;
+                    }
+                }
+                Rgba { width: i.width, height: i.height, pixels }
+            })
+            .collect();
         (indexed, rgba)
     }
 }
