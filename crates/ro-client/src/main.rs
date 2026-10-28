@@ -4,6 +4,7 @@
 //!   ro-client              open the renderer window
 
 mod hud;
+mod social;
 mod windows;
 
 use std::{path::PathBuf, sync::Arc};
@@ -581,6 +582,14 @@ struct App {
     aiming: Option<u16>,
     alt: bool,
     queued_action: Option<windows::UiAction>,
+    social: social::Social,
+    /// The player we asked to trade, until they answer.
+    trade_partner: Option<String>,
+    /// Clicked player: (id, name, menu position in UI points).
+    player_menu: Option<(u32, String, egui::Pos2)>,
+    /// `--deal buy|sell` / `--sell item_id`: answer shops automatically (scripted tests).
+    auto_deal: Option<bool>,
+    auto_sell: Option<u32>,
     /// `--windows`: open all game windows (for captures).
     open_windows: bool,
     script: Vec<String>,
@@ -903,6 +912,162 @@ impl App {
                 self.request_walk(target_cell);
             }
             LookChange { id, kind, value, value2 } => self.look_change(id, kind, value, value2),
+            StorageOpen => {
+                self.social.storage.items.clear();
+                self.social.storage.open = true;
+                // Talking to the Kafra ends the dialog the storage was opened from.
+                self.dialog = None;
+                self.cutin = None;
+            }
+            StorageItems(list) => {
+                for it in list {
+                    self.social.storage.items.insert(it.index, inv_item(it));
+                }
+                self.load_icons();
+            }
+            StorageAdded(it) => {
+                let it = inv_item(it);
+                match self.social.storage.items.get_mut(&it.index) {
+                    Some(s) if s.id == it.id => s.amount += it.amount,
+                    _ => {
+                        self.social.storage.items.insert(it.index, it);
+                    }
+                }
+                self.load_icons();
+            }
+            StorageRemoved { index, amount } => {
+                if let Some(s) = self.social.storage.items.get_mut(&index) {
+                    s.amount = s.amount.saturating_sub(amount);
+                    if s.amount == 0 {
+                        self.social.storage.items.remove(&index);
+                    }
+                }
+            }
+            StorageCount { used, capacity } => self.social.storage.count = (used, capacity),
+            StorageClosed => self.social.storage.open = false,
+            ShopDeal(npc) => {
+                self.dialog = None;
+                self.social.shop = Some(social::Shop::Choose { npc });
+                if let Some(buy) = self.auto_deal.take() {
+                    self.send(ro_net::Command::Shop(ro_net::ShopRequest::Deal { npc, buy }));
+                }
+            }
+            ShopBuyList(items) => {
+                self.social.shop = Some(social::Shop::Buy { items, cart: Default::default() });
+                self.load_shop_icons();
+            }
+            ShopSellList(offers) => {
+                if let Some(id) = self.auto_sell.take() {
+                    let list: Vec<(u16, u16)> = offers
+                        .iter()
+                        .filter_map(|o| self.inventory.items.get(&o.index).filter(|i| i.id == id).map(|i| (i.index, i.amount)))
+                        .collect();
+                    tracing::info!(?list, "selling");
+                    self.send(ro_net::Command::Shop(ro_net::ShopRequest::Sell(list)));
+                }
+                self.social.shop = Some(social::Shop::Sell { offers, cart: Default::default() });
+            }
+            ShopResult { buy, ok } => {
+                let msg = match (buy, ok) {
+                    (true, true) => "Purchase complete.",
+                    (true, false) => "You could not buy that (not enough zeny, weight or space).",
+                    (false, true) => "Sale complete.",
+                    (false, false) => "You could not sell that.",
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, msg.into());
+            }
+            TradeRequested { name, .. } => self.social.prompts.push(social::Prompt::Trade { name }),
+            TradeAnswer(result) => match result {
+                3 => {
+                    let partner = self.trade_partner.take().unwrap_or_default();
+                    self.social.trade = Some(social::Trade { partner, ..Default::default() });
+                }
+                r => {
+                    let why = match r {
+                        0 => "too far away",
+                        1 => "that character is not available",
+                        2 => "they are already trading",
+                        4 => "they declined",
+                        _ => "they are busy",
+                    };
+                    self.hud.push_chat(ro_net::ChatKind::System, format!("Trade failed: {why}."));
+                }
+            },
+            TradeItem { id, amount, .. } => {
+                if let Some(t) = self.social.trade.as_mut() {
+                    if id == 0 {
+                        t.zeny_theirs = amount;
+                    } else {
+                        t.theirs.push((id, amount));
+                    }
+                }
+                self.load_icons_for(&[id]);
+            }
+            TradeAdded { index, ok } => {
+                if let (true, Some(t)) = (ok, self.social.trade.as_mut()) {
+                    if let Some(it) = self.inventory.items.get(&index) {
+                        t.ours.push((it.id, it.amount as i32));
+                    }
+                }
+            }
+            TradeLocked { partner } => {
+                if let Some(t) = self.social.trade.as_mut() {
+                    if partner {
+                        t.they_locked = true;
+                    } else {
+                        t.we_locked = true;
+                    }
+                }
+            }
+            TradeEnded { completed } => {
+                self.social.trade = None;
+                let msg = if completed { "Trade completed." } else { "Trade cancelled." };
+                self.hud.push_chat(ro_net::ChatKind::System, msg.into());
+            }
+            Party { name, members } => {
+                let hp = self.social.party.take().map(|p| p.hp).unwrap_or_default();
+                self.social.party = Some(social::Party { name, members, hp });
+            }
+            PartyMember { name, member } => {
+                let p = self.social.party.get_or_insert_with(|| social::Party { name: name.clone(), ..Default::default() });
+                p.members.retain(|m| m.account_id != member.account_id);
+                p.members.push(member);
+            }
+            PartyLeft { account_id, name } => {
+                if account_id == self.account_id {
+                    self.social.party = None;
+                    self.hud.push_chat(ro_net::ChatKind::System, "You left the party.".into());
+                } else if let Some(p) = self.social.party.as_mut() {
+                    p.members.retain(|m| m.account_id != account_id);
+                    self.hud.push_chat(ro_net::ChatKind::Party, format!("{name} left the party."));
+                }
+            }
+            PartyHp { account_id, hp, max_hp } => {
+                if let Some(p) = self.social.party.as_mut() {
+                    p.hp.insert(account_id, (hp, max_hp));
+                }
+            }
+            PartyInvite { party, name } => self.social.prompts.push(social::Prompt::Party { party, name }),
+            PartyCreated { ok } => {
+                let msg = if ok { "Party created." } else { "Could not create the party (name taken, or already in one)." };
+                self.hud.push_chat(ro_net::ChatKind::System, msg.into());
+            }
+            Guild { id, name } => self.social.guild = (id != 0 && !name.is_empty()).then_some(name),
+            Friends(list) => self.social.friends = list,
+            FriendOnline { account_id, online, .. } => {
+                if let Some(f) = self.social.friends.iter_mut().find(|f| f.account_id == account_id) {
+                    f.online = online;
+                }
+            }
+            FriendRequested { account_id, char_id, name } => self.social.prompts.push(social::Prompt::Friend { account_id, char_id, name }),
+            FriendAdded { ok, friend } => {
+                if ok {
+                    self.hud.push_chat(ro_net::ChatKind::System, format!("{} is now your friend.", friend.name));
+                    self.social.friends.retain(|f| f.account_id != friend.account_id);
+                    self.social.friends.push(friend);
+                }
+            }
+            FriendRemoved { account_id, .. } => self.social.friends.retain(|f| f.account_id != account_id),
             InventoryStart => self.inventory.items.clear(),
             Items(list) => {
                 for it in list {
@@ -1084,6 +1249,29 @@ impl App {
         };
         self.sprites.insert(key, actor.clone());
         actor
+    }
+
+    fn load_shop_icons(&mut self) {
+        let ids: Vec<u32> = match &self.social.shop {
+            Some(social::Shop::Buy { items, .. }) => items.iter().map(|i| i.id).collect(),
+            _ => vec![],
+        };
+        self.load_icons_for(&ids);
+    }
+
+    /// Loads icons for specific item ids (shops, trades, storage).
+    fn load_icons_for(&mut self, ids: &[u32]) {
+        let (Some(db), Some(vfs)) = (self.item_db.as_ref(), self.vfs.as_ref()) else { return };
+        for &id in ids {
+            if self.icons.contains_key(&id) || !self.icons_tried.insert(id) {
+                continue;
+            }
+            let Some(info) = db.get(id) else { continue };
+            let path = format!("data\\texture\\유저인터페이스\\item\\{}.bmp", info.resource);
+            if let Some(tex) = load_texture(&self.egui_ctx, vfs, &path) {
+                self.icons.insert(id, tex);
+            }
+        }
     }
 
     /// Loads inventory icons not yet loaded into egui textures.
@@ -1488,10 +1676,51 @@ impl App {
                 zeny: self.hud.status.zeny,
                 screen_width: size.0 as f32 / (window.scale_factor() as f32 * self.ui_scale),
             };
+            let my_name = self.hud.status.name.clone();
+            let social_ctx = social::Ctx {
+                db: self.item_db.as_ref(),
+                icons: &self.icons,
+                inventory: &items,
+                zeny: self.hud.status.zeny,
+                my_name: &my_name,
+            };
+            let mut social_cmds = vec![];
+            let mut player_cmd = None;
             let out = self.egui_ctx.run_ui(input, |ui| {
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars);
                 answer = self.hud.show_dialog(ui.ctx(), &mut self.dialog, self.cutin.as_ref());
                 ui_action = self.windows.show(ui.ctx(), &view);
+                self.social.show_party = self.windows.party;
+                self.social.show_friends = self.windows.friends;
+                social_cmds = self.social.show(ui.ctx(), &social_ctx);
+                (self.windows.party, self.windows.friends) = (self.social.show_party, self.social.show_friends);
+                // Menu for a clicked player.
+                if let Some((id, name, pos)) = self.player_menu.clone() {
+                    let mut keep = true;
+                    egui::Area::new(egui::Id::unique("player menu")).fixed_pos(pos).show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            ui.label(egui::RichText::new(&name).strong());
+                            if ui.button("Trade").clicked() {
+                                player_cmd = Some((ro_net::Command::Trade(ro_net::TradeRequest::Ask { target: id }), Some(name.clone())));
+                                keep = false;
+                            }
+                            if ui.button("Invite to party").clicked() {
+                                player_cmd = Some((ro_net::Command::Party(ro_net::PartyRequest::Invite { name: name.clone() }), None));
+                                keep = false;
+                            }
+                            if ui.button("Add friend").clicked() {
+                                player_cmd = Some((ro_net::Command::Friend(ro_net::FriendRequest::Add { name: name.clone() }), None));
+                                keep = false;
+                            }
+                            if ui.button("Close").clicked() {
+                                keep = false;
+                            }
+                        });
+                    });
+                    if !keep {
+                        self.player_menu = None;
+                    }
+                }
                 if let Some(skill) = self.aiming {
                     let name = self.skills.iter().find(|s| s.id == skill).map(|s| self.skill_names.display(&s.name)).unwrap_or_default();
                     egui::Area::new(egui::Id::unique("aiming")).anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 16.0)).show(ui.ctx(), |ui| {
@@ -1502,6 +1731,15 @@ impl App {
             drop(view);
             // Handled next tick: the renderer is borrowed here.
             self.queued_action = ui_action;
+            if let Some((cmd, partner)) = player_cmd {
+                self.trade_partner = partner.or(self.trade_partner.take());
+                social_cmds.push(cmd);
+            }
+            if let Some((tx, _)) = self.net.as_ref() {
+                for c in social_cmds {
+                    let _ = tx.send(c);
+                }
+            }
             if let (Some((npc, reply)), Some((tx, _))) = (answer, self.net.as_ref()) {
                 if reply == ro_net::NpcReply::Close {
                     self.cutin = None;
@@ -1512,7 +1750,14 @@ impl App {
             let primitives = self.egui_ctx.tessellate(out.shapes, out.pixels_per_point);
             r.set_ui(ro_render::UiFrame { primitives, textures: out.textures_delta, pixels_per_point: out.pixels_per_point });
             if let (Some(text), Some((tx, _))) = (sent, self.net.as_ref()) {
-                let _ = tx.send(ro_net::Command::Chat(text));
+                // "/p text" goes to the party, "/g text" to the guild.
+                let speaker = self.hud.status.name.clone();
+                let cmd = match text.split_once(' ') {
+                    Some(("/p", rest)) => ro_net::Command::Party(ro_net::PartyRequest::Chat { speaker, text: rest.to_string() }),
+                    Some(("/g", rest)) => ro_net::Command::Party(ro_net::PartyRequest::GuildChat { speaker, text: rest.to_string() }),
+                    _ => ro_net::Command::Chat(text),
+                };
+                let _ = tx.send(cmd);
             }
         }
 
@@ -1665,6 +1910,8 @@ impl ApplicationHandler for App {
                         "q" => self.windows.toggle_equipment(),
                         "a" => self.windows.toggle_stats(),
                         "s" => self.windows.toggle_skills(),
+                        "z" => self.windows.party = !self.windows.party,
+                        "h" => self.windows.friends = !self.windows.friends,
                         _ => {}
                     },
                     _ => {}
@@ -1694,6 +1941,13 @@ impl ApplicationHandler for App {
                         self.walk_goal = None;
                         self.attack = None;
                         self.talk(id);
+                    }
+                    // Other players: a menu (trade, party, friend).
+                    Some((id, 0)) if self.aiming.is_none() => {
+                        let name = self.units.get(&id).map(|m| m.name.clone()).unwrap_or_default();
+                        let ppp = self.egui_ctx.pixels_per_point();
+                        let pos = self.cursor.map_or(egui::Pos2::ZERO, |(x, y)| egui::pos2(x as f32 / ppp, y as f32 / ppp));
+                        self.player_menu = Some((id, name, pos));
                     }
                     // Monsters: attack until it dies (or use the skill being aimed).
                     Some((id, 5)) => match self.aiming.take() {
@@ -1796,6 +2050,11 @@ fn main() -> anyhow::Result<()> {
         aiming: None,
         alt: false,
         queued_action: None,
+        social: Default::default(),
+        trade_partner: None,
+        player_menu: None,
+        auto_deal: arg("--deal").map(|d| d == "buy"),
+        auto_sell: arg("--sell").and_then(|s| s.parse().ok()),
         open_windows: args.iter().any(|a| a == "--windows"),
         auto_pickup: false,
         script: arg("--do").map(|s| s.split(",").map(str::to_string).collect()).unwrap_or_default(),

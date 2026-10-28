@@ -26,6 +26,8 @@ pub struct Windows {
     pub equipment: bool,
     pub stats: bool,
     pub skills: bool,
+    pub party: bool,
+    pub friends: bool,
     tab: InvTab,
 }
 
@@ -151,6 +153,8 @@ impl Windows {
                             ("Equipment", "Alt+Q", &mut self.equipment),
                             ("Status", "Alt+A", &mut self.stats),
                             ("Skills", "Alt+S", &mut self.skills),
+                            ("Party", "Alt+Z", &mut self.party),
+                            ("Friends", "Alt+H", &mut self.friends),
                         ] {
                             if ui.selectable_label(*open, label).on_hover_text(key).clicked() {
                                 *open = !*open;

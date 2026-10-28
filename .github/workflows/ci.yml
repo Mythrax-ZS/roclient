@@ -75,7 +75,8 @@ jobs:
             --exclude-library 'libxkbcommon*' \
             --output appimage
           # linuxdeploy overwrites AppRun with a symlink only if absent; ensure ours is used
-          mv roclient*.AppImage roclient-x86_64.AppImage || mv *.AppImage roclient-x86_64.AppImage
+          ls -la *.AppImage
+          [ -f roclient-x86_64.AppImage ] || mv "$(ls roclient*.AppImage | head -1)" roclient-x86_64.AppImage
       - uses: actions/upload-artifact@v4
         with:
           name: linux

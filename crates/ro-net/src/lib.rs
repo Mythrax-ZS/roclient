@@ -14,6 +14,8 @@ use tokio_util::codec::Framed;
 pub use ro_proto::packets::{sp, Act, CharInfo, ChatKind, Look, NpcDialog, NpcReply, UnitInfo, UnitPos};
 pub use ro_proto::items::{FloorItem, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
+pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
+use ro_proto::social::*;
 
 type Conn = Framed<TcpStream, RoCodec<ServerTable>>;
 
@@ -171,6 +173,38 @@ pub enum Event {
     Vanish { id: u32, reason: u8 },
     /// A unit's appearance changed (see `parse_sprite_change` kinds).
     LookChange { id: u32, kind: u8, value: u32, value2: u32 },
+    StorageOpen,
+    StorageItems(Vec<ItemData>),
+    StorageAdded(ItemData),
+    StorageRemoved { index: u16, amount: u16 },
+    StorageCount { used: u16, capacity: u16 },
+    StorageClosed,
+    /// An NPC shop asks: buy or sell?
+    ShopDeal(u32),
+    ShopBuyList(Vec<ShopItem>),
+    ShopSellList(Vec<SellOffer>),
+    ShopResult { buy: bool, ok: bool },
+    TradeRequested { name: String, id: u32, level: u16 },
+    /// Answer to our trade request (3 accepted; see parse_trade_ack).
+    TradeAnswer(u8),
+    /// The partner put up an item (id 0: zeny).
+    TradeItem { id: u32, amount: i32, identified: bool },
+    /// Our own item was added (or refused).
+    TradeAdded { index: u16, ok: bool },
+    TradeLocked { partner: bool },
+    TradeEnded { completed: bool },
+    Party { name: String, members: Vec<PartyMember> },
+    PartyMember { name: String, member: PartyMember },
+    PartyLeft { account_id: u32, name: String },
+    PartyHp { account_id: u32, hp: i32, max_hp: i32 },
+    PartyInvite { party: u32, name: String },
+    PartyCreated { ok: bool },
+    Guild { id: u32, name: String },
+    Friends(Vec<Friend>),
+    FriendOnline { account_id: u32, char_id: u32, online: bool },
+    FriendRequested { account_id: u32, char_id: u32, name: String },
+    FriendAdded { ok: bool, friend: Friend },
+    FriendRemoved { account_id: u32, char_id: u32 },
     /// The server is about to resend the whole inventory.
     InventoryStart,
     Items(Vec<ItemData>),
@@ -194,6 +228,11 @@ pub enum Event {
 #[derive(Debug, Clone)]
 pub enum Command {
     Item(ItemRequest),
+    Shop(ShopRequest),
+    Storage(StorageRequest),
+    Trade(TradeRequest),
+    Party(PartyRequest),
+    Friend(FriendRequest),
     Stat(StatRequest),
     Move { x: u16, y: u16 },
     /// Attack a unit (continuously when `keep`).
@@ -299,6 +338,11 @@ impl MapSession {
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Npc { npc, reply }) => self.send(CzNpc { npc, reply: &reply }).await?,
                     Some(Command::Item(r)) => self.send(r).await?,
+                    Some(Command::Shop(r)) => self.send(r).await?,
+                    Some(Command::Storage(r)) => self.send(r).await?,
+                    Some(Command::Trade(r)) => self.send(r).await?,
+                    Some(Command::Party(r)) => self.send(r).await?,
+                    Some(Command::Friend(r)) => self.send(r).await?,
                     Some(Command::Stat(r)) => self.send(r).await?,
                 },
                 f = self.conn.next() => {
@@ -322,6 +366,82 @@ impl MapSession {
                         0x09fd | 0x09fe | 0x09ff => parse_unit(opcode, &data).map(Event::Unit),
                         0x00b4 | 0x00b5 | 0x00b6 | 0x00b7 | 0x0142 | 0x01d4 | 0x08d6 | 0x01b3 => parse_npc_dialog(opcode, &data).map(Event::Npc),
                         // Inventory (invType 0 only; carts and storage come later).
+                        // Kafra storage: the same item lists with invType 2.
+                        0x0b08 if data.get(4) == Some(&2) => Some(Event::StorageOpen),
+                        0x0b09 | 0x0b39 if data.get(4) == Some(&2) => {
+                            Some(Event::StorageItems(if opcode == 0x0b09 { parse_itemlist_normal(&data) } else { parse_itemlist_equip(&data) }))
+                        }
+                        0x0b44 => Some(Event::StorageAdded(parse_store_add(&data))),
+                        0x00f6 => {
+                            let (index, amount) = parse_store_delete(&data);
+                            Some(Event::StorageRemoved { index, amount })
+                        }
+                        0x00f2 => {
+                            let (used, capacity) = parse_store_count(&data);
+                            Some(Event::StorageCount { used, capacity })
+                        }
+                        0x00f8 => Some(Event::StorageClosed),
+                        0x00c4 => Some(Event::ShopDeal(parse_deal_type(&data))),
+                        0x0b77 => Some(Event::ShopBuyList(parse_buy_list(&data))),
+                        0x00c7 => Some(Event::ShopSellList(parse_sell_list(&data))),
+                        0x00ca | 0x00cb => Some(Event::ShopResult { buy: opcode == 0x00ca, ok: data[2] == 0 }),
+                        0x01f4 => {
+                            let (name, id, level) = parse_trade_request(&data);
+                            Some(Event::TradeRequested { name, id, level })
+                        }
+                        0x01f5 => Some(Event::TradeAnswer(parse_trade_ack(&data))),
+                        0x0b42 => {
+                            let (id, amount, identified) = parse_trade_item(&data);
+                            Some(Event::TradeItem { id, amount, identified: identified != 0 })
+                        }
+                        0x00ea => Some(Event::TradeAdded { index: u16::from_le_bytes([data[2], data[3]]), ok: data[4] == 0 }),
+                        0x00ec => Some(Event::TradeLocked { partner: data[2] != 0 }),
+                        0x00ee => Some(Event::TradeEnded { completed: false }),
+                        0x00f0 => Some(Event::TradeEnded { completed: data[2] == 0 }),
+                        0x0ae5 => {
+                            let (name, members) = parse_party_list(&data);
+                            Some(Event::Party { name, members })
+                        }
+                        0x0ae4 => {
+                            let (name, member) = parse_party_add(&data);
+                            Some(Event::PartyMember { name, member })
+                        }
+                        0x0105 => {
+                            let (account_id, name) = parse_party_remove(&data);
+                            Some(Event::PartyLeft { account_id, name })
+                        }
+                        0x080e => {
+                            let (account_id, hp, max_hp) = parse_party_hp(&data);
+                            Some(Event::PartyHp { account_id, hp, max_hp })
+                        }
+                        0x02c6 => {
+                            let (party, name) = parse_party_invite(&data);
+                            Some(Event::PartyInvite { party, name })
+                        }
+                        0x00fa => Some(Event::PartyCreated { ok: data[2] == 0 }),
+                        0x0109 => Some(Event::Chat { kind: ChatKind::Party, from: None, text: parse_party_chat(&data) }),
+                        0x017f => Some(Event::Chat { kind: ChatKind::Guild, from: None, text: parse_guild_chat(&data) }),
+                        0x02f7 => {
+                            let (id, name) = parse_guild_name(&data);
+                            Some(Event::Guild { id, name })
+                        }
+                        0x0201 => Some(Event::Friends(parse_friends(&data))),
+                        0x0206 => {
+                            let (account_id, char_id, online) = parse_friend_state(&data);
+                            Some(Event::FriendOnline { account_id, char_id, online })
+                        }
+                        0x0207 => {
+                            let (account_id, char_id, name) = parse_friend_request(&data);
+                            Some(Event::FriendRequested { account_id, char_id, name })
+                        }
+                        0x0209 => {
+                            let (result, friend) = parse_friend_added(&data);
+                            Some(Event::FriendAdded { ok: result == 0, friend })
+                        }
+                        0x020a => {
+                            let (account_id, char_id) = parse_friend_removed(&data);
+                            Some(Event::FriendRemoved { account_id, char_id })
+                        }
                         0x0b08 if data.get(4) == Some(&0) => Some(Event::InventoryStart),
                         0x0b09 | 0x0b39 if data.get(4) == Some(&0) => {
                             Some(Event::Items(if opcode == 0x0b09 { parse_itemlist_normal(&data) } else { parse_itemlist_equip(&data) }))

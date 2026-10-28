@@ -541,6 +541,8 @@ pub enum ChatKind {
     Whisper,
     Broadcast,
     System,
+    Party,
+    Guild,
 }
 
 /// Text after the fixed header of a variable packet, without trailing NULs.
