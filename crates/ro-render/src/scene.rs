@@ -285,7 +285,6 @@ fn node_matrices(rsm: &Rsm) -> Vec<Mat4> {
     };
 
     let by_name: HashMap<&str, usize> = rsm.nodes.iter().enumerate().map(|(i, n)| (n.name.as_str(), i)).collect();
-    let only = rsm.nodes.len() == 1;
     let mut global: Vec<Option<Mat4>> = vec![None; rsm.nodes.len()];
 
     fn resolve(
@@ -304,7 +303,8 @@ fn node_matrices(rsm: &Rsm) -> Vec<Mat4> {
         let parent = by_name.get(n.parent.as_str()).copied().filter(|&p| p != i && depth < 64);
         let base = match parent {
             Some(p) => resolve(p, rsm, by_name, global, root_shift, local_rot, depth + 1) * Mat4::from_translation(Vec3::from(n.pos)),
-            None => root_shift,
+            // The root node is placed by its own position too (it cancels out in the shift below).
+            None => root_shift * Mat4::from_translation(Vec3::from(n.pos)),
         };
         let m = base * local_rot(n) * Mat4::from_scale(Vec3::from(n.scale));
         global[i] = Some(m);
@@ -332,7 +332,8 @@ fn node_matrices(rsm: &Rsm) -> Vec<Mat4> {
         (min, max) = (Vec3::ZERO, Vec3::ZERO);
     }
     let center = (min + max) / 2.0;
-    let shift = if only { Vec3::new(0.0, -max.y + (max.y - min.y) / 2.0, 0.0) } else { Vec3::new(-center.x, -max.y, -center.z) };
+    // Same for single- and multi-node models: centre in x/z, lowest point on the ground.
+    let shift = Vec3::new(-center.x, -max.y, -center.z);
     unshifted.into_iter().map(|m| Mat4::from_translation(shift) * m).collect()
 }
 

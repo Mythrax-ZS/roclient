@@ -161,7 +161,9 @@ pub(crate) fn actor_quads(sheets: &[Sheet], a: &Actor) -> Vec<(usize, Vec<Vertex
     // Idle and sitting heads hold frame 0: their extra frames are head-turn poses, not animation.
     let still_head = matches!(a.action, 0 | 2);
     let Some(body) = sheets.get(a.body.0) else { return out };
-    let body_frame = body.frame_index(index, a.time_ms);
+    // Idle and sitting frames are head-turn poses (straight / left / right) whose anchors
+    // differ, not an animation: hold the pose (straight) for body and head alike.
+    let body_frame = if still_head { 0 } else { body.frame_index(index, a.time_ms) };
     let Some(bf) = body.frame(index, body_frame) else { return out };
     let mut v = vec![];
     body.emit(bf, a.pos, [0.0, 0.0], &mut v);
@@ -170,7 +172,7 @@ pub(crate) fn actor_quads(sheets: &[Sheet], a: &Actor) -> Vec<(usize, Vec<Vertex
     // The head follows the body's frame index so its anchor lines up every frame
     // (a separate timer lets the two drift and the head bobs).
     if let Some(head) = a.head.and_then(|id| sheets.get(id.0)) {
-        if let Some(hf) = head.frame(index, if still_head { 0 } else { body_frame }) {
+        if let Some(hf) = head.frame(index, body_frame) {
             let shift = match (bf.anchors.first(), hf.anchors.first()) {
                 (Some(b), Some(h)) => [(b[0] - h[0]) as f32, (b[1] - h[1]) as f32],
                 _ => [0.0, 0.0],
