@@ -16,6 +16,9 @@ pub enum UiAction {
     Drop { index: u16, amount: u16 },
     /// Raise a base stat; 0..6 = str, agi, vit, int, dex, luk.
     RaiseStat(usize),
+    /// Ask which equipment can take this card (inventory index).
+    CardTargets(u16),
+    InsertCard { card: u16, equip: u16 },
     SkillUp(u16),
     UseSkill(u16),
     /// Activate shortcut slot n (row * HOTKEYS_PER_ROW + column).
@@ -38,6 +41,10 @@ pub struct Windows {
     pub skill_list: bool,
     /// The skill tree tab shown; None opens on the current job's tab.
     pub skill_tab: Option<usize>,
+    /// A card being inserted and the equipment the server offered for it.
+    pub card_pick: Option<(u16, Vec<u16>)>,
+    /// How long a stat "+" has been held, for repeating.
+    stat_hold: f32,
     pub party: bool,
     pub friends: bool,
     pub guild: bool,
@@ -194,16 +201,43 @@ const STAT_NAMES: [&str; 6] = ["STR", "AGI", "VIT", "INT", "DEX", "LUK"];
 
 fn item_name(db: Option<&ItemDb>, it: &InvItem) -> String {
     let base = db.map_or_else(|| format!("Item #{}", it.id), |d| d.name(it.id, it.identified));
-    if it.refine > 0 { format!("+{} {base}", it.refine) } else { base }
+    let base = if it.refine > 0 { format!("+{} {base}", it.refine) } else { base };
+    // Slotted equipment shows its slot count, as in the original ("Knife [3]").
+    match db.and_then(|d| d.get(it.id)).map(|i| i.slots) {
+        Some(n) if n > 0 && it.identified => format!("{base} [{n}]"),
+        _ => base,
+    }
 }
 
-/// Item tooltip: name and the client's description (with ^RRGGBB codes stripped).
+/// Cards compounded into an item (forged, brewed and pet-egg items reuse the slots for other data).
+fn inserted_cards(it: &InvItem) -> impl Iterator<Item = u32> + '_ {
+    let special = matches!(it.cards[0], 0x00ff | 0x00fe | 0xff00);
+    it.cards.iter().copied().filter(move |&c| !special && c != 0)
+}
+
+/// Item tooltip: name, inserted cards and the client's description (^RRGGBB codes stripped).
 fn item_tooltip(ui: &mut egui::Ui, db: Option<&ItemDb>, it: &InvItem) {
     ui.label(RichText::new(item_name(db, it)).strong());
+    let slots = db.and_then(|d| d.get(it.id)).map_or(0, |i| i.slots) as usize;
+    if slots > 0 && it.is_equipment() {
+        let cards: Vec<u32> = inserted_cards(it).collect();
+        for i in 0..slots.max(cards.len()) {
+            let text = match cards.get(i) {
+                Some(&c) => db.map_or_else(|| format!("Card #{c}"), |d| d.name(c, true)),
+                None => "(empty slot)".to_string(),
+            };
+            ui.label(RichText::new(text).color(if i < cards.len() { Color32::from_rgb(140, 200, 255) } else { Color32::GRAY }));
+        }
+        ui.separator();
+    }
     if let Some(info) = db.and_then(|d| d.get(it.id)) {
         for line in &info.description {
             ui.label(strip_colors(line));
         }
+    }
+    if it.kind == ro_game::items::kind::CARD {
+        ui.separator();
+        ui.label(RichText::new("Double-click to insert into equipment").color(Color32::GRAY).size(11.5));
     }
 }
 
@@ -323,7 +357,9 @@ impl Windows {
                             resp.dnd_set_drag_payload(Hotkey { skill: false, id: it.id, count: 0 });
                         }
                         if resp.double_clicked() {
-                            action = Some(if it.is_equipment() {
+                            action = Some(if it.kind == ro_game::items::kind::CARD {
+                                UiAction::CardTargets(it.index)
+                            } else if it.is_equipment() {
                                 UiAction::Equip { index: it.index, location: it.location }
                             } else {
                                 UiAction::UseItem(it.index)
@@ -390,6 +426,7 @@ impl Windows {
             self.equipment = open;
         }
 
+        let mut held = false;
         if self.stats {
             let mut open = true;
             egui::Window::new("Status").open(&mut open).default_pos(col(0.0)).resizable(false).show(ctx, |ui| {
@@ -404,8 +441,20 @@ impl Windows {
                             ui.label(if s.plus[i] != 0 { format!("{} + {}", s.base[i], s.plus[i]) } else { s.base[i].to_string() });
                             // The cost arrives as one byte (capped at 255), so past that the server decides.
                             let can = s.points >= s.cost[i] as u32;
-                            if ui.add_enabled(can, egui::Button::new("+")).on_hover_text(format!("Costs {}", s.cost[i])).clicked() {
+                            let plus = ui.add_enabled(can, egui::Button::new("+")).on_hover_text(format!("Costs {} — hold to keep raising", s.cost[i]));
+                            if plus.clicked() {
                                 action = Some(UiAction::RaiseStat(i));
+                            }
+                            // Holding the button repeats: after 0.4 s, one point every 50 ms.
+                            if can && plus.is_pointer_button_down_on() {
+                                held = true;
+                                let dt = ui.input(|inp| inp.stable_dt);
+                                let before = self.stat_hold;
+                                self.stat_hold += dt;
+                                if self.stat_hold > 0.4 && ((self.stat_hold - 0.4) / 0.05) as u32 != ((before - 0.4).max(0.0) / 0.05) as u32 {
+                                    action = Some(UiAction::RaiseStat(i));
+                                }
+                                ui.ctx().request_repaint();
                             }
                             ui.end_row();
                         }
@@ -433,6 +482,37 @@ impl Windows {
                 ui.label(format!("Status points: {}", s.points));
             });
             self.stats = open;
+            if !held {
+                self.stat_hold = 0.0;
+            }
+        }
+
+        // Inserting a card: pick the equipment the server says can take it.
+        if let Some((card, equips)) = self.card_pick.clone() {
+            let mut open = true;
+            egui::Window::new("Insert Card").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
+                let card_item = v.items.iter().find(|it| it.index == card);
+                if let Some(c) = card_item {
+                    ui.label(RichText::new(item_name(v.db, c)).strong());
+                }
+                ui.separator();
+                if equips.is_empty() {
+                    ui.label(RichText::new("No equipment can take this card.").color(Color32::GRAY));
+                }
+                for e in &equips {
+                    let Some(it) = v.items.iter().find(|it| it.index == *e) else { continue };
+                    ui.horizontal(|ui| {
+                        item_slot(ui, v.icons, it, 32.0).on_hover_ui(|ui| item_tooltip(ui, v.db, it));
+                        if ui.button(item_name(v.db, it)).clicked() {
+                            action = Some(UiAction::InsertCard { card, equip: *e });
+                            self.card_pick = None;
+                        }
+                    });
+                }
+            });
+            if !open {
+                self.card_pick = None;
+            }
         }
 
         if self.skills {

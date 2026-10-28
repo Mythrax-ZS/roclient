@@ -247,6 +247,10 @@ pub enum Event {
     FloorItemGone(u32),
     Stats(Stats),
     StatRaised { stat: u16, ok: bool, value: u8 },
+    /// ZC_ITEMCOMPOSITION_LIST: equipment (wire indices) that can take the card.
+    CardTargets(Vec<u16>),
+    /// ZC_ACK_ITEMCOMPOSITION: a card went in (or not).
+    CardInserted { equip: u16, card: u16, ok: bool },
     StatCost { stat: u16, cost: u8 },
     /// A base stat and its equipment/buff bonus (stat: SP_STR..SP_LUK, 13..=18).
     StatBonus { stat: u32, base: i32, plus: i32 },
@@ -606,6 +610,14 @@ impl MapSession {
                             Some(Event::LookChange { id, kind, value, value2 })
                         }
                         0x00bd => Some(Event::Stats(parse_status(&data))),
+                        0x017b => Some(Event::CardTargets(
+                            data.get(4..).unwrap_or_default().chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect(),
+                        )),
+                        0x017d if data.len() >= 7 => Some(Event::CardInserted {
+                            equip: u16::from_le_bytes([data[2], data[3]]),
+                            card: u16::from_le_bytes([data[4], data[5]]),
+                            ok: data[6] == 0,
+                        }),
                         0x00bc => {
                             let (stat, ok, value) = parse_status_change_ack(&data);
                             Some(Event::StatRaised { stat, ok, value })

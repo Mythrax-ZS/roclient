@@ -1524,6 +1524,22 @@ impl App {
                     self.pending_pickup = None;
                 }
             }
+            CardTargets(equips) => {
+                if let Some((_, list)) = self.windows.card_pick.as_mut() {
+                    *list = equips;
+                }
+            }
+            CardInserted { equip, card, ok } => {
+                // The server removes the card itself; the equipment's slots are ours to update.
+                let card_id = self.inventory.items.get(&card).map(|c| c.id);
+                if let (true, Some(id), Some(e)) = (ok, card_id, self.inventory.items.get_mut(&equip)) {
+                    if let Some(slot) = e.cards.iter_mut().find(|c| **c == 0) {
+                        *slot = id;
+                    }
+                }
+                let msg = if ok { "The card was inserted." } else { "The card could not be inserted." };
+                self.hud.push_chat(ro_net::ChatKind::System, msg.to_string());
+            }
             Stats(s) => self.stats = Some(s),
             StatRaised { stat, ok, value } => {
                 if let (true, Some(s), 13..=18) = (ok, self.stats.as_mut(), stat) {
@@ -1754,6 +1770,11 @@ impl App {
             Unequip(index) => self.send(Command::Item(ItemRequest::Unequip { index })),
             Drop { index, amount } => self.send(Command::Item(ItemRequest::Drop { index, amount })),
             RaiseStat(i) => self.send(Command::Stat(StatRequest::Raise(13 + i as u16))),
+            CardTargets(card) => {
+                self.windows.card_pick = Some((card, vec![]));
+                self.send(Command::Item(ItemRequest::CardTargets { card }));
+            }
+            InsertCard { card, equip } => self.send(Command::Item(ItemRequest::InsertCard { card, equip })),
             SkillUp(id) => self.send(Command::Stat(StatRequest::SkillUp(id))),
             UseSkill(id) => {
                 let level = self.skills.iter().find(|s| s.id == id).map_or(0, |s| s.level);
@@ -2607,6 +2628,7 @@ impl App {
                 let action = match step.split_once(':') {
                     Some(("equip", id)) => id.parse().ok().and_then(item).map(|(index, location)| windows::UiAction::Equip { index, location }),
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
+                    Some(("card", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::CardTargets(index)),
                     Some(("raise", n)) => n.parse().ok().map(windows::UiAction::RaiseStat),
                     Some(("skillup", id)) => id.parse().ok().map(windows::UiAction::SkillUp),
                     // hotkey:slot=skill_id (at its learned level), key:slot presses it.

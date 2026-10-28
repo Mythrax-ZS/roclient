@@ -176,6 +176,10 @@ pub enum ItemRequest {
     Unequip { index: u16 },
     PickUp { floor_id: u32 },
     Drop { index: u16, amount: u16 },
+    /// CZ_REQ_ITEMCOMPOSITION_LIST: which equipment can take this card?
+    CardTargets { card: u16 },
+    /// CZ_REQ_ITEMCOMPOSITION: put the card into the equipment.
+    InsertCard { card: u16, equip: u16 },
 }
 
 impl Encode for ItemRequest {
@@ -190,6 +194,15 @@ impl Encode for ItemRequest {
             ItemRequest::Unequip { index } => put_db_packet(d, "UnequipItem", &[&index.to_le_bytes()]),
             ItemRequest::PickUp { floor_id } => put_db_packet(d, "TakeItem", &[&floor_id.to_le_bytes()]),
             ItemRequest::Drop { index, amount } => put_db_packet(d, "DropItem", &[&index.to_le_bytes(), &amount.to_le_bytes()]),
+            ItemRequest::CardTargets { card } => {
+                d.put_u16_le(0x017a);
+                d.put_u16_le(card);
+            }
+            ItemRequest::InsertCard { card, equip } => {
+                d.put_u16_le(0x017c);
+                d.put_u16_le(card);
+                d.put_u16_le(equip);
+            }
         }
     }
 }
