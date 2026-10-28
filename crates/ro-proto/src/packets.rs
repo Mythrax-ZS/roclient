@@ -404,3 +404,73 @@ mod move_tests {
         assert_eq!(unpack_move(&p), ((156, 191), (160, 185)));
     }
 }
+
+// ---------------------------------------------------------------- map: other units
+
+/// Where a unit is: standing at a cell, or walking between two.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UnitPos {
+    At { x: u16, y: u16, dir: u8 },
+    Walking { from: (u16, u16), to: (u16, u16) },
+}
+
+/// A player, NPC, monster, pet, ... entering view.
+#[derive(Debug, Clone)]
+pub struct UnitInfo {
+    /// 0 player, 1 NPC, 5 monster, 6 event NPC, 7 pet, 8 homunculus, ...
+    pub object_type: u8,
+    pub id: u32,
+    pub speed: i16,
+    /// Class: job id for players, sprite class for everything else.
+    pub job: i16,
+    pub hair: u16,
+    pub hair_color: i16,
+    pub sex: u8,
+    pub name: String,
+    pub pos: UnitPos,
+}
+
+/// ZC packets packet_idle_unit (0x09ff), packet_spawn_unit (0x09fe) and
+/// packet_unit_walking (0x09fd) at PACKETVER 20250402 (see packets_struct.hpp).
+pub fn parse_unit(opcode: u16, data: &[u8]) -> Option<UnitInfo> {
+    let (pos_at, name_at, sex_at, walking) = match opcode {
+        0x09ff => (63, 84, 62, false),
+        0x09fe => (63, 83, 62, false),
+        0x09fd => (67, 90, 66, true),
+        _ => return None,
+    };
+    if data.len() < name_at {
+        return None;
+    }
+    let u16_at = |o: usize| u16::from_le_bytes([data[o], data[o + 1]]);
+    let i16_at = |o: usize| i16::from_le_bytes([data[o], data[o + 1]]);
+    let u32_at = |o: usize| u32::from_le_bytes(data[o..o + 4].try_into().unwrap());
+    // headpalette moves 4 bytes later in the walking packet (moveStartTime precedes it).
+    let palette_at = if walking { 45 } else { 41 };
+    let pos = if walking {
+        let (from, to) = unpack_move(&data[pos_at..pos_at + 6]);
+        UnitPos::Walking { from, to }
+    } else {
+        let a = parse_accept_enter(&[&[0u8; 6][..], &data[pos_at..pos_at + 3]].concat());
+        UnitPos::At { x: a.x, y: a.y, dir: a.dir }
+    };
+    let mut name = &data[name_at.min(data.len())..];
+    let name = if name.len() >= 24 { get_fixed_str(&mut name, 24) } else { String::new() };
+    Some(UnitInfo {
+        object_type: data[4],
+        // AID: the unit id used by vanish/move packets (GID is a char id, 0 for NPCs).
+        id: u32_at(5),
+        speed: i16_at(13),
+        job: i16_at(23),
+        hair: u16_at(25),
+        hair_color: i16_at(palette_at),
+        sex: data[sex_at],
+        name,
+        pos,
+    })
+}
+
+/// ZC_NOTIFY_VANISH: (unit id, reason: 0 out of sight, 1 died, 2 logged out, 3 teleported).
+pub fn parse_vanish(data: &[u8]) -> (u32, u8) {
+    ((&data[2..]).get_u32_le(), data[6])
+}

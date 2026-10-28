@@ -106,13 +106,19 @@ impl Sheet {
         Self { act, rects, indexed_len, bind }
     }
 
-    fn frame(&self, action: usize, time_ms: f32, hold_first: bool) -> Option<&ro_formats::act::Frame> {
-        let a = self.act.actions.get(action).or_else(|| self.act.actions.get(action % 8))?;
-        if a.frames.is_empty() {
-            return None;
-        }
-        let i = if hold_first { 0 } else { (time_ms / a.delay_ms.max(1.0)) as usize % a.frames.len() };
-        a.frames.get(i)
+    fn action(&self, action: usize) -> Option<&ro_formats::act::Action> {
+        self.act.actions.get(action).or_else(|| self.act.actions.get(action % 8)).filter(|a| !a.frames.is_empty())
+    }
+
+    /// Frame index of `action` at `time_ms`, looping.
+    fn frame_index(&self, action: usize, time_ms: f32) -> usize {
+        self.action(action).map_or(0, |a| (time_ms / a.delay_ms.max(1.0)) as usize % a.frames.len())
+    }
+
+    /// Frame `i` of `action`, wrapping if this sheet has fewer frames.
+    fn frame(&self, action: usize, i: usize) -> Option<&ro_formats::act::Frame> {
+        let a = self.action(action)?;
+        a.frames.get(i % a.frames.len())
     }
 
     /// Emits the frame's layers as quads, shifted by `shift` pixels.
@@ -145,7 +151,7 @@ impl Sheet {
 pub(crate) fn actor_quads(sheets: &[Sheet], a: &Actor) -> Vec<(usize, Vec<Vertex>)> {
     let mut out = vec![];
     if let Some(s) = a.shadow.and_then(|id| sheets.get(id.0)) {
-        if let Some(f) = s.frame(0, 0.0, true) {
+        if let Some(f) = s.frame(0, 0) {
             let mut v = vec![];
             s.emit(f, a.pos, [0.0, 0.0], &mut v);
             out.push((a.shadow.unwrap().0, v));
@@ -155,13 +161,16 @@ pub(crate) fn actor_quads(sheets: &[Sheet], a: &Actor) -> Vec<(usize, Vec<Vertex
     // Idle and sitting heads hold frame 0: their extra frames are head-turn poses, not animation.
     let still_head = matches!(a.action, 0 | 2);
     let Some(body) = sheets.get(a.body.0) else { return out };
-    let Some(bf) = body.frame(index, a.time_ms, false) else { return out };
+    let body_frame = body.frame_index(index, a.time_ms);
+    let Some(bf) = body.frame(index, body_frame) else { return out };
     let mut v = vec![];
     body.emit(bf, a.pos, [0.0, 0.0], &mut v);
     out.push((a.body.0, v));
 
+    // The head follows the body's frame index so its anchor lines up every frame
+    // (a separate timer lets the two drift and the head bobs).
     if let Some(head) = a.head.and_then(|id| sheets.get(id.0)) {
-        if let Some(hf) = head.frame(index, a.time_ms, still_head) {
+        if let Some(hf) = head.frame(index, if still_head { 0 } else { body_frame }) {
             let shift = match (bf.anchors.first(), hf.anchors.first()) {
                 (Some(b), Some(h)) => [(b[0] - h[0]) as f32, (b[1] - h[1]) as f32],
                 _ => [0.0, 0.0],

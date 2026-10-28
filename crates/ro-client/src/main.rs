@@ -263,10 +263,75 @@ struct World {
     gat: Option<ro_formats::gat::Gat>,
 }
 
-/// The local player.
-struct Player {
+/// Anything that stands and walks on the map: the player, other players, NPCs, monsters.
+struct Mob {
     actor: ro_render::Actor,
     walker: ro_game::Walker,
+}
+
+impl Mob {
+    fn new(actor: ro_render::Actor, cell: (u16, u16), dir: usize, speed: i16) -> Self {
+        let speed = if speed > 0 { speed as f32 } else { 150.0 };
+        Self { actor, walker: ro_game::Walker::new((cell.0 as i32, cell.1 as i32), dir, speed) }
+    }
+
+    /// Starts walking from -> to along the client-side path (as the server will).
+    fn walk(&mut self, gat: Option<&ro_formats::gat::Gat>, from: (u16, u16), to: (u16, u16)) {
+        let from = (from.0 as i32, from.1 as i32);
+        let to = (to.0 as i32, to.1 as i32);
+        self.walker.stop_at(from);
+        match gat.and_then(|g| ro_game::path::find(g, from, to)) {
+            Some(path) => self.walker.walk(path),
+            None => self.walker.stop_at(to),
+        }
+    }
+
+    /// Advances movement and returns the actor to draw. `idle_action` is the pose when
+    /// standing; facing is drawn relative to the camera's rotation (`octant`).
+    fn update(&mut self, dt: f32, world: &World, octant: i32, idle_action: usize) -> ro_render::Actor {
+        let was_walking = self.walker.is_walking();
+        let (fx, fy) = self.walker.update(dt);
+        let walking = self.walker.is_walking();
+        if walking != was_walking {
+            self.actor.time_ms = 0.0; // restart the animation on start/stop
+        }
+        let (x, z) = ((fx + 0.5) * ro_render::CELL, (fy + 0.5) * ro_render::CELL);
+        self.actor.pos = glam::Vec3::new(x, world.ground.height_at(x, z), z);
+        self.actor.action = if walking { 1 } else { idle_action };
+        self.actor.dir = DIRS[(self.walker.dir as i32 + octant).rem_euclid(8) as usize];
+        self.actor.time_ms += dt;
+        self.actor.clone()
+    }
+}
+
+/// Class id -> sprite name, from the client's npcidentity + jobname tables.
+fn load_class_names(vfs: &ro_vfs::Vfs) -> std::collections::HashMap<i16, String> {
+    use ro_formats::lub::assignments;
+    let dir = "data\\luafiles514\\lua files\\datainfo";
+    let read = |name: &str| -> anyhow::Result<Vec<(ro_formats::lub::Value, ro_formats::lub::Value)>> {
+        let path = format!("{dir}\\{name}.lub");
+        assignments(&vfs.read(&path)?.with_context(|| format!("{path} not found"))?)
+    };
+    let (ids, names) = match (read("npcidentity"), read("jobname")) {
+        (Ok(i), Ok(n)) => (i, n),
+        (Err(e), _) | (_, Err(e)) => {
+            tracing::warn!("class tables: {e:#}");
+            return Default::default();
+        }
+    };
+    let ids: std::collections::HashMap<String, i16> =
+        ids.iter().filter_map(|(k, v)| Some((k.as_str()?.to_string(), v.as_number()? as i16))).collect();
+    let map: std::collections::HashMap<i16, String> = names
+        .iter()
+        .filter_map(|(k, v)| Some((*ids.get(k.as_str()?)?, v.as_str()?.to_string())))
+        .collect();
+    tracing::info!(classes = map.len(), "loaded class sprite names");
+    map
+}
+
+/// Player jobs use the human body/head sprites; everything else has one sprite per class.
+fn is_player_class(job: i16) -> bool {
+    job < 45 || (4001..4400).contains(&job)
 }
 
 struct App {
@@ -292,7 +357,13 @@ struct App {
     dir: usize,
     net: Option<(tokio::sync::mpsc::UnboundedSender<ro_net::Command>, std::sync::mpsc::Receiver<ro_net::Event>)>,
     world: Option<World>,
-    player: Option<Player>,
+    player: Option<Mob>,
+    account_id: u32,
+    /// Other units in view, by id.
+    units: std::collections::HashMap<u32, Mob>,
+    class_names: std::collections::HashMap<i16, String>,
+    /// Loaded actor templates by sprite key (None: not available, don't retry).
+    sprites: std::collections::HashMap<String, Option<ro_render::Actor>>,
     /// When the current map became ready (for --capture-after).
     ready_at: Option<std::time::Instant>,
     last_tick: std::time::Instant,
@@ -326,15 +397,95 @@ impl App {
         }
     }
 
-    /// Creates (or re-creates) the local player at a cell.
-    fn spawn_player(&mut self, look: &Look, cell: (u16, u16), dir: usize, speed: f32) {
-        let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
-        match load_character(vfs, r, look) {
-            Ok(actor) => {
-                self.player = Some(Player { actor, walker: ro_game::Walker::new((cell.0 as i32, cell.1 as i32), dir, speed) });
-            }
-            Err(e) => tracing::error!("character sprites: {e:#}"),
+    /// Actor template for a player look, cached so sheets upload once per look.
+    fn player_actor(&mut self, look: &Look) -> Option<ro_render::Actor> {
+        let key = format!("player:{}:{}:{}:{}", look.job, look.male, look.hair, look.hair_color);
+        if let Some(a) = self.sprites.get(&key) {
+            return a.clone();
         }
+        let (r, vfs) = (self.renderer.as_mut()?, self.vfs.as_ref()?);
+        let actor = load_character(vfs, r, look).inspect_err(|e| tracing::warn!("player sprites {key}: {e:#}")).ok();
+        self.sprites.insert(key, actor.clone());
+        actor
+    }
+
+    /// Actor template for an NPC / monster class: data\sprite\npc\ or data\sprite\몬스터\.
+    fn class_actor(&mut self, job: i16) -> Option<ro_render::Actor> {
+        let name = self.class_names.get(&job)?.clone();
+        let key = format!("class:{name}");
+        if let Some(a) = self.sprites.get(&key) {
+            return a.clone();
+        }
+        let (r, vfs) = (self.renderer.as_mut()?, self.vfs.as_ref()?);
+        let found = ["npc", "몬스터"].iter().find_map(|folder| {
+            let base = format!("data\\sprite\\{folder}\\{name}");
+            let spr = vfs.read(&format!("{base}.spr")).ok().flatten()?;
+            let act = vfs.read(&format!("{base}.act")).ok().flatten()?;
+            Some((ro_formats::spr::Spr::parse(&spr).ok()?, ro_formats::act::Act::parse(&act).ok()?))
+        });
+        let actor = match found {
+            Some((spr, act)) => {
+                let body = r.add_sheet(&spr, act, None);
+                let shadow = self.sprites.get("shadow").cloned().flatten().and_then(|a| a.shadow);
+                Some(ro_render::Actor { pos: Default::default(), body, head: None, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0 })
+            }
+            None => {
+                tracing::debug!(job, %name, "no sprite for class");
+                None
+            }
+        };
+        self.sprites.insert(key, actor.clone());
+        actor
+    }
+
+    /// Creates (or re-creates) the local player at a cell.
+    fn spawn_player(&mut self, look: &Look, cell: (u16, u16), dir: usize, speed: i16) {
+        if let Some(actor) = self.player_actor(look) {
+            // NPC/monster actors borrow the player's shadow sheet.
+            self.sprites.insert("shadow".into(), Some(actor.clone()));
+            self.player = Some(Mob::new(actor, cell, dir, speed));
+        }
+    }
+
+    /// A unit came into view or started walking.
+    fn unit(&mut self, info: ro_net::UnitInfo) {
+        if info.id == self.account_id {
+            return;
+        }
+        let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
+        if let Some(m) = self.units.get_mut(&info.id) {
+            match info.pos {
+                ro_net::UnitPos::Walking { from, to } => m.walk(gat, from, to),
+                ro_net::UnitPos::At { x, y, dir } => {
+                    m.walker.stop_at((x as i32, y as i32));
+                    m.walker.dir = dir as usize;
+                }
+            }
+            return;
+        }
+        let actor = if is_player_class(info.job) {
+            let look = Look {
+                job: job_sprite(info.job).to_string(),
+                male: info.sex == 1,
+                hair: info.hair.max(1),
+                hair_color: info.hair_color.max(0) as u16,
+            };
+            self.player_actor(&look)
+        } else {
+            self.class_actor(info.job)
+        };
+        let Some(actor) = actor else { return };
+        let (cell, dir) = match info.pos {
+            ro_net::UnitPos::At { x, y, dir } => ((x, y), dir as usize),
+            ro_net::UnitPos::Walking { from, .. } => (from, 0),
+        };
+        let mut mob = Mob::new(actor, cell, dir, info.speed);
+        if let ro_net::UnitPos::Walking { from, to } = info.pos {
+            let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
+            mob.walk(gat, from, to);
+        }
+        tracing::debug!(id = info.id, job = info.job, name = %info.name, ?cell, "unit");
+        self.units.insert(info.id, mob);
     }
 
     /// Asks to walk to a cell: through the server online, locally offline.
@@ -357,8 +508,10 @@ impl App {
     fn handle(&mut self, event: ro_net::Event) {
         use ro_net::Event::*;
         match event {
-            Entered { map, x, y, dir, character, .. } => {
+            Entered { map, x, y, dir, character, account_id } => {
                 tracing::info!(%map, x, y, name = %character.name, job = character.job, "entered");
+                self.account_id = account_id;
+                self.units.clear();
                 self.enter_map(&map);
                 let look = Look {
                     job: job_sprite(character.job).to_string(),
@@ -366,30 +519,30 @@ impl App {
                     hair: character.head.max(1) as u16,
                     hair_color: character.hair_color as u16,
                 };
-                let speed = if character.speed > 0 { character.speed as f32 } else { 150.0 };
-                self.spawn_player(&look, (x, y), dir as usize, speed);
+                self.spawn_player(&look, (x, y), dir as usize, character.speed);
                 if let Some(cell) = self.walk_on_enter.take() {
                     self.request_walk(cell);
                 }
             }
             Walk { from, to } => {
-                let (Some(p), Some(w)) = (self.player.as_mut(), self.world.as_ref()) else { return };
-                let from = (from.0 as i32, from.1 as i32);
-                // Continue from where we are; the server's start cell is authoritative.
-                p.walker.stop_at(from);
-                let path = w.gat.as_ref().and_then(|g| ro_game::path::find(g, from, (to.0 as i32, to.1 as i32)));
-                tracing::debug!(?from, ?to, steps = path.as_ref().map(Vec::len), "walk");
-                match path {
-                    Some(path) => p.walker.walk(path),
-                    None => p.walker.stop_at((to.0 as i32, to.1 as i32)),
+                let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
+                if let Some(p) = self.player.as_mut() {
+                    tracing::debug!(?from, ?to, "walk");
+                    p.walk(gat, from, to);
                 }
             }
-            Stop { x, y, .. } => {
-                if let Some(p) = self.player.as_mut() {
-                    p.walker.stop_at((x as i32, y as i32));
+            Stop { id, x, y } => {
+                let mob = if id == self.account_id { self.player.as_mut() } else { self.units.get_mut(&id) };
+                if let Some(m) = mob {
+                    m.walker.stop_at((x as i32, y as i32));
                 }
+            }
+            Unit(info) => self.unit(info),
+            Vanish { id, .. } => {
+                self.units.remove(&id);
             }
             MapMove { map, x, y } => {
+                self.units.clear();
                 if self.world.as_ref().is_none_or(|w| w.name != map) {
                     self.enter_map(&map);
                 }
@@ -431,22 +584,16 @@ impl App {
 
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         r.actors.clear();
-        if let (Some(p), Some(w)) = (self.player.as_mut(), self.world.as_ref()) {
-            let was_walking = p.walker.is_walking();
-            let (fx, fy) = p.walker.update(dt);
-            let walking = p.walker.is_walking();
-            if walking != was_walking {
-                p.actor.time_ms = 0.0; // restart the animation on start/stop
-            }
-            let (x, z) = ((fx + 0.5) * ro_render::CELL, (fy + 0.5) * ro_render::CELL);
-            p.actor.pos = glam::Vec3::new(x, w.ground.height_at(x, z), z);
-            p.actor.action = if walking { 1 } else { self.action };
-            // Facing is drawn relative to the camera's rotation.
+        if let Some(w) = self.world.as_ref() {
             let octant = (r.camera.yaw / std::f32::consts::FRAC_PI_4).round() as i32;
-            p.actor.dir = DIRS[(p.walker.dir as i32 + octant).rem_euclid(8) as usize];
-            p.actor.time_ms += dt;
-            r.camera.target = p.actor.pos;
-            r.actors.push(p.actor.clone());
+            if let Some(p) = self.player.as_mut() {
+                let a = p.update(dt, w, octant, self.action);
+                r.camera.target = a.pos;
+                r.actors.push(a);
+            }
+            for m in self.units.values_mut() {
+                r.actors.push(m.update(dt, w, octant, 0));
+            }
         }
 
         if let Some((path, w, h)) = &self.capture {
@@ -537,7 +684,7 @@ impl ApplicationHandler for App {
             let map = self.map.clone();
             self.enter_map(&map);
             let look = self.look.clone();
-            self.spawn_player(&look, self.at, self.dir, 150.0);
+            self.spawn_player(&look, self.at, self.dir, 150);
         }
     }
 
@@ -624,6 +771,10 @@ fn main() -> anyhow::Result<()> {
         net,
         world: None,
         player: None,
+        account_id: 0,
+        units: Default::default(),
+        class_names: Default::default(),
+        sprites: Default::default(),
         ready_at: None,
         last_tick: std::time::Instant::now(),
         capture: arg("--capture").map(|p| {
@@ -639,6 +790,7 @@ fn main() -> anyhow::Result<()> {
         cursor: None,
         fps: FpsCounter::default(),
     };
+    app.class_names = app.vfs.as_ref().map(load_class_names).unwrap_or_default();
     event_loop.run_app(&mut app)?;
     Ok(())
 }

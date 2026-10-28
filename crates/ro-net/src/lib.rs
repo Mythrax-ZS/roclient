@@ -11,6 +11,8 @@ use ro_proto::{id, packets::*, Frame, RoCodec, ServerTable};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
+pub use ro_proto::packets::{CharInfo, UnitInfo, UnitPos};
+
 type Conn = Framed<TcpStream, RoCodec<ServerTable>>;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -146,10 +148,14 @@ pub enum Event {
     Entered { map: String, x: u16, y: u16, dir: u8, account_id: u32, character: CharInfo },
     /// Our walk was accepted: walk from -> to.
     Walk { from: (u16, u16), to: (u16, u16) },
-    /// The server placed a unit; for us this ends or corrects a walk.
+    /// The server placed a unit (us or another) at a cell, ending or correcting a walk.
     Stop { id: u32, x: u16, y: u16 },
     /// Warped within the same map server.
     MapMove { map: String, x: u16, y: u16 },
+    /// Another unit came into view, or (Walking) started moving.
+    Unit(UnitInfo),
+    /// A unit left view (reason: 0 out of sight, 1 died, 2 logged out, 3 teleported).
+    Vanish { id: u32, reason: u8 },
     Disconnected(String),
 }
 
@@ -201,7 +207,7 @@ pub fn spawn_session(cfg: SessionConfig) -> (tokio::sync::mpsc::UnboundedSender<
                     account_id: auth.account_id,
                     character,
                 });
-                map.run(auth.account_id, cmd_rx, &ev_tx).await
+                map.run(cmd_rx, &ev_tx).await
             });
             let reason = match result {
                 Ok(()) => "closed".to_string(),
@@ -217,7 +223,6 @@ impl MapSession {
     /// Pumps the map connection: keepalives, UI commands, and the packets the UI cares about.
     pub async fn run(
         mut self,
-        account_id: u32,
         mut commands: tokio::sync::mpsc::UnboundedReceiver<Command>,
         events: &std::sync::mpsc::Sender<Event>,
     ) -> anyhow::Result<()> {
@@ -242,13 +247,18 @@ impl MapSession {
                         }
                         id::ZC_STOPMOVE => {
                             let (id, x, y) = parse_stop_move(&data);
-                            (id == account_id).then_some(Event::Stop { id, x, y })
+                            Some(Event::Stop { id, x, y })
                         }
                         id::ZC_NPCACK_MAPMOVE => {
                             let (map, x, y) = parse_map_move(&data);
                             // The server waits for the client to finish loading again.
                             self.send(CzLoadEndAck).await?;
                             Some(Event::MapMove { map: map.trim_end_matches(".gat").to_string(), x, y })
+                        }
+                        0x09fd | 0x09fe | 0x09ff => parse_unit(opcode, &data).map(Event::Unit),
+                        id::ZC_NOTIFY_VANISH => {
+                            let (id, reason) = parse_vanish(&data);
+                            Some(Event::Vanish { id, reason })
                         }
                         id::SC_NOTIFY_BAN => bail!("disconnected by map server, code {}", data[2]),
                         _ => None,
