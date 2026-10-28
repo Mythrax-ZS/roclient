@@ -241,33 +241,79 @@ impl Social {
             .resizable(false)
             .default_pos(egui::pos2(60.0, 280.0))
             .show(ctx, |ui| {
+                // Items move by double-click or by dragging them to the other column (from
+                // the inventory window too).
+                let row = |ui: &mut egui::Ui, id: u32, amount: u16, drag: StorageDrag, tip: &str| {
+                    let r = ui
+                        .horizontal(|ui| {
+                            icon(ui, c.icons, id);
+                            ui.label(format!("{} x{amount}", name(c.db, id)));
+                        })
+                        .response;
+                    let r = ui.interact(r.rect, ui.scope_id().with(("storage_row", drag.clone())), egui::Sense::click_and_drag());
+                    if r.hovered() {
+                        ui.painter().rect_filled(r.rect, 3.0, Color32::from_white_alpha(18));
+                    }
+                    if r.drag_started() {
+                        r.dnd_set_drag_payload(drag.clone());
+                    }
+                    if r.on_hover_text(tip).double_clicked() {
+                        Some(drag)
+                    } else {
+                        None
+                    }
+                };
+                let mut moved = vec![];
                 ui.columns(2, |cols| {
                     cols[0].label(RichText::new("Storage").strong());
-                    egui::ScrollArea::vertical().id_salt("st").max_height(300.0).show(&mut cols[0], |ui| {
-                        for it in self.storage.items.values() {
-                            ui.horizontal(|ui| {
-                                icon(ui, c.icons, it.id);
-                                let r = ui.add(egui::Label::new(format!("{} x{}", name(c.db, it.id), it.amount)).sense(egui::Sense::click()));
-                                if r.on_hover_text("Double-click to take").double_clicked() {
-                                    out.push(Command::Storage(StorageRequest::Take { index: it.index, amount: it.amount as u32 }));
-                                }
-                            });
-                        }
+                    let dropped = drop_column(&mut cols[0], |ui| {
+                        ui.set_min_size(Vec2::new(ui.available_width(), 300.0));
+                        egui::ScrollArea::vertical().id_salt("st").max_height(300.0).show(ui, |ui| {
+                            for it in self.storage.items.values() {
+                                moved.extend(row(ui, it.id, it.amount, StorageDrag::Take(it.index, it.amount), "Double-click or drag to take"));
+                            }
+                        });
                     });
+                    moved.extend(dropped.filter(|d| matches!(**d, StorageDrag::Put(..))).map(|d| (*d).clone()));
                     cols[1].label(RichText::new("Inventory").strong());
-                    egui::ScrollArea::vertical().id_salt("inv").max_height(300.0).show(&mut cols[1], |ui| {
-                        for it in c.inventory.iter().filter(|i| i.equipped == 0) {
-                            ui.horizontal(|ui| {
-                                icon(ui, c.icons, it.id);
-                                let r = ui.add(egui::Label::new(format!("{} x{}", name(c.db, it.id), it.amount)).sense(egui::Sense::click()));
-                                if r.on_hover_text("Double-click to store").double_clicked() {
-                                    out.push(Command::Storage(StorageRequest::Put { index: it.index, amount: it.amount as u32 }));
-                                }
-                            });
-                        }
+                    let dropped = drop_column(&mut cols[1], |ui| {
+                        ui.set_min_size(Vec2::new(ui.available_width(), 300.0));
+                        egui::ScrollArea::vertical().id_salt("inv").max_height(300.0).show(ui, |ui| {
+                            for it in c.inventory.iter().filter(|i| i.equipped == 0) {
+                                moved.extend(row(ui, it.id, it.amount, StorageDrag::Put(it.index, it.amount), "Double-click or drag to store"));
+                            }
+                        });
                     });
+                    moved.extend(dropped.filter(|d| matches!(**d, StorageDrag::Take(..))).map(|d| (*d).clone()));
                 });
+                // An item dragged in from the inventory window carries its item id.
+                let window = ui.min_rect();
+                if let Some(key) = egui::DragAndDrop::payload::<ro_net::Hotkey>(ui.ctx()).filter(|k| !k.skill) {
+                    let over = ui.ctx().pointer_hover_pos().is_some_and(|p| window.contains(p));
+                    if over && ui.input(|i| i.pointer.any_released()) {
+                        if let Some(it) = c.inventory.iter().find(|i| i.id == key.id && i.equipped == 0) {
+                            moved.push(StorageDrag::Put(it.index, it.amount));
+                        }
+                        egui::DragAndDrop::clear_payload(ui.ctx());
+                    }
+                }
+                for m in moved {
+                    out.push(Command::Storage(match m {
+                        StorageDrag::Take(index, amount) => StorageRequest::Take { index, amount: amount as u32 },
+                        StorageDrag::Put(index, amount) => StorageRequest::Put { index, amount: amount as u32 },
+                    }));
+                }
             });
+        // What is being dragged, under the pointer.
+        if let (Some(d), Some(p)) = (egui::DragAndDrop::payload::<StorageDrag>(ctx), ctx.pointer_interact_pos()) {
+            let (index, take) = match *d { StorageDrag::Take(i, _) => (i, true), StorageDrag::Put(i, _) => (i, false) };
+            let id = if take { self.storage.items.values().find(|i| i.index == index).map(|i| i.id) } else { c.inventory.iter().find(|i| i.index == index).map(|i| i.id) };
+            if let Some(t) = id.and_then(|id| c.icons.get(&id)) {
+                egui::Area::new(egui::Id::unique("storage_drag")).fixed_pos(p + Vec2::new(-12.0, -12.0)).order(egui::Order::Tooltip).interactable(false).show(ctx, |ui| {
+                    ui.image((t.id(), Vec2::splat(24.0)));
+                });
+            }
+        }
         if !open {
             out.push(Command::Storage(StorageRequest::Close));
             self.storage.open = false;
@@ -418,4 +464,20 @@ impl Social {
         });
         self.show_friends = open;
     }
+}
+
+/// An item being dragged in the storage window: (index, amount) from storage or inventory.
+#[derive(Clone, Debug, Hash, PartialEq)]
+enum StorageDrag {
+    Take(u16, u16),
+    Put(u16, u16),
+}
+
+/// A column that takes dropped storage drags: outlined while one hovers it.
+fn drop_column(ui: &mut egui::Ui, body: impl FnOnce(&mut egui::Ui)) -> Option<std::sync::Arc<StorageDrag>> {
+    let r = ui.scope(body).response;
+    if r.dnd_hover_payload::<StorageDrag>().is_some() {
+        ui.painter().rect_stroke(r.rect.expand(2.0), 4.0, egui::Stroke::new(1.5, Color32::from_rgb(120, 200, 255)), egui::StrokeKind::Outside);
+    }
+    r.dnd_release_payload::<StorageDrag>()
 }

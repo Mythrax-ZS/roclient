@@ -868,6 +868,8 @@ struct App {
     fake_pointer: Option<egui::Pos2>,
     /// A click the test script queued there; pressed one frame, released the next.
     fake_click: Option<(egui::Pos2, bool)>,
+    /// Test drags: pointer events played one frame at a time.
+    fake_frames: std::collections::VecDeque<Vec<egui::Event>>,
     social: social::Social,
     /// The player we asked to trade, until they answer.
     trade_partner: Option<String>,
@@ -3823,6 +3825,28 @@ impl App {
                         None
                     }
                     // click:x:y clicks the UI there.
+                    // drag:x1:y1:x2:y2 presses at one point, moves over a few frames, releases at the other.
+                    // idle:n holds the next test drag for n frames.
+                    Some(("idle", n)) => {
+                        for _ in 0..n.parse().unwrap_or(0) {
+                            self.fake_frames.push_back(vec![]);
+                        }
+                        None
+                    }
+                    Some(("drag", at)) => {
+                        let f: Vec<f32> = at.split(':').filter_map(|v| v.parse().ok()).collect();
+                        if f.len() == 4 {
+                            let (a, b) = (egui::pos2(f[0], f[1]), egui::pos2(f[2], f[3]));
+                            let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+                            self.fake_frames.push_back(vec![egui::Event::PointerMoved(a)]);
+                            self.fake_frames.push_back(vec![button(a, true)]);
+                            for t in [0.1, 0.3, 0.6, 0.9, 1.0, 1.0] {
+                                self.fake_frames.push_back(vec![egui::Event::PointerMoved(a + (b - a) * t)]);
+                            }
+                            self.fake_frames.push_back(vec![button(b, false)]);
+                        }
+                        None
+                    }
                     Some(("click", at)) => {
                         let f: Vec<f32> = at.split(':').filter_map(|v| v.parse().ok()).collect();
                         self.fake_click = (f.len() == 2).then(|| (egui::pos2(f[0], f[1]), true));
@@ -4273,6 +4297,9 @@ impl App {
             let mut input = state.take_egui_input(window);
             if let Some(p) = self.fake_pointer.take() {
                 input.events.push(egui::Event::PointerMoved(p));
+            }
+            if let Some(events) = self.fake_frames.pop_front() {
+                input.events.extend(events);
             }
             if let Some((p, pressed)) = self.fake_click.take() {
                 input.events.push(egui::Event::PointerMoved(p));
@@ -5034,6 +5061,7 @@ fn main() -> anyhow::Result<()> {
         queued_action: None,
         fake_pointer: None,
         fake_click: None,
+        fake_frames: Default::default(),
         social: Default::default(),
         trade_partner: None,
         player_menu: None,
