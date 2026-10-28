@@ -65,6 +65,11 @@ impl SkillNames {
         self.ids.get(&id).map(String::as_str)
     }
 
+    /// Skill id for an internal name.
+    pub fn id_of(&self, internal: &str) -> Option<u16> {
+        self.ids.iter().find(|(_, n)| n.as_str() == internal).map(|(id, _)| *id)
+    }
+
     pub fn description(&self, internal: &str) -> Option<&[String]> {
         self.descriptions.get(internal).map(Vec::as_slice)
     }

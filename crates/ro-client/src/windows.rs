@@ -34,6 +34,10 @@ pub struct Windows {
     pub equipment: bool,
     pub stats: bool,
     pub skills: bool,
+    /// Show skills as a plain list instead of the tree.
+    pub skill_list: bool,
+    /// The skill tree tab shown; None opens on the current job's tab.
+    pub skill_tab: Option<usize>,
     pub party: bool,
     pub friends: bool,
     pub guild: bool,
@@ -59,6 +63,9 @@ pub struct View<'a> {
     pub skills: &'a [Skill],
     pub skill_names: &'a dyn Fn(&str) -> String,
     pub skill_info: Option<&'a ro_game::skills::SkillNames>,
+    pub skill_tree: Option<&'a crate::skilltree::SkillTree>,
+    /// The player's job id, choosing the skill tree tabs.
+    pub job: i16,
     pub skill_points: i64,
     pub weight: (i64, i64),
     pub zeny: i64,
@@ -430,56 +437,112 @@ impl Windows {
         if self.skills {
             let mut open = true;
             egui::Window::new("Skills").open(&mut open).default_pos(egui::pos2(col(0.0).x, 420.0)).resizable(false).show(ctx, |ui| {
-                ui.label(format!("Skill points: {}", v.skill_points));
-                ui.separator();
-                if v.skills.is_empty() {
-                    ui.label(RichText::new("No skills").color(Color32::GRAY));
-                }
-                egui::Grid::new("skills").num_columns(4).spacing(Vec2::new(8.0, 4.0)).show(ui, |ui| {
-                    for s in v.skills {
-                        let name = (v.skill_names)(&s.name);
-                        let usable = s.level > 0 && s.target != 0;
-                        // Hovering the icon or name shows the skill's description; double-clicking
-                        // either uses it, as in the original skill window.
-                        let tooltip = |ui: &mut egui::Ui| {
-                            ui.set_max_width(360.0);
-                            ui.label(RichText::new(&name).strong());
-                            ui.label(RichText::new(format!("Lv {}   SP {}   Range {}", s.level, s.sp, s.range)).color(Color32::GRAY));
-                            if let Some(lines) = v.skill_info.and_then(|i| i.description(&s.name)) {
-                                ui.separator();
-                                for line in lines {
-                                    ui.label(crate::hud::npc_text(line, 12.5));
-                                }
-                            }
-                            if usable {
-                                ui.separator();
-                                ui.label(RichText::new("Double-click to use, or drag to the shortcut bar").color(Color32::GRAY).size(11.5));
-                            }
-                        };
-                        let icon = match v.skill_icons.get(&s.id) {
-                            Some(t) => ui.add(egui::Image::new((t.id(), Vec2::splat(24.0))).sense(egui::Sense::click_and_drag())),
-                            None => ui.allocate_exact_size(Vec2::splat(24.0), egui::Sense::click()).1,
-                        };
-                        if usable {
-                            icon.dnd_set_drag_payload(Hotkey { skill: true, id: s.id as u32, count: s.level as i16 });
-                        }
-                        let label = ui.add(egui::Label::new(RichText::new(&name)).sense(egui::Sense::click()));
-                        let clicked = icon.double_clicked() || label.double_clicked();
-                        icon.on_hover_ui(tooltip);
-                        label.on_hover_ui(tooltip);
-                        if usable && clicked {
-                            action = Some(UiAction::UseSkill(s.id));
-                        }
-                        ui.label(format!("Lv {}", s.level));
-                        if ui.add_enabled(s.upgradable && v.skill_points > 0, egui::Button::new("+")).clicked() {
-                            action = Some(UiAction::SkillUp(s.id));
-                        }
-                        ui.end_row();
-                    }
+                ui.horizontal(|ui| {
+                    ui.label(format!("Skill points: {}", v.skill_points));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.selectable_value(&mut self.skill_list, true, "List");
+                        ui.selectable_value(&mut self.skill_list, false, "Tree");
+                    });
                 });
+                ui.separator();
+                let tabs = v.skill_tree.map(|t| t.tabs(v.job)).unwrap_or_default();
+                if self.skill_list || tabs.is_empty() {
+                    if v.skills.is_empty() {
+                        ui.label(RichText::new("No skills").color(Color32::GRAY));
+                    }
+                    egui::Grid::new("skills").num_columns(4).spacing(Vec2::new(8.0, 4.0)).show(ui, |ui| {
+                        for s in v.skills {
+                            let name = (v.skill_names)(&s.name);
+                            let icon = skill_icon(ui, v, s.id, Some(s), 24.0);
+                            let label = ui.add(egui::Label::new(RichText::new(&name)).sense(egui::Sense::click()));
+                            if s.level > 0 && s.target != 0 && (icon.double_clicked() || label.double_clicked()) {
+                                action = Some(UiAction::UseSkill(s.id));
+                            }
+                            icon.on_hover_ui(|ui| skill_tooltip(ui, v, &s.name, Some(s)));
+                            label.on_hover_ui(|ui| skill_tooltip(ui, v, &s.name, Some(s)));
+                            ui.label(format!("Lv {}", s.level));
+                            if ui.add_enabled(s.upgradable && v.skill_points > 0, egui::Button::new("+")).clicked() {
+                                action = Some(UiAction::SkillUp(s.id));
+                            }
+                            ui.end_row();
+                        }
+                    });
+                } else {
+                    // One tab per job tier, as in the original skill tree window.
+                    let mut tab = self.skill_tab.unwrap_or(usize::MAX).min(tabs.len() - 1);
+                    ui.horizontal(|ui| {
+                        for (i, (job, _)) in tabs.iter().enumerate() {
+                            ui.selectable_value(&mut tab, i, crate::jobs::title(*job));
+                        }
+                    });
+                    ui.add_space(4.0);
+                    self.skill_tab = Some(tab);
+                    let grid = tabs[tab].1;
+                    let rows = grid.iter().map(|(slot, _)| slot / crate::skilltree::COLUMNS + 1).max().unwrap_or(1);
+                    const CELL: f32 = 58.0;
+                    let cols = crate::skilltree::COLUMNS;
+                    let (area, _) = ui.allocate_exact_size(Vec2::new(cols as f32 * CELL, rows as f32 * CELL), egui::Sense::hover());
+                    for (slot, internal) in grid {
+                        let at = area.min + Vec2::new((slot % cols) as f32 * CELL, (slot / cols) as f32 * CELL);
+                        let cell = egui::Rect::from_min_size(at, Vec2::splat(CELL)).shrink(2.0);
+                        let skill = v.skills.iter().find(|s| &s.name == internal);
+                        let id = skill.map(|s| s.id).or_else(|| v.skill_info.and_then(|i| i.id_of(internal)));
+                        let lv = skill.map_or(0, |s| s.level);
+                        ui.painter().rect_filled(cell, 4.0, if lv > 0 { Color32::from_gray(48) } else { Color32::from_gray(30) });
+                        let icon_rect = egui::Rect::from_center_size(cell.center_top() + Vec2::new(0.0, 19.0), Vec2::splat(32.0));
+                        let icon = ui.scope_builder(egui::UiBuilder::new().max_rect(icon_rect), |ui| skill_icon(ui, v, id.unwrap_or(0), skill, 32.0)).inner;
+                        if let Some(s) = skill.filter(|s| s.level > 0 && s.target != 0) {
+                            if icon.double_clicked() {
+                                action = Some(UiAction::UseSkill(s.id));
+                            }
+                        }
+                        icon.on_hover_ui(|ui| skill_tooltip(ui, v, internal, skill));
+                        let color = if lv > 0 { Color32::WHITE } else { Color32::GRAY };
+                        ui.painter().text(cell.left_bottom() + Vec2::new(5.0, -3.0), egui::Align2::LEFT_BOTTOM, format!("{lv}"), egui::FontId::proportional(11.0), color);
+                        if let Some(s) = skill.filter(|s| s.upgradable && v.skill_points > 0) {
+                            let plus = egui::Rect::from_min_size(cell.right_bottom() - Vec2::new(18.0, 16.0), Vec2::new(16.0, 14.0));
+                            if ui.put(plus, egui::Button::new(RichText::new("+").size(10.0))).clicked() {
+                                action = Some(UiAction::SkillUp(s.id));
+                            }
+                        }
+                    }
+                }
             });
             self.skills = open;
         }
         action
+    }
+}
+
+/// A skill icon that can be dragged to the shortcut bar; greyed out until learned.
+fn skill_icon(ui: &mut egui::Ui, v: &View, id: u16, skill: Option<&Skill>, size: f32) -> egui::Response {
+    let learned = skill.is_some_and(|s| s.level > 0);
+    let resp = match v.skill_icons.get(&id) {
+        Some(t) => ui.add(egui::Image::new((t.id(), Vec2::splat(size))).tint(if learned { Color32::WHITE } else { Color32::from_gray(90) }).sense(egui::Sense::click_and_drag())),
+        None => ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click()).1,
+    };
+    if let Some(s) = skill.filter(|s| s.level > 0 && s.target != 0) {
+        resp.dnd_set_drag_payload(Hotkey { skill: true, id: s.id as u32, count: s.level as i16 });
+    }
+    resp
+}
+
+/// Hovering a skill shows its name, numbers and description.
+fn skill_tooltip(ui: &mut egui::Ui, v: &View, internal: &str, skill: Option<&Skill>) {
+    ui.set_max_width(360.0);
+    ui.label(RichText::new((v.skill_names)(internal)).strong());
+    match skill {
+        Some(s) => ui.label(RichText::new(format!("Lv {}   SP {}   Range {}", s.level, s.sp, s.range)).color(Color32::GRAY)),
+        None => ui.label(RichText::new("Not yet available").color(Color32::GRAY)),
+    };
+    if let Some(lines) = v.skill_info.and_then(|i| i.description(internal)) {
+        ui.separator();
+        for line in lines {
+            ui.label(crate::hud::npc_text(line, 12.5));
+        }
+    }
+    if skill.is_some_and(|s| s.level > 0 && s.target != 0) {
+        ui.separator();
+        ui.label(RichText::new("Double-click to use, or drag to the shortcut bar").color(Color32::GRAY).size(11.5));
     }
 }

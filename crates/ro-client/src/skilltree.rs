@@ -1,0 +1,74 @@
+//! The skill tree layout from the client's own tables: skilltreeview.lub places each job's
+//! skills on a 7-column grid, and jobinheritlist.lub says which job each one came from
+//! (Assassin Cross -> Assassin -> Thief -> Novice), giving one tab per tier.
+
+use std::collections::HashMap;
+
+pub const COLUMNS: u32 = 7;
+
+#[derive(Default)]
+pub struct SkillTree {
+    /// Job id -> (grid slot, internal skill name).
+    views: HashMap<i16, Vec<(u32, String)>>,
+    /// Job id -> the job it advanced from.
+    parent: HashMap<i16, i16>,
+}
+
+impl SkillTree {
+    pub fn from_lubs(view: &[u8], inherit: &[u8]) -> anyhow::Result<Self> {
+        let inherit = ro_formats::lub::eval(inherit)?;
+        let mut job_ids: HashMap<String, i16> = HashMap::new();
+        let mut parent = HashMap::new();
+        for (name, table) in &inherit.globals {
+            for (k, v) in inherit.entries(table) {
+                match name.as_str() {
+                    "JOBID" => {
+                        if let (Some(k), Some(v)) = (k.as_str(), v.as_number()) {
+                            job_ids.insert(k.to_string(), v as i16);
+                        }
+                    }
+                    "JOB_INHERIT_LIST" => {
+                        if let (Some(k), Some(v)) = (k.as_number(), v.as_number()) {
+                            parent.insert(k as i16, v as i16);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let view = ro_formats::lub::eval(view)?;
+        let mut views = HashMap::new();
+        for (name, table) in &view.globals {
+            if name != "SKILL_TREEVIEW_FOR_JOB" {
+                continue;
+            }
+            for (job, skills) in view.entries(table) {
+                let Some(&id) = job.as_str().and_then(|j| job_ids.get(j)) else { continue };
+                let slots = view
+                    .entries(skills)
+                    .iter()
+                    .filter_map(|(slot, skill)| Some((slot.as_number()? as u32, skill.as_str()?.to_string())))
+                    .collect();
+                views.insert(id, slots);
+            }
+        }
+        Ok(Self { views, parent })
+    }
+
+    /// The tabs for a job, first tier first: (job id, its grid).
+    pub fn tabs(&self, job: i16) -> Vec<(i16, &[(u32, String)])> {
+        let mut out = vec![];
+        let mut j = job;
+        for _ in 0..8 {
+            if let Some(v) = self.views.get(&j) {
+                out.push((j, v.as_slice()));
+            }
+            match self.parent.get(&j) {
+                Some(&p) if p != j => j = p,
+                _ => break,
+            }
+        }
+        out.reverse();
+        out
+    }
+}

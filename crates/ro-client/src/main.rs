@@ -12,6 +12,7 @@ mod jobs;
 mod preview;
 mod screens;
 mod settings;
+mod skilltree;
 mod splash;
 mod social;
 mod windows;
@@ -749,6 +750,7 @@ struct App {
     floaters: Vec<(glam::Vec3, String, egui::Color32, f32)>,
     item_db: Option<ro_game::items::ItemDb>,
     skill_names: ro_game::skills::SkillNames,
+    skill_tree: skilltree::SkillTree,
     inventory: ro_game::items::Inventory,
     /// Items on the ground, with their sprite.
     floor: std::collections::HashMap<u32, (ro_net::FloorItem, Option<ro_render::Actor>)>,
@@ -947,6 +949,8 @@ impl App {
                 look.job = job_sprite(value as i16).to_string();
                 if id == self.account_id {
                     self.hud.status.job = job_title(value as i16).to_string();
+                    self.hud.status.job_id = value as i16;
+                    self.load_skill_icons();
                 }
             }
             1 => look.hair = value.max(1) as u16,
@@ -1127,6 +1131,7 @@ impl App {
                 let s = &mut self.hud.status;
                 s.name = character.name.clone();
                 s.job = job_title(character.job).to_string();
+                s.job_id = character.job;
                 s.base_level = character.base_level as i64;
                 s.job_level = character.job_level as i64;
                 (s.hp, s.max_hp, s.sp, s.max_sp) = (character.hp, character.max_hp, character.sp, character.max_sp);
@@ -1905,13 +1910,18 @@ impl App {
 
     fn load_skill_icons(&mut self) {
         let Some(vfs) = self.vfs.as_ref() else { return };
-        for s in &self.skills {
-            if self.skill_icons.contains_key(&s.id) {
+        // Learned skills, and the rest of the job's tree (drawn greyed out).
+        let mut wanted: Vec<(u16, String)> = self.skills.iter().map(|s| (s.id, s.name.clone())).collect();
+        for (_, grid) in self.skill_tree.tabs(self.hud.status.job_id) {
+            wanted.extend(grid.iter().filter_map(|(_, n)| Some((self.skill_names.id_of(n)?, n.clone()))));
+        }
+        for (id, name) in wanted {
+            if self.skill_icons.contains_key(&id) {
                 continue;
             }
-            let path = format!("data\\texture\\유저인터페이스\\item\\{}.bmp", s.name.to_ascii_lowercase());
+            let path = format!("data\\texture\\유저인터페이스\\item\\{}.bmp", name.to_ascii_lowercase());
             if let Some(tex) = load_texture(&self.egui_ctx, vfs, &path) {
-                self.skill_icons.insert(s.id, tex);
+                self.skill_icons.insert(id, tex);
             }
         }
     }
@@ -2664,7 +2674,8 @@ impl App {
             }
         }
         if std::mem::take(&mut self.open_windows) {
-            self.windows.guild = true;
+            let args: Vec<String> = std::env::args().collect();
+            if args.iter().any(|a| a == "--skills-win") { self.windows.skills = true; self.windows.skill_list = args.iter().any(|a| a == "--skill-list"); self.windows.skill_tab = args.iter().skip_while(|a| *a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()); } else { self.windows.guild = true; }
             self.guild.start_tab = std::env::args().skip_while(|a| a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()).unwrap_or(0);
         }
         for c in std::mem::take(&mut self.queued_commands) {
@@ -2898,6 +2909,8 @@ impl App {
                 skills: &self.skills,
                 skill_names: &skill_names,
                 skill_info: Some(&self.skill_names),
+                skill_tree: Some(&self.skill_tree),
+                job: self.hud.status.job_id,
                 skill_points: self.hud.status.skill_points,
                 weight: (self.hud.status.weight, self.hud.status.max_weight),
                 zeny: self.hud.status.zeny,
@@ -3471,6 +3484,7 @@ fn main() -> anyhow::Result<()> {
         floaters: vec![],
         item_db: None,
         skill_names: Default::default(),
+        skill_tree: Default::default(),
         inventory: Default::default(),
         floor: Default::default(),
         stats: None,
@@ -3581,6 +3595,13 @@ fn main() -> anyhow::Result<()> {
         if let Some(d) = read(r"data\luafiles514\lua files\skillinfoz\skillid.lub") {
             if let Err(e) = app.skill_names.add_ids(&d) {
                 tracing::warn!("skillid: {e:#}");
+            }
+        }
+        let tree = read(r"data\luafiles514\lua files\skillinfoz\skilltreeview.lub");
+        if let (Some(view), Some(inherit)) = (tree, read(r"data\luafiles514\lua files\skillinfoz\jobinheritlist.lub")) {
+            match skilltree::SkillTree::from_lubs(&view, &inherit) {
+                Ok(t) => app.skill_tree = t,
+                Err(e) => tracing::warn!("skill tree: {e:#}"),
             }
         }
         if let Some(d) = read(r"data\luafiles514\lua files\skillinfoz\skilldescript.lub") {

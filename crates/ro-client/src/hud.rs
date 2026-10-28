@@ -13,6 +13,7 @@ const CHAT_LINES: usize = 200;
 pub struct Status {
     pub name: String,
     pub job: String,
+    pub job_id: i16,
     pub base_level: i64,
     pub job_level: i64,
     pub hp: i64,
