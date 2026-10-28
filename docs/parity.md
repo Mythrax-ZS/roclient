@@ -12,12 +12,13 @@ Ticked items are handled and tested in game against the local server.
 - [ ] ZC_SAY_DIALOG2 / ZC_WAIT_DIALOG2, ZC_DIALOG_TEXT_ALIGN / WINDOW_SIZE / WINDOW_POS / POS2
 - [x] ZC_MSG_COLOR, ZC_MSG_VALUE, ZC_MSG_SKILL, and every ZC_MSG id (was: only two)
 - [ ] ZC_SPECIALPOPUP, ZC_SKILLMSG
-- [ ] ZC_NOTIFY_EFFECT3, ZC_REMOVE_EFFECT, ZC_EQUIPMENT_EFFECT (hat effects)
+- [x] ZC_REMOVE_EFFECT, ZC_EQUIPMENT_EFFECT
+- [ ] ZC_NOTIFY_EFFECT3
 - [x] ZC_NPC_MARKET_OPEN / PURCHASE_RESULT (market shops)
 - [x] ZC_NPC_BARTER_MARKET_ITEMINFO / EXPANDED_BARTER (barter shops)
 - [x] Stylist (openstylist: hair, hair colour, clothes colour, live preview)
 - [x] ZC_DRESSROOM_OPEN (opendressroom: preview only)
-- [ ] ZC_ADD_SKILL, ZC_SKILLINFO_UPDATE2, ZC_SKILLINFO_DELETE (`skill` / `bonus_script` skills)
+- [x] ZC_ADD_SKILL, ZC_SKILLINFO_UPDATE2, ZC_SKILLINFO_DELETE
 - [x] Random enchant (ZC_UI_OPEN_V3 + ZC_RESPONSE_ENCHANT) from the official enchantlist.lub (32-bit bytecode widened and run)
 - [x] Item reform (ZC_OPEN_REFORM_UI / ITEM_REFORM_ACK) from itemreformsystem.lub
 - [x] Failed item adds (full inventory, overweight) now say why
@@ -33,8 +34,8 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_ATTACK_RANGE, ZC_OVERWEIGHT_PERCENT, ZC_MAPPROPERTY_R2 (PvP/GvG: click enemy players to attack, Shift when the map requires it)
 - [ ] ZC_CARTOFF
 - [ ] ZC_SPIRITS / SPIRITS2 / SPIRITS_ATTRIBUTE / SOULENERGY / TARGET_SPIRITS, ZC_MILLENNIUMSHIELD
-- [ ] ZC_COMBODELAY, ZC_BLADESTOP, ZC_DISPEL, ZC_HIGHJUMP, ZC_AUTORUN_SKILL, ZC_NOTIFY_SKILL_POSITION
-- [ ] ZC_EQUIPITEM_DAMAGED, ZC_NOTIFY_BIND_ON_EQUIP, ZC_CHANGE_ITEM_OPTION, ZC_UPDATE_CARDSLOT
+- [ ] ZC_COMBODELAY, ZC_BLADESTOP, ZC_DISPEL, ZC_HIGHJUMP, ZC_NOTIFY_SKILL_POSITION
+- [ ] ZC_NOTIFY_BIND_ON_EQUIP, ZC_CHANGE_ITEM_OPTION, ZC_UPDATE_CARDSLOT
 - [ ] ZC_ACK_TAKEOFF_EQUIP_ALL, ZC_MOVE_ITEM_FAILED, ZC_INVENTORY_TAB, ZC_INVENTORY_END
 - [ ] ZC_EXTEND_BODYITEM_SIZE (+ ACK / MSGBOX)
 
@@ -58,7 +59,7 @@ Ticked items are handled and tested in game against the local server.
 - [ ] ZC_ACK_OPENSTORE2
 - [x] Ranking window (ZC_ACK_RANKING2 + names by char id; /blacksmith /alchemist /taekwon /pk)
 - [ ] ZC_CONGRATULATION, ZC_DIVORCE
-- [ ] ZC_ACK_REQNAMEALL / NPC / BYGID, ZC_BAN_LIST
+- [ ] ZC_BAN_LIST
 
 ## Found while testing
 - [x] `specialeffect` (ZC_NOTIFY_EFFECT2): 110 EF_* ids matched to STR files, plus the most-used code-drawn ones (heal, grand cross, steal, bash, ...) shown with their skill effect; the hit sparks and screen quake still missing

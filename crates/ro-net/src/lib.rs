@@ -373,6 +373,10 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_ADD_SKILL / ZC_SKILLINFO_UPDATE2: a skill added or changed (script `skill`, item bonuses).
+    SkillAdded(Skill),
+    /// ZC_SKILLINFO_DELETE.
+    SkillRemoved(u16),
     /// Equipment switch set: the full list (index, slots), an item added / removed, a swap done.
     SwitchList(Vec<(u16, u32)>),
     SwitchChanged { index: u16, location: u32, ok: bool },
@@ -848,6 +852,14 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0111 if data.len() >= 39 => parse_skill_list(&[&[0u8; 4][..], &data[2..]].concat()).into_iter().next().map(Event::SkillAdded),
+                        0x07e1 if data.len() >= 15 => {
+                            let mut b = &data[2..];
+                            use bytes::Buf;
+                            let (id, target, level, sp, range, up) = (b.get_u16_le(), b.get_i32_le(), b.get_u16_le(), b.get_u16_le(), b.get_u16_le(), b.get_u8() != 0);
+                            Some(Event::SkillAdded(Skill { id, target, level, sp, range, name: String::new(), upgradable: up }))
+                        }
+                        0x0441 if data.len() >= 4 => Some(Event::SkillRemoved(u16::from_le_bytes([data[2], data[3]]))),
                         0x0a9b => Some(Event::SwitchList(data.get(4..).unwrap_or_default().chunks_exact(6).map(|c| (u16::from_le_bytes([c[0], c[1]]), u32::from_le_bytes([c[2], c[3], c[4], c[5]]))).collect())),
                         0x0a98 if data.len() >= 10 => Some(Event::SwitchChanged { index: u16::from_le_bytes([data[2], data[3]]), location: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), ok: data[8] == 0 }),
                         0x0a9a if data.len() >= 10 => Some(Event::SwitchChanged { index: u16::from_le_bytes([data[2], data[3]]), location: 0, ok: data[8] == 0 }),

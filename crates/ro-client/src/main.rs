@@ -2552,6 +2552,20 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            SkillAdded(mut s) => {
+                tracing::debug!(id = s.id, level = s.level, "skill added");
+                match self.skills.iter_mut().find(|k| k.id == s.id) {
+                    Some(k) => {
+                        if s.name.is_empty() {
+                            s.name = std::mem::take(&mut k.name);
+                        }
+                        *k = s;
+                    }
+                    None => self.skills.push(s),
+                }
+                self.load_skill_icons();
+            }
+            SkillRemoved(id) => self.skills.retain(|k| k.id != id),
             SwitchList(list) => {
                 for it in self.inventory.items.values_mut() {
                     it.switch = 0;
