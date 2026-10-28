@@ -21,6 +21,8 @@ pub enum UiAction {
     InsertCard { card: u16, equip: u16 },
     /// Answer the open skill/item menu.
     Menu(ro_net::MenuReply),
+    /// Move an inventory item into the cart.
+    CartPut { index: u16, amount: u16 },
     SkillUp(u16),
     UseSkill(u16),
     /// Activate shortcut slot n (row * HOTKEYS_PER_ROW + column).
@@ -86,6 +88,8 @@ pub struct View<'a> {
     pub hotkey_row: u8,
     /// Skills cooling down: id -> when they are ready again.
     pub cooldowns: &'a HashMap<u16, std::time::Instant>,
+    /// We have a pushcart (inventory items can go into it).
+    pub has_cart: bool,
     /// A controller is in use: label slots with its buttons.
     pub pad_hints: bool,
     pub playstation: bool,
@@ -385,6 +389,10 @@ impl Windows {
                             }
                             if it.is_usable() && ui.button("Use").clicked() {
                                 action = Some(UiAction::UseItem(it.index));
+                                ui.close();
+                            }
+                            if v.has_cart && it.equipped == 0 && ui.button("Move to cart").clicked() {
+                                action = Some(UiAction::CartPut { index: it.index, amount: it.amount });
                                 ui.close();
                             }
                             if ui.button(if it.amount > 1 { "Drop all" } else { "Drop" }).clicked() {

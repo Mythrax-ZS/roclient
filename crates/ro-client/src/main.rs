@@ -9,6 +9,7 @@ mod gamepad;
 mod guild;
 mod hud;
 mod jobs;
+mod merchant;
 mod preview;
 mod quests;
 mod screens;
@@ -790,6 +791,8 @@ struct App {
     buffs: buffs::Buffs,
     /// The quest log and NPC quest marks.
     quests: quests::QuestLog,
+    /// Cart, vending and shops.
+    merchant: merchant::Merchant,
     /// Skills cooling down: id -> ready again at.
     cooldowns: std::collections::HashMap<u16, std::time::Instant>,
     /// When a paused (`wait:`) test script carries on.
@@ -1253,6 +1256,81 @@ impl App {
                     self.quests.marks.insert(npc, (mark, color));
                 }
             }
+            CartStart => {
+                tracing::debug!("cart list");
+                self.merchant.cart.clear();
+            }
+            CartItems(items) => {
+                for d in items {
+                    let it = inv_item(d);
+                    self.merchant.cart.insert(it.index, it);
+                }
+                let ids = self.merchant.item_ids();
+                self.load_icons_for(&ids);
+            }
+            CartCount { items, max_items, weight, max_weight } => {
+                tracing::debug!(items, max_items, weight, max_weight, "cart");
+                self.merchant.cart_count = (items, max_items, weight, max_weight);
+            }
+            CartAdded(d) => {
+                let it = inv_item(d);
+                self.load_icons_for(&[it.id]);
+                match self.merchant.cart.get_mut(&it.index) {
+                    Some(e) if e.id == it.id => e.amount += it.amount,
+                    _ => {
+                        self.merchant.cart.insert(it.index, it);
+                    }
+                }
+            }
+            CartRemoved { index, amount } => {
+                if let Some(e) = self.merchant.cart.get_mut(&index) {
+                    e.amount = e.amount.saturating_sub(amount as u16);
+                    if e.amount == 0 {
+                        self.merchant.cart.remove(&index);
+                    }
+                }
+            }
+            ShopSign { aid, title } => {
+                if title.is_empty() {
+                    self.merchant.signs.remove(&aid);
+                } else {
+                    self.merchant.signs.insert(aid, title);
+                }
+            }
+            Shop { seller, shop, items } => {
+                let ids: Vec<u32> = items.iter().map(|i| i.id).collect();
+                self.load_icons_for(&ids);
+                let amounts = vec![0; items.len()];
+                self.merchant.browsing = Some((seller, shop, items, amounts));
+            }
+            ShopSetup(slots) => {
+                self.merchant.setup = Some((slots, format!("{}'s shop", self.hud.status.name), Default::default()));
+            }
+            MyShop(stock) => self.merchant.my_shop = Some(stock),
+            Sold { index, amount, zeny } => {
+                let what = self.merchant.my_shop.as_ref().and_then(|s| s.iter().find(|i| i.index == index)).map(|i| i.id);
+                let name = what.and_then(|id| self.item_db.as_ref().map(|d| d.name(id, true))).unwrap_or_else(|| "an item".into());
+                self.hud.push_chat(ro_net::ChatKind::System, format!("Sold {amount} x {name} for {zeny} z."));
+                if let Some(stock) = self.merchant.my_shop.as_mut() {
+                    if let Some(i) = stock.iter_mut().find(|i| i.index == index) {
+                        i.amount = i.amount.saturating_sub(amount);
+                    }
+                    stock.retain(|i| i.amount > 0);
+                }
+            }
+            ShopBuyResult(code) => {
+                let msg = match code {
+                    0 => "Purchase complete.",
+                    1 => "You don't have enough zeny.",
+                    2 => "You are carrying too much weight.",
+                    4 => "The shop is out of that item.",
+                    5 => "The shop has changed; look again.",
+                    6 => "The seller cannot take more zeny.",
+                    7 => "You cannot carry that many items.",
+                    _ => "The purchase failed.",
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, msg.into());
+            }
             SkillCooldown { skill, ms } => {
                 self.cooldowns.insert(skill, std::time::Instant::now() + std::time::Duration::from_millis(ms as u64));
             }
@@ -1685,6 +1763,33 @@ impl App {
                     8 => "requires a Blue Gemstone",
                     9 => "carrying too much weight",
                     11 => "invalid target",
+                    13 => "requires Holy Water",
+                    15 | 22 => "already in effect",
+                    16 => "requires another skill first",
+                    23 => "conditions not met",
+                    26 => "can't be used here",
+                    28 => "too close to a wall",
+                    32 => "no poison applied to the weapon",
+                    33 | 50 => "requires a Mado Gear",
+                    34 => "requires Kunai",
+                    35 => "can only target players",
+                    43 => "requires a Guillotine poison",
+                    57 => "requires a cart",
+                    71 => "requires an item",
+                    72 | 95 => "requires a weapon",
+                    73 => "must follow a combo",
+                    74 | 96 => "not enough spirit spheres",
+                    83 => "there are NPCs too close",
+                    84 | 90 => "not enough bullets",
+                    87 => "can't be used on this map",
+                    89 => "a shop is already open",
+                    91 => "requires arrows",
+                    92 => "requires a party",
+                    93 => "requires party leader",
+                    97 => "requires Weapon Blocking",
+                    98 => "too many traps",
+                    100 => "not enough AP",
+                    110 => "requires a shield",
                     _ => "failed",
                 };
                 self.casts.remove(&self.account_id);
@@ -1852,6 +1957,7 @@ impl App {
             }
             InsertCard { card, equip } => self.send(Command::Item(ItemRequest::InsertCard { card, equip })),
             Menu(reply) => self.send(Command::Menu(reply)),
+            CartPut { index, amount } => self.send(Command::Merchant(ro_net::MerchantRequest::CartPut { index, amount: amount as u32 })),
             SkillUp(id) => self.send(Command::Stat(StatRequest::SkillUp(id))),
             UseSkill(id) => {
                 let level = self.skills.iter().find(|s| s.id == id).map_or(0, |s| s.level);
@@ -2763,10 +2869,36 @@ impl App {
                     break;
                 }
                 let item = |id: u32| self.inventory.items.values().find(|i| i.id == id).map(|i| (i.index, i.location));
-                let action = match step.split_once(':') {
+                let action = match step.split_once(':').or(Some((step.as_str(), ""))) {
                     Some(("equip", id)) => id.parse().ok().and_then(item).map(|(index, location)| windows::UiAction::Equip { index, location }),
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some(("card", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::CardTargets(index)),
+                    // Merchant tests: cartwin opens the cart; vend:price fills the shop
+                    // set-up with everything in the cart; browse:aid looks in a shop; buyone
+                    // buys one of each item in the shop being browsed.
+                    Some(("cartwin", _)) => {
+                        self.merchant.cart_open = true;
+                        None
+                    }
+                    Some(("vend", price)) => {
+                        let price: u32 = price.parse().unwrap_or(100);
+                        if let Some((slots, title, _)) = self.merchant.setup.take() {
+                            let items = self.merchant.cart.values().take(slots as usize).map(|it| (it.index, it.amount, price)).collect();
+                            self.queued_commands.push(ro_net::Command::Merchant(ro_net::MerchantRequest::OpenShop { title, items }));
+                        }
+                        None
+                    }
+                    Some(("browse", aid)) => {
+                        aid.parse().ok().map(|aid| self.queued_commands.push(ro_net::Command::Merchant(ro_net::MerchantRequest::Browse(aid))));
+                        None
+                    }
+                    Some(("buyone", _)) => {
+                        if let Some((seller, shop, items, _)) = self.merchant.browsing.take() {
+                            let list = items.iter().map(|i| (1, i.index)).collect();
+                            self.queued_commands.push(ro_net::Command::Merchant(ro_net::MerchantRequest::Buy { seller, shop, items: list }));
+                        }
+                        None
+                    }
                     // pick:id answers the open menu with that item/skill id (or inventory index).
                     Some(("pick", id)) => {
                         let id: u32 = id.parse().unwrap_or(0);
@@ -3112,6 +3244,13 @@ impl App {
         // The controller's target, marked over its head.
         let pad_marker = self.pad_target.filter(|_| self.pad.in_use()).and_then(|t| self.units.get(&t)).and_then(|m| r.project(m.actor.pos, size));
         // Cast bars over whoever is chanting.
+        // Shop signs over vending players.
+        let shop_signs: Vec<(u32, glam::Vec2)> = self
+            .merchant
+            .signs
+            .keys()
+            .filter_map(|id| { let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) }?; Some((*id, r.project(m.actor.pos + glam::Vec3::Y * ro_render::CELL * 3.2, size)?)) })
+            .collect();
         // Quest marks over NPC heads (screen pixels).
         let quest_marks: Vec<(glam::Vec2, u16, u16)> = self
             .quests
@@ -3155,6 +3294,7 @@ impl App {
                 hotkeys: &self.hotkeys,
                 hotkey_row: self.hotkey_row,
                 cooldowns: &self.cooldowns,
+                has_cart: self.merchant.has_cart(),
                 pad_hints: self.pad.in_use(),
                 playstation: self.pad.playstation,
             };
@@ -3231,6 +3371,13 @@ impl App {
                             painter.image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                         }
                     }
+                }
+                let zeny = self.hud.status.zeny;
+                if let Some(req) = self.merchant.show(ui.ctx(), self.item_db.as_ref(), &self.icons, zeny) {
+                    self.queued_commands.push(ro_net::Command::Merchant(req));
+                }
+                if let Some(aid) = self.merchant.show_signs(ui.ctx(), &shop_signs) {
+                    self.queued_commands.push(ro_net::Command::Merchant(ro_net::MerchantRequest::Browse(aid)));
                 }
                 if let Some((quest, active)) = self.quests.show(ui.ctx()) {
                     self.queued_commands.push(ro_net::Command::QuestActive { quest, active });
@@ -3559,6 +3706,7 @@ impl ApplicationHandler for App {
                         }
                         "o" => self.windows.settings = !self.windows.settings,
                         "u" => self.quests.open = !self.quests.open,
+                        "w" => self.merchant.cart_open = !self.merchant.cart_open,
                         // Alt+1..Alt+0: the emote shortcuts.
                         d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => {
                             if let Some((tx, _)) = self.net.as_ref() {
@@ -3759,6 +3907,7 @@ fn main() -> anyhow::Result<()> {
         queued_chat: vec![],
         buffs: Default::default(),
         quests: Default::default(),
+        merchant: Default::default(),
         cooldowns: Default::default(),
         script_resume: None,
         pad: gamepad::Pad::new(),

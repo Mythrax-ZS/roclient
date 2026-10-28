@@ -8,6 +8,7 @@ pub mod generated;
 pub mod guild;
 pub mod items;
 pub mod menus;
+pub mod merchant;
 pub mod quests;
 pub mod packets;
 pub mod social;

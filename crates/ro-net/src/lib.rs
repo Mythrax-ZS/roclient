@@ -18,6 +18,8 @@ pub use ro_proto::guild::{GuildInfo, GuildMember, GuildRequest, GuildSkill, Posi
 use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
 pub use ro_proto::quests::{Objective, Quest};
+pub use ro_proto::merchant::{MerchantRequest, VendItem};
+use ro_proto::merchant::*;
 use ro_proto::quests::*;
 use ro_proto::menus::*;
 pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
@@ -289,6 +291,24 @@ pub enum Event {
     QuestActiveChanged { quest: u32, active: bool },
     /// A marker over an NPC (9999: none).
     QuestMark { npc: u32, mark: u16, color: u16 },
+    /// The cart's contents start arriving (replace what we had).
+    CartStart,
+    CartItems(Vec<ItemData>),
+    CartCount { items: u16, max_items: u16, weight: u32, max_weight: u32 },
+    CartAdded(ItemData),
+    CartRemoved { index: u16, amount: u32 },
+    /// A shop sign over a player (empty title: gone).
+    ShopSign { aid: u32, title: String },
+    /// Someone's shop, opened to browse.
+    Shop { seller: u32, shop: u32, items: Vec<VendItem> },
+    /// Vending was cast: set up a shop with this many slots.
+    ShopSetup(u16),
+    /// Our shop as it opened.
+    MyShop(Vec<VendItem>),
+    /// Something sold from our shop.
+    Sold { index: u16, amount: u16, zeny: i32 },
+    /// Buying from a shop: 0 ok, 1 not enough zeny, 2 overweight, 4 out of stock...
+    ShopBuyResult(u8),
     /// A pick-one menu from a skill or item.
     Menu(Menu),
     /// ZC_ACK_REQMAKINGITEM: making an item (ok, item id).
@@ -353,6 +373,8 @@ pub enum Command {
     Menu(MenuReply),
     /// Show (true) or hide a quest in the active list.
     QuestActive { quest: u32, active: bool },
+    /// Cart and player-shop requests.
+    Merchant(MerchantRequest),
     /// Login screen.
     Login { user: String, pass: String },
     SelectServer(usize),
@@ -480,6 +502,7 @@ impl MapSession {
                     Some(Command::Emotion(e)) => self.send(CzEmotion(e)).await?,
                     Some(Command::Menu(reply)) => self.send(reply).await?,
                     Some(Command::QuestActive { quest, active }) => self.send(CzActiveQuest { quest, active }).await?,
+                    Some(Command::Merchant(r)) => self.send(r).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
@@ -622,6 +645,20 @@ impl MapSession {
                             Some(Event::FriendRemoved { account_id, char_id })
                         }
                         0x0b08 if data.get(4) == Some(&0) => Some(Event::InventoryStart),
+                        0x0b08 if data.get(4) == Some(&1) => Some(Event::CartStart),
+                        0x0b09 | 0x0b39 if data.get(4) == Some(&1) => {
+                            Some(Event::CartItems(if opcode == 0x0b09 { parse_itemlist_normal(&data) } else { parse_itemlist_equip(&data) }))
+                        }
+                        0x0121 => parse_cart_count(&data).map(|(items, max_items, weight, max_weight)| Event::CartCount { items, max_items, weight, max_weight }),
+                        0x0b45 => parse_cart_add(&data).map(Event::CartAdded),
+                        0x0125 => parse_cart_remove(&data).map(|(index, amount)| Event::CartRemoved { index, amount }),
+                        0x0131 => parse_store_entry(&data).map(|(aid, title)| Event::ShopSign { aid, title }),
+                        0x0132 if data.len() >= 6 => Some(Event::ShopSign { aid: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), title: String::new() }),
+                        0x0b3d => parse_shop(&data).map(|(seller, shop, items)| Event::Shop { seller, shop, items }),
+                        0x012d if data.len() >= 4 => Some(Event::ShopSetup(u16::from_le_bytes([data[2], data[3]]))),
+                        0x0b40 => Some(Event::MyShop(parse_my_shop(&data))),
+                        0x09e5 => parse_sold(&data).map(|(index, amount, zeny)| Event::Sold { index, amount, zeny }),
+                        0x0135 if data.len() >= 7 => Some(Event::ShopBuyResult(data[6])),
                         0x0b09 | 0x0b39 if data.get(4) == Some(&0) => {
                             Some(Event::Items(if opcode == 0x0b09 { parse_itemlist_normal(&data) } else { parse_itemlist_equip(&data) }))
                         }
