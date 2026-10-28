@@ -12,11 +12,63 @@ pub struct Settings {
     pub sfx_volume: f32,
     pub ui_scale: f32,
     pub minimap: bool,
+    /// The HD-2D look (lighting, shadows, post-processing).
+    pub visual: Visual,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, visual: Visual::default() }
+    }
+}
+
+/// Artist-facing look controls, mirrored into the renderer's `PostSettings`.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[serde(default)]
+pub struct Visual {
+    /// Off: the classic look (no bloom, blur, grading or sprite shadows).
+    pub hd2d: bool,
+    pub bloom: f32,
+    pub depth_of_field: f32,
+    pub vignette: f32,
+    pub shadows: f32,
+    pub sun_elevation: f32,
+    pub warmth: f32,
+    pub saturation: f32,
+    pub contrast: f32,
+}
+
+impl Default for Visual {
+    fn default() -> Self {
+        let p = ro_render::PostSettings::default();
+        Self {
+            hd2d: p.enabled,
+            bloom: p.bloom_intensity,
+            depth_of_field: p.dof_strength,
+            vignette: p.vignette,
+            shadows: p.shadow_strength,
+            sun_elevation: p.sun_elevation,
+            warmth: p.warmth,
+            saturation: p.saturation,
+            contrast: p.contrast,
+        }
+    }
+}
+
+impl Visual {
+    pub fn post(&self) -> ro_render::PostSettings {
+        ro_render::PostSettings {
+            enabled: self.hd2d,
+            bloom_intensity: self.bloom,
+            dof_strength: self.depth_of_field,
+            vignette: self.vignette,
+            shadow_strength: self.shadows,
+            sun_elevation: self.sun_elevation,
+            warmth: self.warmth,
+            saturation: self.saturation,
+            contrast: self.contrast,
+            ..Default::default()
+        }
     }
 }
 
@@ -62,6 +114,38 @@ impl Settings {
                 ui.end_row();
                 ui.label("Minimap");
                 ui.checkbox(&mut self.minimap, "Show (Alt+M)");
+                ui.end_row();
+                ui.label(egui::RichText::new("Visual").strong());
+                ui.checkbox(&mut self.visual.hd2d, "HD-2D lighting and effects");
+                ui.end_row();
+                let v = &mut self.visual;
+                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Bloom"));
+                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.bloom, 0.0..=1.0));
+                ui.end_row();
+                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Depth of field"));
+                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.depth_of_field, 0.0..=1.0));
+                ui.end_row();
+                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Shadows"));
+                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.shadows, 0.0..=1.0));
+                ui.end_row();
+                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Sun height"));
+                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.sun_elevation, 15.0..=85.0).suffix("°"));
+                ui.end_row();
+                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Vignette"));
+                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.vignette, 0.0..=1.0));
+                ui.end_row();
+                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Warmth"));
+                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.warmth, -1.0..=1.0));
+                ui.end_row();
+                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Saturation"));
+                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.saturation, 0.5..=1.5));
+                ui.end_row();
+                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Contrast"));
+                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.contrast, 0.7..=1.4));
+                ui.end_row();
+                if ui.add_enabled(v.hd2d, egui::Button::new("Reset look")).clicked() {
+                    *v = Visual { hd2d: true, ..Visual::default() };
+                }
                 ui.end_row();
             });
         });

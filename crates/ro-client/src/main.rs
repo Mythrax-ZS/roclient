@@ -2449,6 +2449,7 @@ impl App {
             }
         }
 
+        r.post_settings = self.settings.visual.post();
         // HUD: names under actors, status, chat. Laid out for the capture size when capturing.
         let size = self.capture.as_ref().map_or_else(|| r.size(), |(_, w, h)| (*w, *h));
         let mut labels = vec![];
@@ -2942,6 +2943,7 @@ fn main() -> anyhow::Result<()> {
             sfx_volume: cfg.sfx_volume,
             ui_scale: cfg.ui_scale,
             minimap: true,
+            visual: Default::default(),
         }),
         audio: None,
         pending_npc: None,

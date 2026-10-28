@@ -4,6 +4,8 @@ mod camera;
 mod scene;
 mod effect;
 mod fx;
+mod post;
+mod shadow;
 mod sprite;
 mod water;
 
@@ -17,6 +19,7 @@ pub use scene::{SceneBuilder, SceneMesh};
 pub use water::WaterMesh;
 pub use effect::{ProcFx, Shape, TexId};
 pub use fx::{Fx, FxId};
+pub use post::PostSettings;
 pub use sprite::{Actor, Dir, SheetId};
 use winit::window::Window;
 
@@ -35,6 +38,10 @@ struct Globals {
     diffuse: [f32; 4],
     /// x: seconds since start
     params: [f32; 4],
+    /// The sun's view-projection for the sprite shadow map.
+    light_vp: [[f32; 4]; 4],
+    /// x: shadow strength (0 off), y: shadow-map texel size, z: softness (texels)
+    shadow: [f32; 4],
 }
 
 /// One frame of tessellated egui output.
@@ -71,6 +78,8 @@ struct Targets {
     depth: wgpu::TextureView,
     /// None when MSAA is off.
     msaa: Option<wgpu::TextureView>,
+    /// HDR scene and post-processing intermediates.
+    post: post::PostTargets,
 }
 
 pub struct Renderer {
@@ -105,6 +114,10 @@ pub struct Renderer {
     fx_pipeline: wgpu::RenderPipeline,
     fx_assets: Vec<fx::FxAsset>,
     effect_textures: Vec<wgpu::BindGroup>,
+    post: post::Post,
+    shadow: shadow::Shadow,
+    /// The HD-2D look (bloom, tilt-shift, grading); `enabled = false` for the classic look.
+    pub post_settings: PostSettings,
     /// Code-drawn effects playing this frame; the client advances and removes them.
     pub procs: Vec<ProcFx>,
     /// STR effects playing this frame; the client advances and removes them.
@@ -160,7 +173,8 @@ impl Renderer {
         config.desired_maximum_frame_latency = 2;
         surface.configure(&device, &config);
 
-        let supported = adapter.get_texture_format_features(config.format).flags;
+        // The world renders into an HDR target (post::HDR_FORMAT); MSAA must suit that format.
+        let supported = adapter.get_texture_format_features(post::HDR_FORMAT).flags;
         let samples = [msaa, 4, 2, 1]
             .into_iter()
             .find(|&s| s == 1 || (s <= msaa && supported.sample_count_supported(s)))
@@ -175,21 +189,35 @@ impl Renderer {
         });
         let globals_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("globals"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
-        });
-        let globals_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("globals"),
-            layout: &globals_layout,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() }],
+                // Sun shadow map (sprites seen from the sun) and its comparison sampler.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+            ],
         });
 
         let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -326,7 +354,7 @@ impl Renderer {
                     entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: config.format,
+                        format: post::HDR_FORMAT,
                         blend,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -371,6 +399,17 @@ impl Renderer {
                 },
             ],
         });
+        // The sun shadow map is bound with the globals so world shaders can sample it.
+        let shadow = shadow::Shadow::new(&device, &sprite_layout);
+        let globals_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("globals"),
+            layout: &globals_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shadow.view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&shadow.compare) },
+            ],
+        });
         let effect_pipeline = pipeline(
             "effect",
             include_str!("effect.wgsl"),
@@ -398,6 +437,7 @@ impl Renderer {
 
         let ui_renderer = egui_wgpu::Renderer::new(&device, config.format.remove_srgb_suffix(), Default::default());
         let targets = Self::make_targets(&device, &config, samples);
+        let post = post::Post::new(&device, config.format);
         Ok(Self {
             surface,
             device,
@@ -428,6 +468,9 @@ impl Renderer {
             fx_pipeline,
             fx_assets: vec![],
             effect_textures: vec![],
+            post,
+            shadow,
+            post_settings: PostSettings::default(),
             procs: vec![],
             effects: vec![],
             effect_pipeline,
@@ -465,6 +508,19 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.repeat_sampler) },
             ],
         }));
+    }
+
+    /// Direction sunlight travels for sprite shadows: the map's sun bearing, lowered to
+    /// `sun_elevation` so shadows stretch out like HD-2D dioramas.
+    fn shadow_dir(&self) -> glam::Vec3 {
+        let d = glam::Vec3::from(self.lighting.direction);
+        let elev = self.post_settings.sun_elevation;
+        if elev <= 0.0 {
+            return d;
+        }
+        let h = glam::Vec2::new(d.x, d.z).try_normalize().unwrap_or(glam::Vec2::new(0.6, 0.8));
+        let (s, c) = elev.to_radians().sin_cos();
+        glam::Vec3::new(h.x * c, -s, h.y * c)
     }
 
     /// Uploads a texture for code-drawn effects (light columns, ground circles).
@@ -537,7 +593,11 @@ impl Renderer {
                 })
                 .create_view(&Default::default())
         };
-        Targets { depth: tex("depth", DEPTH_FORMAT), msaa: (samples > 1).then(|| tex("msaa", config.format)) }
+        Targets {
+            depth: tex("depth", DEPTH_FORMAT),
+            msaa: (samples > 1).then(|| tex("msaa", post::HDR_FORMAT)),
+            post: post::PostTargets::new(device, config.width, config.height),
+        }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -654,6 +714,9 @@ impl Renderer {
         let targets = targets.unwrap_or(&self.targets);
         let aspect = size.0 as f32 / size.1 as f32;
         let cam = &self.camera;
+        // The sun's view of the area around the player, for sprite shadows.
+        let light_vp = shadow::Shadow::light_vp(cam.target, self.shadow_dir(), (cam.distance * 0.75).clamp(120.0, 600.0));
+        let shadow_strength = if self.post_settings.enabled { self.post_settings.shadow_strength } else { 0.0 };
         let globals = Globals {
             view_proj: cam.view_proj(aspect).to_cols_array_2d(),
             focus: [cam.target.x, CELL, cam.target.z, cam.distance * 4.0],
@@ -667,14 +730,41 @@ impl Renderer {
                 let s = CELL / sprite::PIXELS_PER_CELL;
                 [self.started.elapsed().as_secs_f32(), s * f / aspect, s * f, 0.0]
             },
+            light_vp: light_vp.to_cols_array_2d(),
+            shadow: [shadow_strength, 1.0 / shadow::SIZE as f32, self.post_settings.shadow_softness, 0.0],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
-        let (color, resolve) = match &targets.msaa {
-            Some(m) => (m, Some(view)),
-            None => (view, None),
-        };
+        // Sprites, back to front by distance from the eye so blended edges composite.
+        let eye = cam.eye();
+        let mut order: Vec<&Actor> = self.actors.iter().collect();
+        order.sort_by(|a, b| b.pos.distance_squared(eye).total_cmp(&a.pos.distance_squared(eye)));
+        let mut sprite_vertices = vec![];
+        let mut sprite_draws = vec![];
+        let blobs: std::collections::HashSet<usize> = self.actors.iter().filter_map(|a| a.shadow.map(|s| s.0)).collect();
+        for a in order {
+            for (sheet, v) in sprite::actor_quads(&self.sheets, a) {
+                let start = sprite_vertices.len() as u32;
+                sprite_vertices.extend(v);
+                sprite_draws.push((sheet, start..sprite_vertices.len() as u32));
+            }
+        }
+        let sprite_buffer = (!sprite_vertices.is_empty()).then(|| sprite::vertex_buffer(&self.device, &sprite_vertices));
         let mut enc = self.device.create_command_encoder(&Default::default());
+        // Sun shadows: every sprite layer except the round blob shadows under actors.
+        if shadow_strength > 0.0 {
+            // Casters face the sun (not the camera) so they throw their full silhouette.
+            let sun = self.shadow_dir();
+            let right = glam::Vec3::new(-sun.z, 0.0, sun.x).try_normalize().unwrap_or(glam::Vec3::X);
+            let casters = sprite_draws.iter().filter(|(s, _)| !blobs.contains(s)).map(|(s, r)| (&self.sheets[*s].bind, r.clone()));
+            self.shadow.record(&self.queue, &mut enc, light_vp, right, CELL / sprite::PIXELS_PER_CELL, sprite_buffer.as_ref(), casters);
+        }
+
+        // The world goes to the HDR target; post-processing then writes `view`.
+        let (color, resolve) = match &targets.msaa {
+            Some(m) => (m, Some(&targets.post.hdr)),
+            None => (&targets.post.hdr, None),
+        };
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),
@@ -728,28 +818,13 @@ impl Renderer {
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..verts.len() as u32, 0..1);
             }
-            // Actors back to front (by distance from the eye) so blended edges composite.
-            if !self.actors.is_empty() {
-                let eye = cam.eye();
-                let mut order: Vec<&Actor> = self.actors.iter().collect();
-                order.sort_by(|a, b| b.pos.distance_squared(eye).total_cmp(&a.pos.distance_squared(eye)));
-                let mut vertices = vec![];
-                let mut draws = vec![];
-                for a in order {
-                    for (sheet, v) in sprite::actor_quads(&self.sheets, a) {
-                        let start = vertices.len() as u32;
-                        vertices.extend(v);
-                        draws.push((sheet, start..vertices.len() as u32));
-                    }
-                }
-                if !vertices.is_empty() {
-                    let buffer = sprite::vertex_buffer(&self.device, &vertices);
-                    pass.set_pipeline(&self.sprite_pipeline);
-                    pass.set_vertex_buffer(0, buffer.slice(..));
-                    for (sheet, range) in draws {
-                        pass.set_bind_group(1, &self.sheets[sheet].bind, &[]);
-                        pass.draw(range, 0..1);
-                    }
+            // Actors back to front (built before the shadow pass, which shares them).
+            if let Some(buffer) = &sprite_buffer {
+                pass.set_pipeline(&self.sprite_pipeline);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                for (sheet, range) in &sprite_draws {
+                    pass.set_bind_group(1, &self.sheets[*sheet].bind, &[]);
+                    pass.draw(range.clone(), 0..1);
                 }
             }
             // Code-drawn skill effects (additive, world space).
@@ -801,6 +876,9 @@ impl Renderer {
                 }
             }
         }
+
+        // HD-2D post-processing: HDR scene -> bloom, tilt-shift, grading -> swapchain.
+        self.post.record(&self.device, &self.queue, &mut enc, &targets.post, view, &self.post_settings);
 
         // UI on top of the resolved frame.
         if let Some(ui) = self.ui.take() {
