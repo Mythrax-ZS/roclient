@@ -11,7 +11,7 @@ const DIR: &str = r"data\texture\유저인터페이스\basic_interface";
 /// The images loaded (file names without .bmp).
 const NAMES: &[&str] = &[
     "titlebar_left", "titlebar_mid", "titlebar_right", "btnbar_left", "btnbar_mid", "btnbar_right", "itemwin_mid", "tab_itm_01", "tab_itm_02", "tab_itm_03", "sys_close_off",
-    "sys_close_on", "equipwin_bg", "statwin_bg", "arw_right", "arw_right_on",
+    "sys_close_on", "equipwin_bg", "statwin_bg", "arw_right", "arw_right_on", "tab_l", "tab_m", "tab_r", "tab_a_l", "tab_a_m", "tab_a_r",
 ];
 
 /// Dark text on the white window bodies.
@@ -85,6 +85,17 @@ impl Skin {
             p.rect_stroke(Rect::from_min_max(top.min, bottom.max), 0.0, egui::Stroke::new(1.0, Color32::from_rgb(150, 160, 190)), egui::StrokeKind::Outside);
         });
         let _ = area;
+    }
+
+    /// A classic tab (tab_l/m/r, or tab_a_* when active) around a label.
+    pub fn tab(&self, ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
+        let galley = ui.painter().layout_no_wrap(label.to_string(), egui::FontId::proportional(11.5), TEXT);
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(galley.size().x + 14.0, 21.0), egui::Sense::click());
+        let (l, m, rt) = if active { ("tab_a_l", "tab_a_m", "tab_a_r") } else { ("tab_l", "tab_m", "tab_r") };
+        self.bar(ui.painter(), r, l, m, rt);
+        let color = if active || resp.hovered() { TEXT } else { Color32::from_rgb(110, 116, 140) };
+        ui.painter().galley(r.center() - galley.size() / 2.0, galley, color);
+        resp
     }
 
     /// A small classic text button: a pale blue bevel like the originals.
