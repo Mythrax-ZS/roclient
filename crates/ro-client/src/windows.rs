@@ -110,6 +110,8 @@ pub struct View<'a> {
     pub has_cart: bool,
     /// Our "others may view my equipment" setting, once the server has said.
     pub show_equip: Option<bool>,
+    /// Our character as the select screen draws it, for the equipment window.
+    pub portrait: Option<&'a egui::TextureHandle>,
     /// A controller is in use: label slots with its buttons.
     pub pad_hints: bool,
     pub playstation: bool,
@@ -765,6 +767,11 @@ impl Windows {
                     let p = ui.painter().clone();
                     skin.draw(&p, "equipwin_bg", area.min);
                     let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                    // The character stands in the middle column, between the slots.
+                    if let Some(t) = v.portrait {
+                        let column = egui::Rect::from_min_max(egui::pos2(area.min.x + 105.0, area.min.y + 2.0), egui::pos2(area.min.x + 175.0, area.max.y - 2.0));
+                        p.with_clip_rect(column).image(t.id(), egui::Rect::from_center_size(column.center() + Vec2::new(0.0, 8.0), Vec2::splat(126.0)), uv, Color32::WHITE);
+                    }
                     let mut used_acc = vec![];
                     // (slot bits, left column?, row) as the art lays them out.
                     const LAYOUT: [(u32, bool, usize); 10] =
@@ -824,6 +831,9 @@ impl Windows {
                         action = Some(UiAction::ShowEquip(on));
                     }
                     ui.separator();
+                }
+                if let Some(t) = v.portrait {
+                    ui.vertical_centered(|ui| ui.image((t.id(), Vec2::splat(120.0))));
                 }
                 let mut used_acc = vec![];
                 egui::Grid::new("equip").num_columns(2).spacing(Vec2::new(8.0, 4.0)).show(ui, |ui| {

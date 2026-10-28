@@ -835,6 +835,8 @@ struct App {
     refine: refine::Refine,
     /// Whether others may view our equipment (as the server last said).
     show_equip: Option<bool>,
+    /// Our character drawn for the equipment window, keyed by the look it shows.
+    portrait: Option<(preview::Look, Option<egui::TextureHandle>)>,
     /// Skills cooling down: id -> ready again at.
     cooldowns: std::collections::HashMap<u16, std::time::Instant>,
     /// When a paused (`wait:`) test script carries on.
@@ -1016,6 +1018,25 @@ impl App {
             mob.look = Some(look.clone());
             self.player = Some(mob);
         }
+    }
+
+    /// Redraws the equipment window's portrait when our look has changed.
+    fn refresh_portrait(&mut self) {
+        let Some(look) = self.player.as_ref().and_then(|p| p.look.as_ref()) else { return };
+        let mut headgear = vec![];
+        for v in [look.gear.head_bottom, look.gear.head_mid, look.gear.head_top] {
+            if let Some(n) = (v != 0).then(|| self.look_tables.accessory(v as u32).map(str::to_string)).flatten() {
+                if !headgear.contains(&n) {
+                    headgear.push(n);
+                }
+            }
+        }
+        let want = preview::Look { job: look.job.clone(), male: look.male, hair: look.hair.max(1), hair_color: look.hair_color, headgear };
+        if self.portrait.as_ref().is_some_and(|p| p.0 == want) {
+            return;
+        }
+        let tex = self.vfs.as_ref().and_then(|v| preview::compose(v, &want)).map(|img| self.egui_ctx.load_texture("portrait", img, egui::TextureOptions::NEAREST));
+        self.portrait = Some((want, tex));
     }
 
     /// Applies a ZC_SPRITE_CHANGE to a player-sprite unit (us or another player).
@@ -3934,6 +3955,9 @@ impl App {
         if let Some(key) = self.hud.menu_click.take().or_else(|| self.windows.menu_key.take()) {
             self.alt_key(key);
         }
+        if self.windows.equipment {
+            self.refresh_portrait();
+        }
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         r.actors.clear();
         r.warps = self
@@ -4128,6 +4152,7 @@ impl App {
             let items: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
             let skill_names = |n: &str| self.skill_names.display(n);
             let view = windows::View {
+                portrait: self.portrait.as_ref().and_then(|p| p.1.as_ref()),
                 skin: self.skin.as_ref().filter(|_| self.settings.classic_ui),
                 guild_name: Some(guild_name.as_str()),
                 items: &items,
@@ -4834,6 +4859,7 @@ fn main() -> anyhow::Result<()> {
         item_info: Default::default(),
         refine: Default::default(),
         show_equip: None,
+        portrait: None,
         cooldowns: Default::default(),
         script_resume: None,
         pad: gamepad::Pad::new(),
