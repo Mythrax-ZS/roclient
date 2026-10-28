@@ -11,7 +11,7 @@ use ro_proto::{id, packets::*, Frame, RoCodec, ServerTable};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-pub use ro_proto::packets::{CharInfo, UnitInfo, UnitPos};
+pub use ro_proto::packets::{sp, CharInfo, ChatKind, UnitInfo, UnitPos};
 
 type Conn = Framed<TcpStream, RoCodec<ServerTable>>;
 
@@ -152,6 +152,10 @@ pub enum Event {
     Stop { id: u32, x: u16, y: u16 },
     /// Warped within the same map server.
     MapMove { map: String, x: u16, y: u16 },
+    /// A status value changed (see `sp`): HP, SP, EXP, level, zeny, weight...
+    Stat { id: u16, value: i64 },
+    /// A chat line; `from` is the speaking unit when known.
+    Chat { kind: ChatKind, from: Option<u32>, text: String },
     /// Another unit came into view, or (Walking) started moving.
     Unit(UnitInfo),
     /// A unit left view (reason: 0 out of sight, 1 died, 2 logged out, 3 teleported).
@@ -163,6 +167,8 @@ pub enum Event {
 #[derive(Debug, Clone)]
 pub enum Command {
     Move { x: u16, y: u16 },
+    /// Say something in public chat.
+    Chat(String),
 }
 
 pub struct SessionConfig {
@@ -187,7 +193,7 @@ pub fn spawn_session(cfg: SessionConfig) -> (tokio::sync::mpsc::UnboundedSender<
                     return;
                 }
             };
-            let result = rt.block_on(async {
+            let result: anyhow::Result<()> = rt.block_on(async {
                 let auth = login(&cfg.login_addr, &cfg.username, &cfg.password).await?;
                 let server = auth.servers.first().context("no char servers offered")?.clone();
                 let chars = enter_char(&server, &auth).await?;
@@ -197,17 +203,35 @@ pub fn spawn_session(cfg: SessionConfig) -> (tokio::sync::mpsc::UnboundedSender<
                     .find(|c| c.slot == cfg.char_slot)
                     .cloned()
                     .with_context(|| format!("no character in slot {}", cfg.char_slot))?;
-                let zone = chars.select(cfg.char_slot).await?;
-                let map = enter_map(&zone, &auth).await?;
-                let _ = ev_tx.send(Event::Entered {
-                    map: zone.map.trim_end_matches(".gat").to_string(),
-                    x: map.spawn.x,
-                    y: map.spawn.y,
-                    dir: map.spawn.dir,
-                    account_id: auth.account_id,
-                    character,
-                });
-                map.run(cmd_rx, &ev_tx).await
+                let mut zone = chars.select(cfg.char_slot).await?;
+                let char_id = zone.char_id;
+                let mut cmd_rx = cmd_rx;
+                let mut first = true;
+                loop {
+                    let map = enter_map(&zone, &auth).await?;
+                    let name = zone.map.trim_end_matches(".gat").to_string();
+                    let event = if first {
+                        Event::Entered {
+                            map: name,
+                            x: map.spawn.x,
+                            y: map.spawn.y,
+                            dir: map.spawn.dir,
+                            account_id: auth.account_id,
+                            character: character.clone(),
+                        }
+                    } else {
+                        Event::MapMove { map: name, x: map.spawn.x, y: map.spawn.y }
+                    };
+                    first = false;
+                    if ev_tx.send(event).is_err() {
+                        return Ok(());
+                    }
+                    match map.run(&character.name, &mut cmd_rx, &ev_tx).await? {
+                        // Warped to a map on another map server: re-enter there.
+                        Some(next) => zone = ZoneServer { char_id, ..next },
+                        None => return Ok(()),
+                    }
+                }
             });
             let reason = match result {
                 Ok(()) => "closed".to_string(),
@@ -221,11 +245,13 @@ pub fn spawn_session(cfg: SessionConfig) -> (tokio::sync::mpsc::UnboundedSender<
 
 impl MapSession {
     /// Pumps the map connection: keepalives, UI commands, and the packets the UI cares about.
+    /// Returns the next zone server when the server moves us to another map server.
     pub async fn run(
         mut self,
-        mut commands: tokio::sync::mpsc::UnboundedReceiver<Command>,
+        name: &str,
+        commands: &mut tokio::sync::mpsc::UnboundedReceiver<Command>,
         events: &std::sync::mpsc::Sender<Event>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<ZoneServer>> {
         let mut keepalive = tokio::time::interval(KEEPALIVE);
         loop {
             tokio::select! {
@@ -234,8 +260,9 @@ impl MapSession {
                     self.send(CzRequestTime { client_tick: tick }).await?;
                 }
                 cmd = commands.recv() => match cmd {
-                    None => return Ok(()),
+                    None => return Ok(None),
                     Some(Command::Move { x, y }) => self.send(CzRequestMove { x, y, dir: 0 }).await?,
+                    Some(Command::Chat(text)) => self.send(CzChat { name, text: &text }).await?,
                 },
                 f = self.conn.next() => {
                     let Some(f) = f else { bail!("map server closed the connection") };
@@ -256,16 +283,25 @@ impl MapSession {
                             Some(Event::MapMove { map: map.trim_end_matches(".gat").to_string(), x, y })
                         }
                         0x09fd | 0x09fe | 0x09ff => parse_unit(opcode, &data).map(Event::Unit),
+                        0x00b0 | 0x00b1 | 0x0acb => parse_par_change(opcode, &data).map(|(id, value)| Event::Stat { id, value }),
+                        0x008d | 0x008e | 0x02c1 | 0x09de | 0x009a | 0x01c3 => {
+                            parse_chat(opcode, &data).map(|(kind, from, text)| Event::Chat { kind, from, text })
+                        }
                         id::ZC_NOTIFY_VANISH => {
                             let (id, reason) = parse_vanish(&data);
                             Some(Event::Vanish { id, reason })
+                        }
+                        id::ZC_NPCACK_SERVERMOVE => {
+                            let (zone, x, y) = parse_server_move(&data);
+                            tracing::info!(map = %zone.map, x, y, addr = %zone.addr, "moving to another map server");
+                            return Ok(Some(zone));
                         }
                         id::SC_NOTIFY_BAN => bail!("disconnected by map server, code {}", data[2]),
                         _ => None,
                     };
                     if let Some(e) = event {
                         if events.send(e).is_err() {
-                            return Ok(()); // UI gone
+                            return Ok(None); // UI gone
                         }
                     }
                 }

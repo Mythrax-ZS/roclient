@@ -31,6 +31,13 @@ struct Globals {
     params: [f32; 4],
 }
 
+/// One frame of tessellated egui output.
+pub struct UiFrame {
+    pub primitives: Vec<egui::ClippedPrimitive>,
+    pub textures: egui::TexturesDelta,
+    pub pixels_per_point: f32,
+}
+
 /// Map-wide sun lighting (from the RSW), in the renderer's y-up space.
 #[derive(Clone, Copy, Debug)]
 pub struct Lighting {
@@ -81,6 +88,9 @@ pub struct Renderer {
     sprite_pipeline: wgpu::RenderPipeline,
     sprite_layout: wgpu::BindGroupLayout,
     sheets: Vec<sprite::Sheet>,
+    ui_renderer: egui_wgpu::Renderer,
+    /// UI to draw over the next frame (set by the caller each frame).
+    ui: Option<UiFrame>,
     /// Actors drawn each frame; the caller updates positions, actions and times.
     pub actors: Vec<Actor>,
     started: std::time::Instant,
@@ -129,6 +139,7 @@ impl Renderer {
             config.format = srgb;
         }
         config.present_mode = wgpu::PresentMode::AutoVsync;
+        config.view_formats = vec![config.format.remove_srgb_suffix()];
         config.desired_maximum_frame_latency = 2;
         surface.configure(&device, &config);
 
@@ -351,6 +362,7 @@ impl Renderer {
             Some(wgpu::BlendState::ALPHA_BLENDING),
         );
 
+        let ui_renderer = egui_wgpu::Renderer::new(&device, config.format.remove_srgb_suffix(), Default::default());
         let targets = Self::make_targets(&device, &config, samples);
         Ok(Self {
             surface,
@@ -374,6 +386,8 @@ impl Renderer {
             sprite_pipeline,
             sprite_layout,
             sheets: vec![],
+            ui_renderer,
+            ui: None,
             actors: vec![],
             started: std::time::Instant::now(),
             lighting: Lighting::default(),
@@ -470,7 +484,10 @@ impl Renderer {
         };
 
         let view = tex.texture.create_view(&Default::default());
-        let cmd = self.encode(&view, &self.targets, self.aspect());
+        // egui blends in gamma space: give it a non-sRGB view of the same surface.
+        let ui_view = tex.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(self.config.format.remove_srgb_suffix()), ..Default::default() });
+        let cmd = self.encode(&view, &ui_view, None, self.size());
+
         self.queue.submit([cmd]);
         self.queue.present(tex);
         Ok(())
@@ -490,10 +507,12 @@ impl Renderer {
             dimension: wgpu::TextureDimension::D2,
             format: config.format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
+            view_formats: &[config.format.remove_srgb_suffix()],
         });
         let view = texture.create_view(&Default::default());
-        let cmd = self.encode(&view, &targets, width as f32 / height as f32);
+        let ui_view = texture.create_view(&wgpu::TextureViewDescriptor { format: Some(config.format.remove_srgb_suffix()), ..Default::default() });
+        let cmd = self.encode(&view, &ui_view, Some(&targets), (width, height));
+
 
         // Rows must be padded to 256 bytes for buffer copies.
         let row = (width * 4).div_ceil(256) * 256;
@@ -533,7 +552,9 @@ impl Renderer {
     }
 
     /// Records the whole frame into `view` using `targets` (depth / MSAA of the same size).
-    fn encode(&self, view: &wgpu::TextureView, targets: &Targets, aspect: f32) -> wgpu::CommandBuffer {
+    fn encode(&mut self, view: &wgpu::TextureView, ui_view: &wgpu::TextureView, targets: Option<&Targets>, size: (u32, u32)) -> wgpu::CommandBuffer {
+        let targets = targets.unwrap_or(&self.targets);
+        let aspect = size.0 as f32 / size.1 as f32;
         let cam = &self.camera;
         let globals = Globals {
             view_proj: cam.view_proj(aspect).to_cols_array_2d(),
@@ -621,6 +642,58 @@ impl Renderer {
                 }
             }
         }
+
+        // UI on top of the resolved frame.
+        if let Some(ui) = self.ui.take() {
+            for (id, delta) in &ui.textures.set {
+                for d in delta {
+                    self.ui_renderer.update_texture(&self.device, &self.queue, *id, d);
+                }
+            }
+            let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [size.0, size.1], pixels_per_point: ui.pixels_per_point };
+            self.ui_renderer.update_buffers(&self.device, &self.queue, &mut enc, &ui.primitives, &screen);
+            {
+                let mut pass = enc
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("ui"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: ui_view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                        })],
+                        ..Default::default()
+                    })
+                    .forget_lifetime();
+                self.ui_renderer.render(&mut pass, &ui.primitives, &screen);
+            }
+            for id in &ui.textures.free {
+                self.ui_renderer.free_texture(id);
+            }
+        }
         enc.finish()
+    }
+
+    /// Supplies the UI drawn over the next frame.
+    pub fn set_ui(&mut self, ui: UiFrame) {
+        // Texture changes (e.g. the font atlas) from frames that were never drawn must still
+        // reach the GPU, so pending ones are carried over.
+        let mut ui = ui;
+        if let Some(mut old) = self.ui.take() {
+            old.textures.append(ui.textures);
+            ui.textures = old.textures;
+        }
+        self.ui = Some(ui);
+    }
+
+    /// Window pixel position of a world point, or None when behind the camera.
+    pub fn project(&self, p: glam::Vec3, size: (u32, u32)) -> Option<glam::Vec2> {
+        let (w, h) = (size.0 as f32, size.1 as f32);
+        let clip = self.camera.view_proj(w / h) * p.extend(1.0);
+        if clip.w <= 0.0 {
+            return None;
+        }
+        let ndc = clip.truncate() / clip.w;
+        Some(glam::Vec2::new((ndc.x + 1.0) * 0.5 * w, (1.0 - ndc.y) * 0.5 * h))
     }
 }

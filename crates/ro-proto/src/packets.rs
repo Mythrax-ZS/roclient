@@ -474,3 +474,126 @@ pub fn parse_unit(opcode: u16, data: &[u8]) -> Option<UnitInfo> {
 pub fn parse_vanish(data: &[u8]) -> (u32, u8) {
     ((&data[2..]).get_u32_le(), data[6])
 }
+
+/// ZC_NPCACK_SERVERMOVE: warp to (map, x, y) on another map server.
+pub fn parse_server_move(data: &[u8]) -> (ZoneServer, u16, u16) {
+    let mut b = &data[2..];
+    let map = get_fixed_str(&mut b, 16);
+    let (x, y) = (b.get_u16_le(), b.get_u16_le());
+    let ip = b.get_u32_le();
+    let port = b.get_u16_le();
+    (ZoneServer { char_id: 0, map, addr: std::net::SocketAddrV4::new(ipv4(ip), port) }, x, y)
+}
+
+// ---------------------------------------------------------------- map: status and chat
+
+/// rAthena status ids (`SP_*` in map.hpp) the HUD shows.
+pub mod sp {
+    pub const BASEEXP: u16 = 1;
+    pub const JOBEXP: u16 = 2;
+    pub const HP: u16 = 5;
+    pub const MAXHP: u16 = 6;
+    pub const SP: u16 = 7;
+    pub const MAXSP: u16 = 8;
+    pub const BASELEVEL: u16 = 11;
+    pub const ZENY: u16 = 20;
+    pub const NEXTBASEEXP: u16 = 22;
+    pub const NEXTJOBEXP: u16 = 23;
+    pub const WEIGHT: u16 = 24;
+    pub const MAXWEIGHT: u16 = 25;
+    pub const JOBLEVEL: u16 = 55;
+}
+
+/// ZC_PAR_CHANGE (0x00b0) / ZC_LONGPAR_CHANGE (0x00b1) / ZC_LONGLONGPAR_CHANGE (0x0acb):
+/// (status id, value).
+pub fn parse_par_change(opcode: u16, data: &[u8]) -> Option<(u16, i64)> {
+    let mut b = &data[2..];
+    let var = b.get_u16_le();
+    let value = match opcode {
+        0x00b0 => b.get_i32_le() as i64,
+        0x00b1 => b.get_u32_le() as i64,
+        0x0acb => b.get_i64_le(),
+        _ => return None,
+    };
+    Some((var, value))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatKind {
+    /// Someone nearby (or us) talking: "Name : text".
+    Public,
+    Npc,
+    Whisper,
+    Broadcast,
+    System,
+}
+
+/// Text after the fixed header of a variable packet, without trailing NULs.
+fn tail_text(data: &[u8], from: usize) -> String {
+    let raw = data.get(from..).unwrap_or_default();
+    let end = raw.iter().position(|&c| c == 0).unwrap_or(raw.len());
+    EUC_KR.decode(&raw[..end]).0.into_owned()
+}
+
+/// Chat-like packets: (kind, speaker unit id if any, text).
+pub fn parse_chat(opcode: u16, data: &[u8]) -> Option<(ChatKind, Option<u32>, String)> {
+    let id_at = |o: usize| u32::from_le_bytes(data[o..o + 4].try_into().unwrap());
+    Some(match opcode {
+        0x008d => (ChatKind::Public, Some(id_at(4)), tail_text(data, 8)), // ZC_NOTIFY_CHAT
+        0x008e => (ChatKind::Public, None, tail_text(data, 4)),           // ZC_NOTIFY_PLAYERCHAT (ours)
+        0x02c1 => (ChatKind::Npc, Some(id_at(4)), tail_text(data, 12)),   // ZC_NPC_CHAT
+        0x09de => {
+            // ZC_WHISPER: senderGID, sender[24], isAdmin, message
+            let mut b = &data[8..];
+            let sender = get_fixed_str(&mut b, 24);
+            (ChatKind::Whisper, None, format!("(From {sender}) : {}", tail_text(data, 33)))
+        }
+        0x009a => {
+            // ZC_BROADCAST: an optional 4-char colour tag ("blue", "ssss", "micc").
+            let text = tail_text(data, 4);
+            let text = match text.get(..4) {
+                Some("blue" | "ssss" | "micc") => text[4..].to_string(),
+                _ => text,
+            };
+            (ChatKind::Broadcast, None, text)
+        }
+        0x01c3 => (ChatKind::Broadcast, None, tail_text(data, 16)), // ZC_BROADCAST2
+        _ => return None,
+    })
+}
+
+/// CZ_REQUEST_CHAT (GlobalMessage): the client sends "Name : text".
+pub struct CzChat<'a> {
+    pub name: &'a str,
+    pub text: &'a str,
+}
+
+impl Encode for CzChat<'_> {
+    fn encode(&self, d: &mut BytesMut) {
+        let line = format!("{} : {}", self.name, self.text);
+        let (msg, _, _) = EUC_KR.encode(&line);
+        d.put_u16_le(client_packet("GlobalMessage").opcode);
+        d.put_u16_le((4 + msg.len() + 1) as u16);
+        d.put_slice(&msg);
+        d.put_u8(0);
+    }
+}
+
+#[cfg(test)]
+mod chat_tests {
+    use super::*;
+
+    #[test]
+    fn chat_roundtrip_shapes() {
+        let mut b = BytesMut::new();
+        CzChat { name: "Tester", text: "hi" }.encode(&mut b);
+        assert_eq!(u16::from_le_bytes([b[2], b[3]]) as usize, b.len());
+        assert_eq!(&b[4..b.len() - 1], b"Tester : hi");
+
+        let mut p = vec![0x8e, 0x00, 0, 0];
+        p.extend_from_slice(b"Tester : hi\0");
+        let n = p.len() as u16;
+        p[2..4].copy_from_slice(&n.to_le_bytes());
+        assert_eq!(parse_chat(0x008e, &p), Some((ChatKind::Public, None, "Tester : hi".into())));
+    }
+}

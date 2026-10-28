@@ -3,6 +3,8 @@
 //!   ro-client --headless   run login -> char select -> map entry and exit
 //!   ro-client              open the renderer window
 
+mod hud;
+
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Context;
@@ -26,6 +28,9 @@ struct Config {
     /// --headless: how long to stay on the map after entering.
     #[serde(default = "default_soak")]
     soak_secs: u64,
+    /// UI size multiplier on top of the display's DPI scale.
+    #[serde(default = "default_ui_scale")]
+    ui_scale: f32,
     /// MSAA sample count (1, 2, 4); falls back to what the GPU supports.
     #[serde(default = "default_msaa")]
     msaa: u32,
@@ -182,6 +187,10 @@ fn load_map(vfs: &ro_vfs::Vfs, name: &str) -> anyhow::Result<LoadedMap> {
     Ok(LoadedMap { mesh, images, water, lighting: ro_render::Lighting::from_rsw(&rsw.light) })
 }
 
+fn default_ui_scale() -> f32 {
+    1.0
+}
+
 fn default_msaa() -> u32 {
     4
 }
@@ -226,6 +235,15 @@ async fn headless(cfg: &Config) -> anyhow::Result<()> {
 }
 
 /// Sprite name (as in the GRF) for a job id. Covers Novice through the 2-1/2-2 classes.
+/// Display name for a job id (Novice through the 2-1/2-2 classes).
+fn job_title(job: i16) -> &'static str {
+    const NAMES: [&str; 21] = [
+        "Novice", "Swordman", "Mage", "Archer", "Acolyte", "Merchant", "Thief", "Knight", "Priest", "Wizard", "Blacksmith",
+        "Hunter", "Assassin", "Knight", "Crusader", "Monk", "Sage", "Rogue", "Alchemist", "Bard", "Dancer",
+    ];
+    NAMES.get(job as usize).copied().unwrap_or("Adventurer")
+}
+
 fn job_sprite(job: i16) -> &'static str {
     match job {
         1 => "검사",
@@ -282,12 +300,29 @@ struct WalkGoal {
 struct Mob {
     actor: ro_render::Actor,
     walker: ro_game::Walker,
+    /// Name shown under the actor (empty: none).
+    name: String,
+    /// Unit object type (0 player, 1/6 NPC, 5 monster, ...).
+    kind: u8,
 }
 
 impl Mob {
     fn new(actor: ro_render::Actor, cell: (u16, u16), dir: usize, speed: i16) -> Self {
         let speed = if speed > 0 { speed as f32 } else { 150.0 };
-        Self { actor, walker: ro_game::Walker::new((cell.0 as i32, cell.1 as i32), dir, speed) }
+        Self { actor, walker: ro_game::Walker::new((cell.0 as i32, cell.1 as i32), dir, speed), name: String::new(), kind: 0 }
+    }
+
+    /// Name label colour, or None when the original client would not show one
+    /// (monster names appear on hover only).
+    fn label_color(&self) -> Option<egui::Color32> {
+        if self.name.is_empty() {
+            return None;
+        }
+        match self.kind {
+            0 => Some(egui::Color32::WHITE),
+            1 | 6 => Some(egui::Color32::from_rgb(160, 225, 255)),
+            _ => None,
+        }
     }
 
     /// Starts walking from -> to along the client-side path (as the server will).
@@ -371,6 +406,8 @@ struct App {
     capture_after: f32,
     /// `--walk x,y`: request a walk right after entering (scripted test).
     walk_on_enter: Option<(u16, u16)>,
+    /// `--say text`: send a chat line right after entering (scripted test).
+    say_on_enter: Option<String>,
     /// `--distance`: initial camera distance.
     distance: Option<f32>,
     /// `--yaw degrees`: initial camera rotation (0 looks north).
@@ -400,6 +437,11 @@ struct App {
     rotating: bool,
     cursor: Option<(f64, f64)>,
     fps: FpsCounter,
+    egui_ctx: egui::Context,
+    egui_state: Option<egui_winit::State>,
+    hud: hud::Hud,
+    /// UI size multiplier on top of the display's DPI scale (`ui_scale` in the config).
+    ui_scale: f32,
 }
 
 impl App {
@@ -470,7 +512,9 @@ impl App {
         if let Some(actor) = self.player_actor(look) {
             // NPC/monster actors borrow the player's shadow sheet.
             self.sprites.insert("shadow".into(), Some(actor.clone()));
-            self.player = Some(Mob::new(actor, cell, dir, speed));
+            let mut mob = Mob::new(actor, cell, dir, speed);
+            mob.name = self.hud.status.name.clone();
+            self.player = Some(mob);
         }
     }
 
@@ -507,6 +551,9 @@ impl App {
             ro_net::UnitPos::Walking { from, .. } => (from, 0),
         };
         let mut mob = Mob::new(actor, cell, dir, info.speed);
+        // NPC names may carry a "#unique-suffix" that the client never shows.
+        mob.name = info.name.split('#').next().unwrap_or_default().trim().to_string();
+        mob.kind = info.object_type;
         if let ro_net::UnitPos::Walking { from, to } = info.pos {
             let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
             mob.walk(gat, from, to);
@@ -569,7 +616,18 @@ impl App {
                     hair: character.head.max(1) as u16,
                     hair_color: character.hair_color as u16,
                 };
+                let s = &mut self.hud.status;
+                s.name = character.name.clone();
+                s.job = job_title(character.job).to_string();
+                s.base_level = character.base_level as i64;
+                s.job_level = character.job_level as i64;
+                (s.hp, s.max_hp, s.sp, s.max_sp) = (character.hp, character.max_hp, character.sp, character.max_sp);
+                s.base_exp = character.base_exp;
+                s.zeny = character.zeny as i64;
                 self.spawn_player(&look, (x, y), dir as usize, character.speed);
+                if let (Some(text), Some((tx, _))) = (self.say_on_enter.take(), self.net.as_ref()) {
+                    let _ = tx.send(ro_net::Command::Chat(text));
+                }
                 if let Some(cell) = self.walk_on_enter.take() {
                     self.request_walk(cell);
                 }
@@ -591,6 +649,8 @@ impl App {
                 }
             }
             Unit(info) => self.unit(info),
+            Stat { id, value } => self.hud.status.set(id, value),
+            Chat { kind, text, .. } => self.hud.push_chat(kind, text),
             Vanish { id, .. } => {
                 self.units.remove(&id);
             }
@@ -655,6 +715,29 @@ impl App {
             }
             for m in self.units.values_mut() {
                 r.actors.push(m.update(dt, w, octant, 0));
+            }
+        }
+
+        // HUD: names under actors, status, chat. Laid out for the capture size when capturing.
+        let size = self.capture.as_ref().map_or_else(|| r.size(), |(_, w, h)| (*w, *h));
+        let mut labels = vec![];
+        for m in self.player.iter().chain(self.units.values()) {
+            if let (Some(color), Some(feet)) = (m.label_color(), r.project(m.actor.pos, size)) {
+                labels.push(hud::Label { feet, text: m.name.clone(), color });
+            }
+        }
+        if let Some(state) = self.egui_state.as_mut() {
+            let mut input = state.take_egui_input(window);
+            let ppp = window.scale_factor() as f32 * self.ui_scale;
+            input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size.0 as f32, size.1 as f32) / ppp));
+            self.egui_ctx.set_pixels_per_point(ppp);
+            let mut sent = None;
+            let out = self.egui_ctx.run_ui(input, |ui| sent = self.hud.show(ui.ctx(), &labels));
+            state.handle_platform_output(window, out.platform_output);
+            let primitives = self.egui_ctx.tessellate(out.shapes, out.pixels_per_point);
+            r.set_ui(ro_render::UiFrame { primitives, textures: out.textures_delta, pixels_per_point: out.pixels_per_point });
+            if let (Some(text), Some((tx, _))) = (sent, self.net.as_ref()) {
+                let _ = tx.send(ro_net::Command::Chat(text));
             }
         }
 
@@ -746,6 +829,14 @@ impl ApplicationHandler for App {
                 return;
             }
         }
+        self.egui_state = Some(egui_winit::State::new(
+            self.egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            &window,
+            Some(window.scale_factor() as f32 * self.ui_scale),
+            None,
+            None,
+        ));
         self.window = Some(window);
         el.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
@@ -764,8 +855,24 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
+        // The UI sees input first; clicks and keys it uses don't reach the game.
+        let ui_used = self.egui_state.as_mut().is_some_and(|s| s.on_window_event(window, &event).consumed);
+        if let WindowEvent::CursorMoved { position, .. } = &event {
+            // Keep tracking the cursor even over UI so rotation deltas stay continuous.
+            if ui_used {
+                self.cursor = Some((position.x, position.y));
+            }
+        }
+        if ui_used && !matches!(event, WindowEvent::Resized(_) | WindowEvent::CloseRequested | WindowEvent::ScaleFactorChanged { .. }) {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => el.exit(),
+            WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key, state: ElementState::Pressed, .. }, .. }
+                if logical_key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter) =>
+            {
+                self.hud.focus_chat();
+            }
             WindowEvent::Resized(s) => {
                 r.resize(s.width, s.height);
                 window.request_redraw();
@@ -839,6 +946,7 @@ fn main() -> anyhow::Result<()> {
         dir: arg("--dir").and_then(|d| d.parse::<usize>().ok()).unwrap_or(0) % 8,
         capture_after: arg("--capture-after").and_then(|d| d.parse().ok()).unwrap_or(0.0),
         walk_on_enter: arg("--walk").and_then(cell),
+        say_on_enter: arg("--say"),
         net,
         world: None,
         player: None,
@@ -862,6 +970,10 @@ fn main() -> anyhow::Result<()> {
         rotating: false,
         cursor: None,
         fps: FpsCounter::default(),
+        egui_ctx: egui::Context::default(),
+        egui_state: None,
+        hud: hud::Hud::default(),
+        ui_scale: cfg.ui_scale,
     };
     app.class_names = app.vfs.as_ref().map(load_class_names).unwrap_or_default();
     event_loop.run_app(&mut app)?;
