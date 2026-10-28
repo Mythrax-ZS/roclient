@@ -113,6 +113,21 @@ fn panel() -> Frame {
         .inner_margin(Margin::same(10))
 }
 
+/// Popups (NPC dialog, death, game menu): the original's white box with a blue-grey border
+/// in Classic, the dark panel otherwise.
+fn popup_frame(ctx: &egui::Context) -> Frame {
+    if crate::classic::skin(ctx).is_some() {
+        Frame::new()
+            .fill(Color32::WHITE)
+            .stroke(Stroke::new(1.0, Color32::from_rgb(130, 146, 190)))
+            .corner_radius(CornerRadius::same(2))
+            .inner_margin(Margin::same(10))
+            .shadow(egui::Shadow { offset: [2, 2], blur: 6, spread: 0, color: Color32::from_black_alpha(60) })
+    } else {
+        panel()
+    }
+}
+
 /// A labelled bar like "HP 120 / 200".
 fn bar(ui: &mut egui::Ui, label: &str, value: i64, max: i64, color: Color32, show_numbers: bool) {
     let frac = if max > 0 { (value as f32 / max as f32).clamp(0.0, 1.0) } else { 0.0 };
@@ -406,7 +421,7 @@ pub struct Cutin {
 
 /// NPC text with ^RRGGBB colour codes. ^000000 means "default colour".
 pub(crate) fn npc_text(text: &str, size: f32) -> egui::text::LayoutJob {
-    let default = Color32::from_rgb(230, 230, 230);
+    let default = if crate::classic::ink(Color32::WHITE) == Color32::WHITE { Color32::from_rgb(230, 230, 230) } else { Color32::BLACK };
     let mut job = egui::text::LayoutJob::default();
     let mut color = default;
     let mut rest = text;
@@ -451,12 +466,14 @@ impl Hud {
             .title_bar(false)
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 60.0))
-            .frame(panel())
+            .frame(popup_frame(ctx))
             .show(ctx, |ui| {
-                ui.style_mut().visuals = egui::Visuals::dark();
+                if crate::classic::skin(ui.ctx()).is_none() {
+                    ui.style_mut().visuals = egui::Visuals::dark();
+                }
                 ui.set_width(440.0);
                 if !d.title.is_empty() {
-                    ui.label(RichText::new(&d.title).strong().size(14.0).color(Color32::from_rgb(160, 225, 255)));
+                    ui.label(RichText::new(&d.title).strong().size(14.0).color(crate::classic::ink(Color32::from_rgb(160, 225, 255))));
                     ui.add_space(4.0);
                 }
                 egui::ScrollArea::vertical().max_height(220.0).stick_to_bottom(true).show(ui, |ui| {
@@ -592,9 +609,11 @@ pub fn death_window(ctx: &egui::Context, pad_hint: Option<&str>) -> bool {
         .title_bar(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, -190.0))
-        .frame(panel())
+        .frame(popup_frame(ctx))
         .show(ctx, |ui| {
-                ui.style_mut().visuals = egui::Visuals::dark();
+                if crate::classic::skin(ui.ctx()).is_none() {
+                    ui.style_mut().visuals = egui::Visuals::dark();
+                }
             ui.set_width(260.0);
             ui.vertical_centered(|ui| {
                 ui.label(RichText::new("You have died.").size(16.0).strong().color(Color32::from_rgb(235, 110, 100)));
@@ -682,9 +701,11 @@ pub fn esc_menu(ctx: &egui::Context) -> Option<EscChoice> {
         .title_bar(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-        .frame(panel())
+        .frame(popup_frame(ctx))
         .show(ctx, |ui| {
-                ui.style_mut().visuals = egui::Visuals::dark();
+                if crate::classic::skin(ui.ctx()).is_none() {
+                    ui.style_mut().visuals = egui::Visuals::dark();
+                }
             ui.set_width(200.0);
             ui.vertical_centered(|ui| {
                 let button = |ui: &mut egui::Ui, text: &str| ui.add(egui::Button::new(RichText::new(text).size(15.0)).min_size(Vec2::new(190.0, 32.0))).clicked();

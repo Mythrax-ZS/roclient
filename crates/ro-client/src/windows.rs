@@ -130,8 +130,15 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
     const SIZE: f32 = 40.0;
     let mut action = None;
     egui::Area::new(egui::Id::unique("hotkeys")).anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -12.0)).show(ctx, |ui| {
-        egui::Frame::new().fill(Color32::from_rgba_unmultiplied(16, 20, 28, 210)).corner_radius(8).inner_margin(6).show(ui, |ui| {
-            ui.style_mut().visuals = egui::Visuals::dark();
+        let frame = if v.skin.is_some() {
+            egui::Frame::new().fill(Color32::WHITE).stroke(egui::Stroke::new(1.0, Color32::from_rgb(150, 160, 190))).inner_margin(4)
+        } else {
+            egui::Frame::new().fill(Color32::from_rgba_unmultiplied(16, 20, 28, 210)).corner_radius(8).inner_margin(6)
+        };
+        frame.show(ui, |ui| {
+            if v.skin.is_none() {
+                ui.style_mut().visuals = egui::Visuals::dark();
+            }
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let base = v.hotkey_row as usize * HOTKEYS_PER_ROW;
@@ -142,7 +149,14 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                     let painter = ui.painter_at(rect);
                     let hovering_drop = resp.dnd_hover_payload::<Hotkey>().is_some();
                     let bg = if hovering_drop { Color32::from_rgba_unmultiplied(255, 220, 120, 60) } else if resp.hovered() { Color32::from_white_alpha(30) } else { Color32::from_white_alpha(12) };
-                    painter.rect_filled(rect, 4.0, bg);
+                    if let Some(t) = v.skin.and_then(|s| s.texture("itemwin_mid")) {
+                        painter.image(t.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                        if hovering_drop || resp.hovered() {
+                            painter.rect_filled(rect.shrink(1.0), 3.0, Color32::from_rgba_unmultiplied(120, 150, 230, 50));
+                        }
+                    } else {
+                        painter.rect_filled(rect, 4.0, bg);
+                    }
                     let skill = key.skill.then(|| v.skills.iter().find(|s| s.id as u32 == key.id)).flatten();
                     if key.id != 0 {
                         if key.skill {
@@ -168,7 +182,11 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                     const XBOX: [&str; HOTKEYS_PER_ROW] = ["A", "B", "X", "Y", "Up", "Rt", "Dn", "Lt", ""];
                     const PS: [&str; HOTKEYS_PER_ROW] = ["Cr", "Ci", "Sq", "Tr", "Up", "Rt", "Dn", "Lt", ""];
                     let key_label = if v.pad_hints { (if v.playstation { PS } else { XBOX })[col].to_string() } else { format!("F{}", col + 1) };
-                    outlined(&painter, rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, &key_label, 10.0, Color32::from_gray(200));
+                    if v.skin.is_some() {
+                        painter.text(rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, &key_label, egui::FontId::proportional(9.5), Color32::from_rgb(90, 100, 140));
+                    } else {
+                        outlined(&painter, rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, &key_label, 10.0, Color32::from_gray(200));
+                    }
 
                     if let Some(dropped) = resp.dnd_release_payload::<Hotkey>() {
                         action = Some(UiAction::SetHotkey { index: index as u16, key: *dropped });
@@ -521,12 +539,16 @@ impl Windows {
     /// Small always-visible buttons for the windows (top right).
     fn menu(&mut self, ctx: &egui::Context) {
         egui::Area::new(egui::Id::unique("menu")).anchor(egui::Align2::RIGHT_TOP, Vec2::new(-12.0, 12.0)).show(ctx, |ui| {
-            egui::Frame::new()
-                .fill(Color32::from_rgba_unmultiplied(16, 20, 28, 210))
-                .corner_radius(8)
-                .inner_margin(6)
-                .show(ui, |ui| {
-                    ui.style_mut().visuals = egui::Visuals::dark();
+            let classic = crate::classic::skin(ui.ctx()).is_some();
+            let frame = if classic {
+                egui::Frame::new().fill(Color32::WHITE).stroke(egui::Stroke::new(1.0, Color32::from_rgb(150, 160, 190))).inner_margin(4)
+            } else {
+                egui::Frame::new().fill(Color32::from_rgba_unmultiplied(16, 20, 28, 210)).corner_radius(8).inner_margin(6)
+            };
+            frame.show(ui, |ui| {
+                    if !classic {
+                        ui.style_mut().visuals = egui::Visuals::dark();
+                    }
                     ui.horizontal(|ui| {
                         for (label, key, open) in [
                             ("Inventory", "Alt+E", &mut self.inventory),

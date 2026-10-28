@@ -231,7 +231,7 @@ impl Front {
         let window = |title: &str| egui::Window::new(title).collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, below_logo));
         match &self.screen {
             Screen::Login => {
-                window("Login").show(ctx, |ui| {
+                crate::classic::show(ctx, window("Login"), "Login", false, |ui| {
                     ui.set_width(300.0);
                     egui::Grid::new("login").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                         ui.label("ID");
@@ -268,7 +268,7 @@ impl Front {
                 });
             }
             Screen::Register => {
-                window("Create Account").show(ctx, |ui| {
+                crate::classic::show(ctx, window("Create Account"), "Create Account", false, |ui| {
                     ui.set_width(300.0);
                     egui::Grid::new("register").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                         ui.label("ID");
@@ -320,7 +320,7 @@ impl Front {
             }
             Screen::Servers(list) => {
                 let list = list.clone();
-                window("Select Server").show(ctx, |ui| {
+                crate::classic::show(ctx, window("Select Server"), "Select Server", false, |ui| {
                     ui.set_width(300.0);
                     for (i, (name, users)) in list.iter().enumerate() {
                         if ui.add(egui::Button::new(format!("{name}   ({users} online)")).min_size(Vec2::new(290.0, 28.0))).clicked() {
@@ -357,7 +357,7 @@ impl Front {
     fn select(&mut self, ctx: &egui::Context, c: &Ctx) -> Option<Action> {
         let mut action = None;
         let pages = self.slots.div_ceil(SLOTS_PER_PAGE).max(1);
-        egui::Window::new("Select Character").collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 30.0)).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new("Select Character").collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 30.0)), "Select Character", false, |ui| {
             ui.horizontal(|ui| {
                 if ui.add_enabled(self.page > 0, egui::Button::new("<")).clicked() {
                     self.page -= 1;
@@ -515,7 +515,7 @@ impl Front {
         let job = if self.summoner { "summoner" } else { "초보자" };
         let look = preview::Look { job: job.into(), male: self.male, hair: self.hair, hair_color: self.hair_color, headgear: vec![] };
         let tex = self.preview(ctx, c, look);
-        egui::Window::new("Make Character").collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 30.0)).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new("Make Character").collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 30.0)), "Make Character", false, |ui| {
             ui.horizontal(|ui| {
                 egui::Frame::new().fill(Color32::from_black_alpha(80)).corner_radius(6).inner_margin(8).show(ui, |ui| {
                     ui.set_width(160.0);
