@@ -798,6 +798,8 @@ struct App {
     /// The item information / card illustration window.
     item_info: iteminfo::ItemInfo,
     refine: refine::Refine,
+    /// Whether others may view our equipment (as the server last said).
+    show_equip: Option<bool>,
     /// Skills cooling down: id -> ready again at.
     cooldowns: std::collections::HashMap<u16, std::time::Instant>,
     /// When a paused (`wait:`) test script carries on.
@@ -1351,6 +1353,13 @@ impl App {
                     self.hud.push_chat(ro_net::ChatKind::System, why.into());
                 }
             }
+            ViewEquip { name, job, items } => {
+                let items: Vec<ro_game::items::InvItem> = items.into_iter().map(inv_item).collect();
+                let ids: Vec<u32> = items.iter().map(|i| i.id).collect();
+                self.load_icons_for(&ids);
+                self.item_info.viewing = Some((name, job_title(job).to_string(), items));
+            }
+            ShowEquip(on) => self.show_equip = Some(on),
             RefineOpen => {
                 self.refine.open = true;
                 self.refine.selected = None;
@@ -2001,6 +2010,7 @@ impl App {
             }
             InsertCard { card, equip } => self.send(Command::Item(ItemRequest::InsertCard { card, equip })),
             Menu(reply) => self.send(Command::Menu(reply)),
+            ShowEquip(on) => self.send(Command::ShowEquip(on)),
             OpenBank => {
                 if self.merchant.bank.is_none() {
                     self.toggle_bank();
@@ -2940,6 +2950,11 @@ impl App {
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some(("card", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::CardTargets(index)),
                     // refsel:item picks equipment in the refine window; refine:material refines it.
+                    Some(("viewequip", aid)) => {
+                        aid.parse().ok().map(|aid| self.queued_commands.push(ro_net::Command::ViewEquip(aid)));
+                        None
+                    }
+                    Some(("showequip", on)) => Some(windows::UiAction::ShowEquip(on == "1")),
                     Some(("bank", _)) => {
                         self.toggle_bank();
                         None
@@ -3384,6 +3399,7 @@ impl App {
                 hotkey_row: self.hotkey_row,
                 cooldowns: &self.cooldowns,
                 has_cart: self.merchant.has_cart(),
+                show_equip: self.show_equip,
                 pad_hints: self.pad.in_use(),
                 playstation: self.pad.playstation,
             };
@@ -3459,6 +3475,11 @@ impl App {
                             let rect = egui::Rect::from_center_size(egui::pos2(p.x / ppp, p.y / ppp), tex.size_vec2() * 2.0);
                             painter.image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                         }
+                    }
+                }
+                if let Some((id, refine, cards)) = self.item_info.show_viewing(ui.ctx(), self.item_db.as_ref(), &self.icons) {
+                    if let Some(vfs) = self.vfs.as_ref() {
+                        self.item_info.show_item(ui.ctx(), vfs, self.item_db.as_ref(), id, refine, cards);
                     }
                 }
                 self.item_info.show(ui.ctx(), self.item_db.as_ref());
@@ -3542,6 +3563,10 @@ impl App {
                             ui.label(egui::RichText::new(&name).strong());
                             if ui.button("Trade").clicked() {
                                 player_cmd = Some((ro_net::Command::Trade(ro_net::TradeRequest::Ask { target: id }), Some(name.clone())));
+                                keep = false;
+                            }
+                            if ui.button("View equipment").clicked() {
+                                player_cmd = Some((ro_net::Command::ViewEquip(id), None));
                                 keep = false;
                             }
                             if ui.button("Invite to party").clicked() {
@@ -4014,6 +4039,7 @@ fn main() -> anyhow::Result<()> {
         merchant: Default::default(),
         item_info: Default::default(),
         refine: Default::default(),
+        show_equip: None,
         cooldowns: Default::default(),
         script_resume: None,
         pad: gamepad::Pad::new(),

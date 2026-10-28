@@ -24,6 +24,7 @@ pub enum UiAction {
     /// Move an inventory item into the cart.
     CartPut { index: u16, amount: u16 },
     OpenBank,
+    ShowEquip(bool),
     /// Show the item information window (cards: their illustration).
     ItemInfo { id: u32, refine: u8, cards: [u32; 4] },
     SkillUp(u16),
@@ -93,6 +94,8 @@ pub struct View<'a> {
     pub cooldowns: &'a HashMap<u16, std::time::Instant>,
     /// We have a pushcart (inventory items can go into it).
     pub has_cart: bool,
+    /// Our "others may view my equipment" setting, once the server has said.
+    pub show_equip: Option<bool>,
     /// A controller is in use: label slots with its buttons.
     pub pad_hints: bool,
     pub playstation: bool,
@@ -433,6 +436,12 @@ impl Windows {
         if self.equipment {
             let mut open = true;
             egui::Window::new("Equipment").open(&mut open).default_pos(col(1.0)).resizable(false).show(ctx, |ui| {
+                if let Some(mut on) = v.show_equip {
+                    if ui.checkbox(&mut on, "Let others view my equipment").changed() {
+                        action = Some(UiAction::ShowEquip(on));
+                    }
+                    ui.separator();
+                }
                 let mut used_acc = vec![];
                 egui::Grid::new("equip").num_columns(2).spacing(Vec2::new(8.0, 4.0)).show(ui, |ui| {
                     for (bits, label) in SLOTS {

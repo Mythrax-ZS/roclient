@@ -13,6 +13,8 @@ pub struct ItemInfo {
     card_art: HashMap<u32, String>,
     /// The item shown: (id, refine, cards, picture).
     open: Option<(u32, u8, [u32; 4], Option<egui::TextureHandle>)>,
+    /// Another player's equipment being viewed: (name, job title, items).
+    pub viewing: Option<(String, String, Vec<ro_game::items::InvItem>)>,
 }
 
 impl ItemInfo {
@@ -84,5 +86,41 @@ impl ItemInfo {
         if !open {
             self.open = None;
         }
+    }
+}
+
+impl ItemInfo {
+    /// Another player's equipment. Returns an item to show in the info window.
+    pub fn show_viewing(&mut self, ctx: &egui::Context, db: Option<&ItemDb>, icons: &HashMap<u32, egui::TextureHandle>) -> Option<(u32, u8, [u32; 4])> {
+        let (name, job, items) = self.viewing.as_ref()?;
+        let mut info = None;
+        let mut open = true;
+        egui::Window::new(format!("{name}'s equipment")).id(egui::Id::unique("view_equip")).open(&mut open).collapsible(false).default_width(320.0).show(ctx, |ui| {
+            ui.label(RichText::new(job).color(Color32::GRAY));
+            ui.separator();
+            if items.is_empty() {
+                ui.label(RichText::new("Nothing worn.").color(Color32::GRAY));
+            }
+            for it in items {
+                let resp = ui
+                    .horizontal(|ui| {
+                        let (rect, resp) = ui.allocate_exact_size(Vec2::splat(28.0), egui::Sense::click());
+                        if let Some(t) = icons.get(&it.id) {
+                            ui.painter().image(t.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                        }
+                        let base = db.map_or_else(|| format!("Item #{}", it.id), |d| d.name(it.id, true));
+                        let label = if it.refine > 0 { format!("+{} {base}", it.refine) } else { base };
+                        resp | ui.add(egui::Label::new(label).sense(egui::Sense::click()))
+                    })
+                    .inner;
+                if resp.on_hover_text("Click for details").clicked() {
+                    info = Some((it.id, it.refine, it.cards));
+                }
+            }
+        });
+        if !open {
+            self.viewing = None;
+        }
+        info
     }
 }

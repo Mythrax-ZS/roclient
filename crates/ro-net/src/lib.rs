@@ -313,6 +313,10 @@ pub enum Event {
     ShopBuyResult(u8),
     /// The refine window opened (an NPC or @refineui).
     RefineOpen,
+    /// Another player's equipment.
+    ViewEquip { name: String, job: i16, items: Vec<ItemData> },
+    /// ZC_CONFIG: our "show equipment" setting as the server has it.
+    ShowEquip(bool),
     /// Bank balance; `reason` is set after a deposit (true) or withdrawal (false).
     Bank { balance: i64, reply: Option<(bool, i16)> },
     RefineInfo { index: u16, blessing: u8, options: Vec<RefineOption> },
@@ -385,6 +389,10 @@ pub enum Command {
     Merchant(MerchantRequest),
     Refine(RefineRequest),
     Bank(BankRequest),
+    /// Look at a player's equipment.
+    ViewEquip(u32),
+    /// Let others look at ours.
+    ShowEquip(bool),
     /// Login screen.
     Login { user: String, pass: String },
     SelectServer(usize),
@@ -515,6 +523,8 @@ impl MapSession {
                     Some(Command::Merchant(r)) => self.send(r).await?,
                     Some(Command::Refine(r)) => self.send(r).await?,
                     Some(Command::Bank(r)) => self.send(r).await?,
+                    Some(Command::ViewEquip(aid)) => self.send(CzViewEquip(aid)).await?,
+                    Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
@@ -670,6 +680,8 @@ impl MapSession {
                         0x012d if data.len() >= 4 => Some(Event::ShopSetup(u16::from_le_bytes([data[2], data[3]]))),
                         0x0b40 => Some(Event::MyShop(parse_my_shop(&data))),
                         0x0aa0 => Some(Event::RefineOpen),
+                        0x0b37 => parse_view_equip(&data).map(|(name, job, items)| Event::ViewEquip { name, job, items }),
+                        0x02d9 if data.len() >= 10 && data[2..6] == [0, 0, 0, 0] => Some(Event::ShowEquip(data[6] != 0)),
                         0x09a6 => parse_bank_balance(&data).map(|balance| Event::Bank { balance, reply: None }),
                         0x09a8 | 0x09aa => parse_bank_ack(&data).map(|(reason, balance, _)| Event::Bank { balance, reply: Some((opcode == 0x09a8, reason)) }),
                         0x0aa2 => parse_refine_info(&data).map(|(index, blessing, options)| Event::RefineInfo { index, blessing, options }),

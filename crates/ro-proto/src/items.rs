@@ -488,3 +488,35 @@ pub fn parse_couple_status(data: &[u8]) -> (u32, i32, i32) {
     let mut b = &data[2..];
     (b.get_u32_le(), b.get_i32_le(), b.get_i32_le())
 }
+
+/// ZC_EQUIPWIN_MICROSCOPE (0x0b37): another player's worn equipment, (name, job, items).
+pub fn parse_view_equip(data: &[u8]) -> Option<(String, i16, Vec<ItemData>)> {
+    let mut b = data.get(4..47)?;
+    let name = crate::packets::get_fixed_str(&mut b, 24);
+    let job = b.get_i16_le();
+    // The entries are the inventory's EQUIPITEM_INFO; reuse that parser (it skips 5 bytes).
+    let mut list = vec![0u8; 5];
+    list.extend_from_slice(&data[47..]);
+    Some((name, job, parse_itemlist_equip(&list)))
+}
+
+/// CZ_EQUIPWIN_MICROSCOPE: ask to see a player's equipment.
+pub struct CzViewEquip(pub u32);
+
+impl Encode for CzViewEquip {
+    fn encode(&self, d: &mut BytesMut) {
+        d.put_u16_le(0x02d6);
+        d.put_u32_le(self.0);
+    }
+}
+
+/// CZ_CONFIG (0x02d8): let others see our equipment (type 0).
+pub struct CzShowEquip(pub bool);
+
+impl Encode for CzShowEquip {
+    fn encode(&self, d: &mut BytesMut) {
+        d.put_u16_le(0x02d8);
+        d.put_u32_le(0);
+        d.put_u32_le(self.0 as u32);
+    }
+}
