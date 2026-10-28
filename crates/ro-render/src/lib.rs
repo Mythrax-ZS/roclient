@@ -971,7 +971,7 @@ impl Renderer {
                         continue;
                     }
                     let start = vertices.len() as u32;
-                    p.vertices(&mut vertices);
+                    p.vertices(self.camera.eye(), &mut vertices);
                     draws.push((p.tex.0, start..vertices.len() as u32));
                 }
                 if !vertices.is_empty() {

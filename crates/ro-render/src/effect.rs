@@ -70,8 +70,11 @@ pub enum Shape {
     Spikes { reach: Vec3, count: u32 },
     /// A shockwave wall expanding to `radius` cells.
     Wave { radius: f32 },
-    /// A glowing ball flying along `reach` and bursting at its end (Soul Breaker).
+    /// A glowing ball flying along `reach` and bursting at its end.
     Orb { reach: Vec3 },
+    /// A camera-facing crescent (effect\purpleslash.tga) flying along `travel`, its curved
+    /// edge leading, growing from `size.0` to `size.1` cells (Soul Breaker, Meteor Assault).
+    Slash { travel: Vec3, size: (f32, f32) },
 }
 
 /// A playing code-drawn effect.
@@ -86,7 +89,7 @@ pub struct ProcFx {
 }
 
 impl ProcFx {
-    pub fn vertices(&self, out: &mut Vec<Vertex>) {
+    pub fn vertices(&self, eye: Vec3, out: &mut Vec<Vertex>) {
         let t = (self.time_ms / self.duration_ms.max(1.0)).clamp(0.0, 1.0);
         // Quick fade in, long fade out.
         let fade = (t / 0.1).min(1.0) * ((1.0 - t) / 0.5).min(1.0);
@@ -151,6 +154,21 @@ impl ProcFx {
                     let (p0, p1, p2, p3) = (v(centre - a - b, 0.0, 1.0), v(centre + a - b, 1.0, 1.0), v(centre + a + b, 1.0, 0.0), v(centre - a + b, 0.0, 0.0));
                     out.extend([p0, p1, p2, p0, p2, p3]);
                 }
+            }
+            Shape::Slash { travel, size } => {
+                let centre = self.pos + travel * t + Vec3::new(0.0, CELL, 0.0);
+                let fwd = (centre - eye).normalize_or_zero();
+                let right = fwd.cross(Vec3::Y).normalize_or_zero();
+                let up = right.cross(fwd);
+                // The crescent bulges toward -u: point that side along the on-screen travel.
+                let (dx, dy) = (travel.dot(right), travel.dot(up));
+                let lead = if dx * dx + dy * dy > 1e-6 { (right * dx + up * dy).normalize() } else { -right };
+                let side = lead.cross(fwd);
+                let s = CELL * (size.0 + (size.1 - size.0) * t);
+                let (a, b) = (-lead * s, side * s);
+                let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color };
+                let (p0, p1, p2, p3) = (v(centre - a - b, 0.0, 1.0), v(centre + a - b, 1.0, 1.0), v(centre + a + b, 1.0, 0.0), v(centre - a + b, 0.0, 0.0));
+                out.extend([p0, p1, p2, p0, p2, p3]);
             }
             Shape::Disc { radius, spin } => {
                 let r = radius * CELL;

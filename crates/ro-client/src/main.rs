@@ -1613,7 +1613,8 @@ impl App {
                 // Soul Breaker: a ball of energy hurled at the target.
                 if skill == 379 {
                     if let (Some(from), Some(to)) = (self.unit_pos(act.src), self.unit_pos(target)) {
-                        self.proc_fx("thunder_ball_a.bmp", ro_render::Shape::Orb { reach: to - from }, from, [0.85, 0.6, 1.0], 900.0);
+                        let shape = ro_render::Shape::Slash { travel: to - from, size: (1.0, 2.0) };
+                        self.proc_fx("purpleslash.tga", shape, from, [1.0, 1.0, 1.0], 500.0);
                     }
                 }
                 if skill == 406 {
@@ -2094,7 +2095,7 @@ impl App {
         }
     }
 
-    /// Meteor Assault: a violet shockwave and dark bursts erupting all around the caster.
+    /// Meteor Assault: eight violet slashes flying outward from the caster.
     /// The cast and every monster hit all announce it, so it plays once per cast.
     fn meteor_assault(&mut self, src: u32) {
         use ro_render::{Shape, CELL};
@@ -2104,13 +2105,11 @@ impl App {
         }
         let Some(at) = self.unit_pos(src) else { return };
         self.burst_at.insert(src, now);
-        self.proc_fx("ring_purple.tga", Shape::Wave { radius: 2.6 }, at, [0.8, 0.35, 1.0], 900.0);
-        self.proc_fx("ring_purple.tga", Shape::Column { radius: 0.9, height: 3.0 }, at, [0.6, 0.25, 0.9], 600.0);
         for i in 0..8 {
-            let a = i as f32 / 8.0 * std::f32::consts::TAU + 0.3;
-            let d = CELL * if i % 2 == 0 { 1.6 } else { 2.3 };
-            let p = at + glam::Vec3::new(a.cos() * d, 0.0, a.sin() * d);
-            self.proc_fx("torch_violet04.bmp", Shape::Orb { reach: glam::Vec3::ZERO }, p, [1.0, 0.8, 1.0], 800.0 + i as f32 * 50.0);
+            let a = i as f32 / 8.0 * std::f32::consts::TAU;
+            let dir = glam::Vec3::new(a.cos(), 0.0, a.sin()) * CELL;
+            let shape = Shape::Slash { travel: dir * 4.0, size: (1.0, 2.0) };
+            self.proc_fx("purpleslash.tga", shape, at + dir, [1.0, 1.0, 1.0], 500.0);
         }
     }
 
