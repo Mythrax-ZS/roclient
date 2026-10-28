@@ -219,6 +219,8 @@ pub enum Event {
     Stats(Stats),
     StatRaised { stat: u16, ok: bool, value: u8 },
     StatCost { stat: u16, cost: u8 },
+    /// A base stat and its equipment/buff bonus (stat: SP_STR..SP_LUK, 13..=18).
+    StatBonus { stat: u32, base: i32, plus: i32 },
     Skills(Vec<Skill>),
     SkillUpdate { id: u16, level: u16, sp: u16, range: u16, upgradable: bool },
     /// Shortcut bar (tab 0): visible row and all slots.
@@ -523,6 +525,10 @@ impl MapSession {
                         0x0229 => {
                             let (id, option) = parse_state_change(&data);
                             Some(Event::UnitOption { id, option })
+                        }
+                        0x0141 => {
+                            let (stat, base, plus) = parse_couple_status(&data);
+                            Some(Event::StatBonus { stat, base, plus })
                         }
                         0x09ca => {
                             let (id, _, cell, kind) = parse_skill_entry(&data);

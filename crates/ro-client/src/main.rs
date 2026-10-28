@@ -968,8 +968,26 @@ impl App {
             Unit(info) => self.unit(info),
             Stat { id, value } => {
                 self.hud.status.set(id, value);
-                if let (9, Some(s)) = (id, self.stats.as_mut()) {
-                    s.points = value as u16; // SP_STATUSPOINT
+                // Keep the Status window live: points and the derived values (SP_ATK1..SP_ASPD).
+                if let Some(s) = self.stats.as_mut() {
+                    let v = value.clamp(i16::MIN as i64, i16::MAX as i64) as i16;
+                    match id {
+                        9 => s.points = value as u16,
+                        41 => s.atk.0 = v,
+                        42 => s.atk.1 = v,
+                        43 => s.matk.1 = v,
+                        44 => s.matk.0 = v,
+                        45 => s.def.0 = v,
+                        46 => s.def.1 = v,
+                        47 => s.mdef.0 = v,
+                        48 => s.mdef.1 = v,
+                        49 => s.hit = v,
+                        50 => s.flee.0 = v,
+                        51 => s.flee.1 = v,
+                        52 => s.crit = v,
+                        53 => s.aspd = (v, 0),
+                        _ => {}
+                    }
                 }
             }
             Chat { kind, text, .. } => self.hud.push_chat(kind, text),
@@ -1216,6 +1234,12 @@ impl App {
             StatRaised { stat, ok, value } => {
                 if let (true, Some(s), 13..=18) = (ok, self.stats.as_mut(), stat) {
                     s.base[(stat - 13) as usize] = value;
+                }
+            }
+            StatBonus { stat, base, plus } => {
+                if let (Some(s), 13..=18) = (self.stats.as_mut(), stat) {
+                    s.base[(stat - 13) as usize] = base.clamp(0, 255) as u8;
+                    s.plus[(stat - 13) as usize] = plus as i16;
                 }
             }
             StatCost { stat, cost } => {
@@ -2121,7 +2145,7 @@ impl App {
             }
         }
         if std::mem::take(&mut self.open_windows) {
-            (self.windows.party, self.windows.friends, self.windows.settings) = (true, true, true);
+            (self.windows.party, self.windows.friends, self.windows.settings, self.windows.stats) = (true, true, true, true);
         }
         for c in std::mem::take(&mut self.queued_commands) {
             self.send(c);

@@ -202,6 +202,8 @@ pub struct Stats {
     pub base: [u8; 6],
     /// Status points needed to raise each by one.
     pub cost: [u8; 6],
+    /// Bonuses on str..luk from equipment and buffs.
+    pub plus: [i16; 6],
     pub atk: (i16, i16),
     /// (min, max)
     pub matk: (i16, i16),
@@ -229,7 +231,7 @@ pub fn parse_status(data: &[u8]) -> Stats {
     let flee = (b.get_i16_le(), b.get_i16_le());
     let crit = b.get_i16_le();
     let aspd = (b.get_i16_le(), b.get_i16_le());
-    Stats { points, base, cost, atk, matk: (min_matk, max_matk), def, mdef, hit, flee, crit, aspd }
+    Stats { points, base, cost, plus: [0; 6], atk, matk: (min_matk, max_matk), def, mdef, hit, flee, crit, aspd }
 }
 
 /// ZC_STATUS_CHANGE_ACK (0x00bc): (stat id, accepted, new value).
@@ -463,4 +465,10 @@ pub fn parse_skill_entry(data: &[u8]) -> (u32, u32, (u16, u16), u32) {
 /// ZC_SKILL_DISAPPEAR (0x0120): the ground effect `id` ended.
 pub fn parse_skill_disappear(data: &[u8]) -> u32 {
     u32::from_le_bytes([data[2], data[3], data[4], data[5]])
+}
+
+/// ZC_COUPLESTATUS (0x0141): a base stat with its bonus. (SP id 13..=18, base, plus)
+pub fn parse_couple_status(data: &[u8]) -> (u32, i32, i32) {
+    let mut b = &data[2..];
+    (b.get_u32_le(), b.get_i32_le(), b.get_i32_le())
 }

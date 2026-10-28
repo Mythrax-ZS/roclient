@@ -391,7 +391,7 @@ impl Windows {
                     egui::Grid::new("base").num_columns(3).show(&mut cols[0], |ui| {
                         for (i, name) in STAT_NAMES.iter().enumerate() {
                             ui.label(RichText::new(*name).strong());
-                            ui.label(s.base[i].to_string());
+                            ui.label(if s.plus[i] != 0 { format!("{} + {}", s.base[i], s.plus[i]) } else { s.base[i].to_string() });
                             let can = s.points >= s.cost[i] as u16 && s.base[i] < 130;
                             if ui.add_enabled(can, egui::Button::new("+")).on_hover_text(format!("Costs {}", s.cost[i])).clicked() {
                                 action = Some(UiAction::RaiseStat(i));
@@ -402,13 +402,14 @@ impl Windows {
                     egui::Grid::new("derived").num_columns(2).show(&mut cols[1], |ui| {
                         let rows = [
                             ("Atk", format!("{} + {}", s.atk.0, s.atk.1)),
-                            ("Matk", format!("{} ~ {}", s.matk.0, s.matk.1)),
+                            ("Matk", format!("{} + {}", s.matk.0, s.matk.1)),
                             ("Def", format!("{} + {}", s.def.0, s.def.1)),
                             ("Mdef", format!("{} + {}", s.mdef.0, s.mdef.1)),
                             ("Hit", s.hit.to_string()),
                             ("Flee", format!("{} + {}", s.flee.0, s.flee.1)),
                             ("Critical", s.crit.to_string()),
-                            ("Aspd", (s.aspd.0 + s.aspd.1).to_string()),
+                            // The server sends the attack delay (amotion); players read ASPD.
+                            ("Aspd", ((2000 - (s.aspd.0 + s.aspd.1) as i32) / 10).to_string()),
                         ];
                         for (k, val) in rows {
                             ui.label(RichText::new(k).color(Color32::GRAY));
