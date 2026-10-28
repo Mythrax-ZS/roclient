@@ -1024,6 +1024,7 @@ impl MapSession {
                             remain_ms: (opcode == 0x0983 && data.len() >= 17).then(|| i32::from_le_bytes([data[13], data[14], data[15], data[16]])).filter(|&ms| ms > 0).map(|ms| ms as u32),
                         }),
                         0x0148 => Some(Event::Resurrected(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x01f3 if data.len() >= 10 => Some(Event::UnitEffect { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), effect: u32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
                         0x019b => {
                             let (id, effect) = parse_notify_effect(&data);
                             Some(Event::UnitEffect { id, effect })

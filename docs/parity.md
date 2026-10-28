@@ -49,6 +49,6 @@ Ticked items are handled and tested in game against the local server.
 - [ ] ZC_ACK_REQNAMEALL / NPC / BYGID, ZC_BAN_LIST
 
 ## Found while testing
-- [ ] `specialeffect` ids: only a handful map to effects (fx::misc_effect); needs the full EF_* table
+- [x] `specialeffect` (ZC_NOTIFY_EFFECT2): 110 EF_* ids matched to STR files by name; the rest (engine-drawn) still missing
 - [ ] Some NPC classes have no sprite name (e.g. 10243 4_m_drzonda01)
 - Note: `setnpcdisplay` to a monster class makes rAthena send class 0 (a Novice); the original client shows the same
