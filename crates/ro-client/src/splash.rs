@@ -25,16 +25,19 @@ fn load(ctx: &egui::Context, vfs: &ro_vfs::Vfs, path: &str) -> Option<egui::Text
     Some(ctx.load_texture(path, color, egui::TextureOptions::LINEAR))
 }
 
-/// Draws `tex` covering the whole screen (cropped to keep its aspect), faded by `alpha`.
+/// Draws `tex` whole and undistorted, centred (4:3 art on wide screens keeps its shape);
+/// the bars beside it show a dim, enlarged copy instead of plain black.
 fn cover(ctx: &egui::Context, tex: &egui::TextureHandle, alpha: f32) {
     let screen = ctx.content_rect();
     let size = tex.size_vec2();
-    let scale = (screen.width() / size.x).max(screen.height() / size.y);
-    let rect = Rect::from_center_size(screen.center(), size * scale);
+    let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
     let painter = ctx.layer_painter(egui::LayerId::background());
     painter.rect_filled(screen, 0.0, Color32::BLACK);
-    let tint = Color32::from_white_alpha((alpha.clamp(0.0, 1.0) * 255.0) as u8);
-    painter.image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), tint);
+    let a = alpha.clamp(0.0, 1.0);
+    let fill = (screen.width() / size.x).max(screen.height() / size.y);
+    painter.image(tex.id(), Rect::from_center_size(screen.center(), size * fill), uv, Color32::from_gray((a * 60.0) as u8));
+    let fit = (screen.width() / size.x).min(screen.height() / size.y);
+    painter.image(tex.id(), Rect::from_center_size(screen.center(), size * fit), uv, Color32::from_white_alpha((a * 255.0) as u8));
 }
 
 impl Splash {

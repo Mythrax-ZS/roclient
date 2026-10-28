@@ -226,7 +226,9 @@ impl Front {
     /// Draws the current screen.
     pub fn show(&mut self, ctx: &egui::Context, c: &Ctx) -> Option<Action> {
         let mut action = None;
-        let window = |title: &str| egui::Window::new(title).collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 40.0));
+        // Below the title art's logo, like the original.
+        let below_logo = ctx.content_rect().height() * 0.2;
+        let window = |title: &str| egui::Window::new(title).collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, below_logo));
         match &self.screen {
             Screen::Login => {
                 window("Login").show(ctx, |ui| {
