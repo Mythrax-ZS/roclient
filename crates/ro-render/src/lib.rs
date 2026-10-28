@@ -781,8 +781,8 @@ impl Renderer {
             let mix3 = |a: [f32; 3], b: [f32; 3]| [a[0] + (b[0] - a[0]) * n, a[1] + (b[1] - a[1]) * n, a[2] + (b[2] - a[2]) * n];
             let a = self.lighting.ambient;
             let d = self.lighting.diffuse;
-            self.lighting.ambient = mix3(a, [a[0] * 0.38, a[1] * 0.42, a[2] * 0.62]);
-            self.lighting.diffuse = mix3(d, [d[0] * 0.22, d[1] * 0.26, d[2] * 0.42]);
+            self.lighting.ambient = mix3(a, [a[0] * 0.62, a[1] * 0.68, a[2] * 0.9]);
+            self.lighting.diffuse = mix3(d, [d[0] * 0.42, d[1] * 0.48, d[2] * 0.68]);
             let p = &mut self.post_settings;
             p.shadow_strength *= 1.0 - 0.6 * n;
             p.point_lights *= 1.0 + 1.5 * n;
@@ -791,7 +791,7 @@ impl Renderer {
             p.god_rays *= 1.0 - n;
             p.bloom_threshold *= 1.0 - 0.35 * n;
             p.vignette += 0.2 * n;
-            p.exposure *= 1.0 - 0.5 * n;
+            p.exposure *= 1.0 - 0.15 * n;
             if !p.enabled {
                 // Classic look: no effects, but night still darkens and cools the screen.
                 *p = PostSettings {
@@ -802,7 +802,7 @@ impl Renderer {
                     contrast: 1.0,
                     saturation: 1.0 - 0.25 * n,
                     warmth: -0.5 * n,
-                    exposure: 1.0 - 0.5 * n,
+                    exposure: 1.0 - 0.25 * n,
                     shadow_strength: 0.0,
                     sprite_light: 0.0,
                     rim_light: 0.0,
