@@ -16,6 +16,7 @@ mod progress;
 mod quests;
 mod refine;
 mod screens;
+mod ai;
 mod buffs;
 mod classic;
 mod companions;
@@ -807,6 +808,14 @@ struct App {
     companion_action: Option<companions::CompanionAction>,
     /// When the companion AI next checks distances.
     follow_at: std::time::Instant,
+    /// Homunculus / mercenary classes by unit id, for their AI.
+    unit_jobs: std::collections::HashMap<u32, i16>,
+    /// Who each unit last attacked (monster aggro, for the AI scripts).
+    aggro: std::collections::HashMap<u32, u32>,
+    /// The companion AI scripts (AI\AI.lua, AI\AI_M.lua), loaded when first needed.
+    homun_ai: Option<ai::Brain>,
+    merc_ai: Option<ai::Brain>,
+    client_dir: Option<std::path::PathBuf>,
     /// The Classic interface art, loaded once the GRF is open.
     skin: Option<classic::Skin>,
     /// The item information / card illustration window.
@@ -1029,6 +1038,9 @@ impl App {
     fn unit(&mut self, info: ro_net::UnitInfo) {
         if info.id == self.account_id {
             return;
+        }
+        if (6001..=6099).contains(&info.job) {
+            self.unit_jobs.insert(info.id, info.job);
         }
         let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
         if let Some(m) = self.units.get_mut(&info.id) {
@@ -1607,7 +1619,12 @@ impl App {
                     self.units.remove(&id);
                 }
             }
-            Act(act) => self.act(act),
+            Act(act) => {
+                if act.target != 0 && act.src != act.target {
+                    self.aggro.insert(act.src, act.target);
+                }
+                self.act(act)
+            }
             OutOfRange { target, target_cell, range } => {
                 // Walk toward the target; the attack is re-sent once in reach.
                 self.chasing = true;
@@ -2600,10 +2617,65 @@ impl App {
         }
     }
 
-    /// The client-side companion AI (the original runs AI.lua): the homunculus and the
-    /// mercenary walk back beside us when they fall more than three cells behind.
+    /// The companion AI. Like the original, the homunculus runs AI\AI.lua and the
+    /// mercenary AI\AI_M.lua (USER_AI\ when present there); without the scripts they just
+    /// follow us and join our fights.
     fn companion_follow(&mut self, now: std::time::Instant) {
         if now < self.follow_at {
+            return;
+        }
+        self.follow_at = now + std::time::Duration::from_millis(250);
+        let homun = self.companions.homun_id;
+        let merc = self.companions.merc.as_ref().map_or(0, |m| m.id);
+        let mut scripted = false;
+        for (id, file, homun_brain) in [(homun, "AI.lua", true), (merc, "AI_M.lua", false)] {
+            if id == 0 || !self.units.contains_key(&id) {
+                continue;
+            }
+            let slot = if homun_brain { &mut self.homun_ai } else { &mut self.merc_ai };
+            if slot.is_none() {
+                let Some(dir) = self.client_dir.as_deref() else { continue };
+                let user = dir.join("AI").join("USER_AI").join(file).exists();
+                match ai::load(dir, file, user) {
+                    Ok(b) => {
+                        tracing::info!(file, user, "companion AI loaded");
+                        *slot = Some(b);
+                    }
+                    Err(e) => {
+                        tracing::warn!("companion AI {file}: {e}");
+                        self.client_dir = None;
+                        continue;
+                    }
+                }
+            }
+            let snapshot = self.ai_snapshot();
+            let Some(brain) = (if homun_brain { self.homun_ai.as_ref() } else { self.merc_ai.as_ref() }) else { continue };
+            {
+                let mut w = brain.world.borrow_mut();
+                w.owner = snapshot.0;
+                w.units = snapshot.1;
+            }
+            scripted = true;
+            for order in brain.tick(id) {
+                tracing::debug!(id, ?order, "AI order");
+                let cmd = match order {
+                    // The original's MoveToOwner asks the server to bring it beside us.
+                    ai::AiOrder::Move { id, x, y } if self.player.as_ref().is_some_and(|p| p.walker.goal_or_cell() == (x, y)) => ro_net::CompanionRequest::Return(id),
+                    ai::AiOrder::Move { id, x, y } => ro_net::CompanionRequest::Move { id, x: x as u16, y: y as u16 },
+                    ai::AiOrder::Attack { id, target } => ro_net::CompanionRequest::Attack { id, target },
+                    ai::AiOrder::Skill { level, skill, target, .. } => {
+                        self.send(ro_net::Command::Stat(ro_net::StatRequest::UseSkill { skill, level, target }));
+                        continue;
+                    }
+                    ai::AiOrder::SkillGround { level, skill, x, y, .. } => {
+                        self.send(ro_net::Command::Stat(ro_net::StatRequest::UseSkillAt { skill, level, x: x as u16, y: y as u16 }));
+                        continue;
+                    }
+                };
+                self.send(ro_net::Command::Companion(cmd));
+            }
+        }
+        if scripted {
             return;
         }
         self.follow_at = now + std::time::Duration::from_millis(400);
@@ -2615,6 +2687,15 @@ impl App {
             (x * 2, y * 2)
         };
         let ids = [(self.companions.homun_id, behind(1)), (self.companions.merc.as_ref().map_or(0, |m| m.id), behind(7))];
+        // While we fight, they attack our target too (the original AI's default).
+        if let Some(target) = self.attack.map(|a| a.0).filter(|t| self.units.get(t).is_some_and(|m| m.dying.is_none())) {
+            let present: Vec<u32> = ids.iter().map(|(id, _)| *id).filter(|id| *id != 0 && self.units.contains_key(id)).collect();
+            for id in present {
+                self.send(ro_net::Command::Companion(ro_net::CompanionRequest::Attack { id, target }));
+            }
+            self.follow_at = now + std::time::Duration::from_millis(1000);
+            return;
+        }
         for (id, (dx, dy)) in ids {
             let Some(unit) = self.units.get(&id).filter(|_| id != 0) else { continue };
             let at = unit.walker.goal_or_cell();
@@ -2630,6 +2711,53 @@ impl App {
                 self.send(ro_net::Command::Companion(ro_net::CompanionRequest::Move { id, x: x as u16, y: y as u16 }));
             }
         }
+    }
+
+    /// The units in sight as the AI scripts see them: (our account id, units).
+    fn ai_snapshot(&self) -> (u32, std::collections::HashMap<u32, ai::AiUnit>) {
+        let motion = |m: &Mob| {
+            if m.dying.is_some() || matches!(m.pose, Some((Pose::Dead, _))) {
+                3
+            } else if matches!(m.pose, Some((Pose::Attack, _))) {
+                2
+            } else if m.walker.is_walking() {
+                1
+            } else {
+                0
+            }
+        };
+        let mut units = std::collections::HashMap::new();
+        if let Some(p) = self.player.as_ref() {
+            let s = &self.hud.status;
+            units.insert(
+                self.account_id,
+                ai::AiUnit { cell: p.walker.cell, motion: motion(p), target: self.attack.map_or(0, |a| a.0), hp: (s.hp as i32, s.max_hp as i32), sp: (s.sp as i32, s.max_sp as i32), range: 1, ..Default::default() },
+            );
+        }
+        for (id, m) in &self.units {
+            let job = self.unit_jobs.get(id).copied().unwrap_or(0) as i32;
+            let mut u = ai::AiUnit { cell: m.walker.cell, motion: motion(m), target: self.aggro.get(id).copied().unwrap_or(0), monster: m.kind == 5, range: 1, ..Default::default() };
+            if let Some(hp) = m.hp {
+                u.hp = hp;
+            }
+            if *id == self.companions.homun_id {
+                u.kind = job - 6000;
+                if let Some(h) = &self.companions.homun {
+                    u.hp = (h.hp as i32, h.max_hp as i32);
+                    u.sp = (h.sp as i32, h.max_sp as i32);
+                }
+            } else if self.companions.merc.as_ref().is_some_and(|mc| mc.id == *id) {
+                u.kind = job - 6016;
+                // Archer mercenaries (types 1-10) shoot from range.
+                u.range = if (1..=10).contains(&u.kind) { 9 } else { 1 };
+                if let Some(mc) = &self.companions.merc {
+                    u.hp = (mc.hp as i32, mc.max_hp as i32);
+                    u.sp = (mc.sp as i32, mc.max_sp as i32);
+                }
+            }
+            units.insert(*id, u);
+        }
+        (self.account_id, units)
     }
 
     /// Opens the bank (asking for the balance) or closes it.
@@ -3527,7 +3655,20 @@ impl App {
         self.update_room();
         if let Some(a) = self.companion_action.take() {
             match a {
-                companions::CompanionAction::Send(r) => self.send(ro_net::Command::Companion(r)),
+                // With a script running, commands go to it (as Alt+right-click does in the
+                // original): ATTACK_OBJECT_CMD 3, FOLLOW_CMD 9.
+                companions::CompanionAction::Send(r) => {
+                    let msg = match r {
+                        ro_net::CompanionRequest::Attack { id, target } => Some((id, vec![3, target as i64])),
+                        ro_net::CompanionRequest::Return(id) => Some((id, vec![9])),
+                        _ => None,
+                    };
+                    let brain = msg.as_ref().and_then(|(id, _)| if *id == self.companions.homun_id { self.homun_ai.as_ref() } else { self.merc_ai.as_ref() });
+                    match (brain, msg) {
+                        (Some(b), Some((_, m))) => b.world.borrow_mut().msg = m,
+                        _ => self.send(ro_net::Command::Companion(r)),
+                    }
+                }
                 companions::CompanionAction::Skill { id, level, on } => self.use_skill_on(id, level, on),
                 companions::CompanionAction::SkillUp(id) => self.send(ro_net::Command::Stat(ro_net::StatRequest::SkillUp(id))),
             }
@@ -4396,6 +4537,11 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         companion_action: None,
         follow_at: std::time::Instant::now(),
+        unit_jobs: Default::default(),
+        aggro: Default::default(),
+        homun_ai: None,
+        merc_ai: None,
+        client_dir: cfg.client_dir.clone(),
         skin: None,
         item_info: Default::default(),
         refine: Default::default(),
