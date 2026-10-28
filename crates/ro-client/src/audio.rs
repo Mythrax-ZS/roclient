@@ -38,9 +38,18 @@ impl Audio {
         Some(Self { sink, bgm, table, playing: String::new(), bgm_volume, sfx_volume, effects })
     }
 
+    /// The title theme the original plays on the login and character screens.
+    pub fn title(&mut self, vfs: &ro_vfs::Vfs) {
+        self.play_track(vfs, "bgm\\01.mp3".into());
+    }
+
     /// Switches to the map's track; keeps playing if it is already the current one.
     pub fn enter_map(&mut self, vfs: &ro_vfs::Vfs, map: &str) {
         let Some(path) = self.table.get(map).cloned() else { return };
+        self.play_track(vfs, path);
+    }
+
+    fn play_track(&mut self, vfs: &ro_vfs::Vfs, path: String) {
         if path == self.playing {
             return;
         }

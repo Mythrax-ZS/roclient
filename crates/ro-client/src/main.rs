@@ -1095,6 +1095,9 @@ impl App {
                     let mut f = screens::Front::new(user, front.remember);
                     f.event(&LoginFailed(format!("Disconnected: {reason}")));
                     self.front = Some(f);
+                    if let (Some(a), Some(v)) = (self.audio.as_mut(), self.vfs.as_ref()) {
+                        a.title(v);
+                    }
                     self.net = Some(ro_net::spawn_session(self.session.clone()));
                     return;
                 }
@@ -2988,6 +2991,9 @@ impl App {
                     let remember = self.front.as_ref().is_some_and(|f| f.remember);
                     let user = self.front.as_ref().map(|f| f.user().to_string()).unwrap_or_default();
                     self.front = Some(screens::Front::new(user, remember));
+                    if let (Some(a), Some(v)) = (self.audio.as_mut(), self.vfs.as_ref()) {
+                        a.title(v);
+                    }
                     self.net = Some(ro_net::spawn_session(self.session.clone()));
                 }
                 Some(screens::Action::Quit) => self.quit = true,
@@ -3450,6 +3456,10 @@ fn main() -> anyhow::Result<()> {
     // Captures and headless runs stay silent.
     if app.capture.is_none() {
         app.audio = app.vfs.as_ref().and_then(|v| audio::Audio::new(v, app.settings.bgm_volume, app.settings.sfx_volume));
+        // Title theme while the login screens show.
+        if let (Some(a), Some(v), true) = (app.audio.as_mut(), app.vfs.as_ref(), app.front.is_some()) {
+            a.title(v);
+        }
     }
     if let Some(vfs) = app.vfs.as_ref() {
         // iteminfo.lub lives in the client's System folder; skill names in the GRF.
