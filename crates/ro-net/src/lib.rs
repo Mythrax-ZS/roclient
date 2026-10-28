@@ -372,6 +372,8 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_DRESSROOM_OPEN.
+    DressRoom,
     /// ZC_STYLE_CHANGE_RES: true when the stylist refused.
     StyleResult(bool),
     /// ZC_OPEN_REFORM_UI (the tool item) / ZC_ITEM_REFORM_ACK (index, result: 0 ok).
@@ -807,6 +809,7 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0a02 => Some(Event::DressRoom),
                         0x0a47 if data.len() >= 3 => Some(Event::StyleResult(data[2] != 0)),
                         0x0b8f if data.len() >= 6 => Some(Event::ReformOpen(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x0b92 if data.len() >= 5 => Some(Event::ReformResult { index: u16::from_le_bytes([data[2], data[3]]), result: data[4] }),

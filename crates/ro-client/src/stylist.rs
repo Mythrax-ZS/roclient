@@ -16,6 +16,8 @@ pub struct Order {
 #[derive(Default)]
 pub struct Stylist {
     pub open: bool,
+    /// The dressing room (/dressroom): the same previews, nothing to buy.
+    pub dressing: bool,
     hair: u16,
     hair_color: u16,
     clothes_color: u16,
@@ -32,6 +34,7 @@ pub const CLOTHES_COLORS: u16 = 7;
 impl Stylist {
     pub fn open(&mut self, hair: u16, hair_color: u16, clothes_color: u16) {
         self.open = true;
+        self.dressing = false;
         self.start = (hair, hair_color, clothes_color);
         (self.hair, self.hair_color, self.clothes_color) = self.start;
         self.status.clear();
@@ -70,7 +73,8 @@ impl Stylist {
             }
         }
         let mut open = true;
-        crate::classic::show(ctx, egui::Window::new("Stylist").open(&mut open).resizable(false).default_width(300.0), "Stylist", true, |ui| {
+        let title = if self.dressing { "Dressing Room" } else { "Stylist" };
+        crate::classic::show(ctx, egui::Window::new(title).id(egui::Id::unique("stylist")).open(&mut open).resizable(false).default_width(300.0), title, true, |ui| {
             if let Some(t) = self.preview.as_ref().and_then(|p| p.1.as_ref()) {
                 ui.vertical_centered(|ui| ui.image((t.id(), Vec2::splat(140.0))));
             }
@@ -94,7 +98,7 @@ impl Stylist {
             ui.separator();
             let order = self.order();
             ui.horizontal(|ui| {
-                if ui.add_enabled(order != Order::default(), egui::Button::new("Buy")).clicked() {
+                if !self.dressing && ui.add_enabled(order != Order::default(), egui::Button::new("Buy")).clicked() {
                     out = Some(Some(order));
                     self.status = "Styling...".into();
                 }
@@ -102,14 +106,16 @@ impl Stylist {
                     (self.hair, self.hair_color, self.clothes_color) = self.start;
                 }
             });
-            ui.label(RichText::new("Prices are set by the server; each change is paid for separately.").size(11.0).color(crate::classic::ink(Color32::GRAY)));
+            if !self.dressing { ui.label(RichText::new("Prices are set by the server; each change is paid for separately.").size(11.0).color(crate::classic::ink(Color32::GRAY))); }
             if !self.status.is_empty() {
                 ui.label(RichText::new(&self.status).color(crate::classic::ink(Color32::from_rgb(255, 210, 110))));
             }
         });
         if !open {
             self.open = false;
-            out = Some(None);
+            if !self.dressing {
+                out = Some(None);
+            }
         }
         out
     }

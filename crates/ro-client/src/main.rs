@@ -2539,6 +2539,11 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            DressRoom => {
+                let (hair, color) = self.player.as_ref().and_then(|p| p.look.as_ref()).map_or((1, 0), |l| (l.hair, l.hair_color));
+                self.stylist.open(hair, color, 0);
+                self.stylist.dressing = true;
+            }
             ReformOpen(tool) => self.reform.open(self.vfs.as_ref(), tool),
             ReformResult { result, .. } => self.reform.result(result == 0),
             UiOpenV3 { kind: 10, data } => self.enchant.open(self.vfs.as_ref(), data),
