@@ -2501,6 +2501,30 @@ impl App {
                 }
             }
             RemoveEffect { .. } => {}
+            Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
+            AutorunSkill { id, target, level } => {
+                // Self (and passive-flagged) skills go off at once; others wait for a target click.
+                if target & 4 != 0 || target & (1 | 2 | 16 | 32) == 0 {
+                    self.use_skill_on(id, level, self.account_id);
+                } else {
+                    self.aiming = Some((id, level));
+                }
+            }
+            Identified(index) => {
+                if let Some(it) = self.inventory.items.get_mut(&index) {
+                    it.identified = true;
+                    let name = self.item_db.as_ref().map_or_else(|| format!("Item #{}", it.id), |d| d.name(it.id, true));
+                    self.hud.push_chat(ro_net::ChatKind::System, format!("Identified: {name}."));
+                }
+            }
+            ArrowEquipped(index) => {
+                for it in self.inventory.items.values_mut() {
+                    it.equipped &= !0x8000;
+                }
+                if let Some(it) = self.inventory.items.get_mut(&index) {
+                    it.equipped |= 0x8000;
+                }
+            }
             Mvp(id) => {
                 if let Some(pos) = self.unit_pos(id) {
                     self.play_fx("mvp", pos);
@@ -4033,7 +4057,10 @@ impl App {
                                 Menu::Produce(list) => list.iter().find(|(i, _)| *i == id).map(|(i, m)| MenuReply::Produce { item: *i, materials: *m }),
                                 Menu::AutoSpell(s) => s.contains(&id).then_some(MenuReply::AutoSpell(id)),
                                 Menu::Skill { flag, skills } => skills.contains(&(id as u16)).then_some(MenuReply::Skill { flag, skill: id as u16 }),
-                                Menu::Identify(_) => Some(MenuReply::Identify(id as u16)),
+                                Menu::Identify(list) => {
+                                    let by_item = self.inventory.items.values().find(|i| i.id == id && !i.identified && list.contains(&i.index)).map(|i| i.index);
+                                    Some(MenuReply::Identify(by_item.unwrap_or(id as u16)))
+                                }
                                 Menu::Egg(_) => Some(MenuReply::Egg(self.inventory.items.values().find(|i| i.id == id).map_or(id as u16, |i| i.index))),
                                 Menu::Warp { skill, maps } => maps.get(id as usize).map(|m| MenuReply::Warp { skill, map: m.clone() }),
                             };

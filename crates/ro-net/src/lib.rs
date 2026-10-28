@@ -372,6 +372,14 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_AUTORUN_SKILL: an item (itemskill) asks us to cast a skill: (id, target flags, level).
+    AutorunSkill { id: u16, target: u32, level: u16 },
+    /// A one-line notice the original shows in chat (map info, warp memo, cart, ammo...).
+    Notice(String),
+    /// ZC_ACK_ITEMIDENTIFY: an item was identified.
+    Identified(u16),
+    /// ZC_EQUIP_ARROW: this item is now the equipped ammunition.
+    ArrowEquipped(u16),
     /// ZC_GUILD_EMBLEM_IMG: (guild, emblem version, zlib-compressed image).
     GuildEmblem { guild: u32, version: u32, data: Vec<u8> },
     /// ZC_MVP: someone got the MVP of a boss.
@@ -777,6 +785,13 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0147 if data.len() >= 10 => Some(Event::AutorunSkill { id: u16::from_le_bytes([data[2], data[3]]), target: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), level: u16::from_le_bytes([data[8], data[9]]) }),
+                        0x0179 if data.len() >= 5 => match data[4] {
+                            0 => Some(Event::Identified(u16::from_le_bytes([data[2], data[3]]))),
+                            _ => Some(Event::Notice("The item could not be identified.".into())),
+                        },
+                        0x013c if data.len() >= 4 => Some(Event::ArrowEquipped(u16::from_le_bytes([data[2], data[3]]))),
+                        0x013b | 0x0189 | 0x011e | 0x012c | 0x02bb | 0x0223 => notice_text(opcode, &data).map(Event::Notice),
                         0x0152 if data.len() >= 12 => Some(Event::GuildEmblem { guild: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), version: u32::from_le_bytes([data[8], data[9], data[10], data[11]]), data: data[12..].to_vec() }),
                         0x010c if data.len() >= 6 => Some(Event::Mvp(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x010a if data.len() >= 6 => Some(Event::MvpItem(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
@@ -1272,4 +1287,53 @@ pub enum MapExit {
     CharSelect,
     /// The UI went away.
     Closed,
+}
+
+/// The chat line the original client shows for small server notices.
+fn notice_text(opcode: u16, data: &[u8]) -> Option<String> {
+    let w = |i: usize| data.get(i..i + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+    Some(match opcode {
+        // ZC_ACTION_FAILURE
+        0x013b => match w(2)? {
+            0 => "Please equip the proper ammunition first.",
+            1 => "You can't attack or use skills because your weight limit has been exceeded.",
+            2 => "You can't use skills because your weight limit has been exceeded.",
+            3 => "You have equipped throwing daggers.",
+            _ => return None,
+        }
+        .into(),
+        // ZC_NOTIFY_MAPINFO
+        0x0189 => match w(2)? {
+            0 => "Unable to teleport in this area.",
+            1 => "Saved point cannot be memorized.",
+            2 => "This skill cannot be used in this area.",
+            3 => "This item cannot be used in this area.",
+            _ => return None,
+        }
+        .into(),
+        // ZC_ACK_REMEMBER_WARPPOINT
+        0x011e => match *data.get(2)? {
+            0 => "Saved location as a memo point for Warp Portal.",
+            1 => "Skill level is not high enough.",
+            _ => "You haven't learned Warp Portal.",
+        }
+        .into(),
+        // ZC_ACK_ADDITEM_TO_CART
+        0x012c => match *data.get(2)? {
+            0 => "The cart is over its weight limit.",
+            1 => "The cart is full.",
+            _ => "That item can't go into the cart.",
+        }
+        .into(),
+        // ZC_EQUIPITEM_DAMAGED
+        0x02bb => "One of your equipped items was damaged.".into(),
+        // ZC_ACK_WEAPONREFINE
+        0x0223 => match data.get(2..6).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))? {
+            0 | 1 => "Weapon upgraded.",
+            2 => "You can't upgrade this until you level up the upgrade skill.",
+            _ => "You lack the materials to upgrade the weapon.",
+        }
+        .into(),
+        _ => return None,
+    })
 }
