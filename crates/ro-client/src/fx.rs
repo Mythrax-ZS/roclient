@@ -133,9 +133,48 @@ pub struct FxLib {
     cache: HashMap<String, Option<ro_render::FxId>>,
     textures: HashMap<&'static str, Option<ro_render::TexId>>,
     sprites: HashMap<&'static str, Option<ro_render::SheetId>>,
+    /// STR paths under effect that sit in subfolders (see `index`).
+    strs: Vec<String>,
 }
 
 impl FxLib {
+    /// Indexes the STR effects kept in per-skill folders (effect\savage_impact\...\x.str),
+    /// so skills without a hand-mapped effect can find their own by name.
+    pub fn index(&mut self, vfs: &ro_vfs::Vfs) {
+        const ROOT: &str = r"data\texture\effect\";
+        self.strs = vfs
+            .names()
+            .filter_map(|n| n.to_ascii_lowercase().strip_prefix(ROOT)?.strip_suffix(".str").map(str::to_string))
+            .filter(|n| n.contains('\\') && !n.starts_with(r"mineffect\"))
+            .collect();
+        self.strs.sort();
+        tracing::info!(count = self.strs.len(), "indexed skill effect folders");
+    }
+
+    /// The best STR (path under effect\, no extension) for a skill's short name, e.g.
+    /// "savage_impact" -> savage_impact\savage_impact\savage_impact. Cast, ground and
+    /// counter pieces are skipped in favour of the main or hit animation.
+    pub fn find(&self, short: &str) -> Option<&str> {
+        let joined = short.replace('_', "");
+        let keys = [short.to_string(), joined.clone(), format!("new_{short}"), format!("new_{joined}")];
+        let score = |p: &str| -> Option<u32> {
+            let parts: Vec<&str> = p.split('\\').collect();
+            let stem = parts.last()?.trim_start_matches("min_");
+            let key = keys.iter().find(|k| parts.iter().any(|c| c == k))?;
+            let mut s = 100;
+            if stem == key {
+                s = 0;
+            } else if stem.ends_with("_hit") || stem.ends_with("_hit_01") {
+                s = 10;
+            }
+            if ["cast", "bottom", "count", "clock", "ground", "_end", "_loop"].iter().any(|w| stem.contains(w)) {
+                s += 50;
+            }
+            Some(s + parts.len() as u32)
+        };
+        self.strs.iter().filter_map(|p| Some((score(p)?, p.as_str()))).min().map(|(_, p)| p)
+    }
+
     /// A texture from data\texture\effect\ for code-drawn effects.
     pub fn texture(&mut self, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, name: &'static str) -> Option<ro_render::TexId> {
         *self.textures.entry(name).or_insert_with(|| {
@@ -180,8 +219,11 @@ impl FxLib {
                     l.textures
                         .iter()
                         .map(|t| {
-                            let p = format!("data\\texture\\effect\\{t}");
-                            vfs.read(&p).ok().flatten().and_then(|d| ro_formats::image::decode(&d, &p).ok())
+                            // Effects in subfolders name textures beside themselves.
+                            let dir = name.rsplit_once('\\').map_or("", |(d, _)| d);
+                            [format!("data\\texture\\effect\\{dir}\\{t}"), format!("data\\texture\\effect\\{t}")]
+                                .into_iter()
+                                .find_map(|p| vfs.read(&p).ok().flatten().and_then(|d| ro_formats::image::decode(&d, &p).ok()))
                         })
                         .collect()
                 })

@@ -266,6 +266,8 @@ pub enum Event {
     SkillAt { skill: u16, src: u32, cell: (u16, u16) },
     /// A unit's status option bits changed (hidden, cloaked, ...).
     UnitOption { id: u32, option: u32 },
+    /// ZC_ACH_UPDATE: an achievement's progress changed (id, now complete).
+    Achievement { id: u32, completed: bool },
     /// A lasting ground effect (Sanctuary, Fire Wall, traps...) appeared or ended.
     GroundEffect { id: u32, cell: (u16, u16), kind: u32 },
     GroundEffectGone(u32),
@@ -635,6 +637,10 @@ impl MapSession {
                             let (skill, src, cell) = parse_ground_skill(&data);
                             Some(Event::SkillAt { skill, src, cell })
                         }
+                        0x0a24 if data.len() >= 21 => Some(Event::Achievement {
+                            id: u32::from_le_bytes([data[16], data[17], data[18], data[19]]),
+                            completed: data[20] != 0,
+                        }),
                         0x0229 => {
                             let (id, option) = parse_state_change(&data);
                             Some(Event::UnitOption { id, option })

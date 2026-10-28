@@ -751,6 +751,8 @@ struct App {
     item_db: Option<ro_game::items::ItemDb>,
     skill_names: ro_game::skills::SkillNames,
     skill_tree: skilltree::SkillTree,
+    /// Achievement id -> title (Systemchievement_list.lub).
+    achievements: std::collections::HashMap<u32, String>,
     inventory: ro_game::items::Inventory,
     /// Items on the ground, with their sprite.
     floor: std::collections::HashMap<u32, (ro_net::FloorItem, Option<ro_render::Actor>)>,
@@ -1016,6 +1018,7 @@ impl App {
         // NPC names may carry a "#unique-suffix" that the client never shows.
         mob.name = info.name.split('#').next().unwrap_or_default().trim().to_string();
         mob.kind = info.object_type;
+        mob.actor.alpha = option_alpha(info.option, false);
         mob.human = is_player_class(info.job);
         mob.look = look;
         if let ro_net::UnitPos::Walking { from, to } = info.pos {
@@ -1639,10 +1642,17 @@ impl App {
                 }
                 self.skill_fx(skill, self.cell_pos(cell), true);
             }
+            Achievement { id, completed } => {
+                if completed {
+                    let title = self.achievements.get(&id).cloned().unwrap_or_else(|| format!("#{id}"));
+                    self.hud.push_chat(ro_net::ChatKind::System, format!("Achievement complete: {title}"));
+                    self.play_sound("ui_achievement_complete.wav");
+                }
+            }
             UnitOption { id, option } => {
-                // Hiding, Cloaking, Chase Walk: the original draws you faded.
+                let me = id == self.account_id;
                 if let Some(m) = self.mob_mut(id) {
-                    m.actor.alpha = if option & (0x2 | 0x4 | 0x4000) != 0 { 0.35 } else { 1.0 };
+                    m.actor.alpha = option_alpha(option, me);
                 }
             }
             GroundEffect { id, cell, kind } => {
@@ -2078,7 +2088,9 @@ impl App {
                     let short = n.split_once('_').map_or(n, |(_, rest)| rest).to_ascii_lowercase();
                     [short.clone(), short.replace('_', "")]
                 });
-                let asset = by_name.iter().flatten().find_map(|n| self.fx.get(r, vfs, n)).or_else(|| damaging.then(|| self.fx.get(r, vfs, "hit")).flatten());
+                let folder = by_name.as_ref().and_then(|n| self.fx.find(&n[0])).map(str::to_string);
+                let asset = by_name.iter().flatten().find_map(|n| self.fx.get(r, vfs, n))
+                    .or_else(|| folder.and_then(|p| self.fx.get(r, vfs, &p))).or_else(|| damaging.then(|| self.fx.get(r, vfs, "hit")).flatten());
                 if let Some(asset) = asset {
                     r.effects.push(ro_render::Fx { asset, pos, time_ms: 0.0, looping: false, tag: 0 });
                 } else if let Some(tex) = self.fx.texture(r, vfs, "alpha_down.tga") {
@@ -2145,7 +2157,7 @@ impl App {
         let mut v: Vec<(i32, u32)> = self
             .units
             .iter()
-            .filter(|(_, m)| m.dying.is_none() && if players { m.kind == 0 } else { m.kind == 5 || (matches!(m.kind, 1 | 6) && !m.name.is_empty()) })
+            .filter(|(_, m)| m.dying.is_none() && m.actor.alpha > 0.01 && if players { m.kind == 0 } else { m.kind == 5 || (matches!(m.kind, 1 | 6) && !m.name.is_empty()) })
             .map(|(id, m)| ((m.walker.cell.0 - me.0).pow(2) + (m.walker.cell.1 - me.1).pow(2), *id))
             .filter(|(d, _)| *d <= PAD_REACH * PAD_REACH)
             .collect();
@@ -2513,6 +2525,9 @@ impl App {
         self.units
             .iter()
             .filter_map(|(&id, m)| {
+                if m.actor.alpha <= 0.01 {
+                    return None;
+                }
                 let feet = r.project(m.actor.pos, size)?;
                 // Rough sprite box: about two cells tall, a little over one wide.
                 let top = r.project(m.actor.pos + glam::Vec3::Y * 2.2 * ro_render::CELL, size)?;
@@ -2867,7 +2882,7 @@ impl App {
         let size = self.capture.as_ref().map_or_else(|| r.size(), |(_, w, h)| (*w, *h));
         let mut labels = vec![];
         for m in self.player.iter().chain(self.units.values()) {
-            let shown = self.world.as_ref().is_none_or(|w| w.shows_cell(m.walker.cell.0, m.walker.cell.1));
+            let shown = m.actor.alpha > 0.01 && self.world.as_ref().is_none_or(|w| w.shows_cell(m.walker.cell.0, m.walker.cell.1));
             if let (true, Some(color), Some(feet)) = (shown, m.label_color(), r.project(m.actor.pos, size)) {
                 labels.push(hud::Label { feet, text: m.name.clone(), color });
             }
@@ -3488,6 +3503,7 @@ fn main() -> anyhow::Result<()> {
         item_db: None,
         skill_names: Default::default(),
         skill_tree: Default::default(),
+        achievements: Default::default(),
         inventory: Default::default(),
         floor: Default::default(),
         stats: None,
@@ -3574,6 +3590,25 @@ fn main() -> anyhow::Result<()> {
     if let Some(vfs) = app.vfs.as_ref() {
         // iteminfo.lub lives in the client's System folder; skill names in the GRF.
         let read = |p: &str| vfs.read(p).ok().flatten();
+        app.fx.index(vfs);
+        // Achievement titles, for the "achievement complete" notice.
+        if let Some(d) = read(r"System\achievement_list.lub") {
+            match ro_formats::lub::eval(&d) {
+                Ok(c) => {
+                    for (name, table) in &c.globals {
+                        if name != "achievement_tbl" {
+                            continue;
+                        }
+                        for (id, entry) in c.entries(table) {
+                            if let (Some(id), Some(title)) = (id.as_number(), c.field(entry, "title").and_then(|t| t.as_str())) {
+                                app.achievements.insert(id as u32, title.to_string());
+                            }
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!("achievement_list: {e:#}"),
+            }
+        }
         match read(r"System\iteminfo.lub").map(|d| ro_game::items::ItemDb::from_lub(&d)) {
             Some(Ok(db)) => {
                 tracing::info!(items = db.len(), "loaded item info");
@@ -3661,5 +3696,15 @@ mod login_addr_tests {
         assert_eq!(n("[::1]"), "[::1]:6900");
         assert_eq!(n("[::1]:7000"), "[::1]:7000");
         assert_eq!(n("::1"), "[::1]:6900");
+    }
+}
+
+/// How opaque a unit is under its OPTION_* flags. Hiding, cloaking and Chase Walk show
+/// you faded; other units (and NPCs cloaked by scripts) vanish entirely.
+fn option_alpha(option: u32, me: bool) -> f32 {
+    match (option & (0x2 | 0x4 | 0x40 | 0x4000) != 0, me) {
+        (false, _) => 1.0,
+        (true, true) => 0.35,
+        (true, false) => 0.0,
     }
 }

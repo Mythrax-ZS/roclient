@@ -431,6 +431,8 @@ pub struct UnitInfo {
     pub object_type: u8,
     pub id: u32,
     pub speed: i16,
+    /// Effect state (OPTION_* flags: 0x2 hiding, 0x4 cloaking, 0x40 invisible, ...).
+    pub option: u32,
     /// Class: job id for players, sprite class for everything else.
     pub job: i16,
     pub hair: u16,
@@ -472,6 +474,7 @@ pub fn parse_unit(opcode: u16, data: &[u8]) -> Option<UnitInfo> {
         // AID: the unit id used by vanish/move packets (GID is a char id, 0 for NPCs).
         id: u32_at(5),
         speed: i16_at(13),
+        option: u32_at(19),
         job: i16_at(23),
         hair: u16_at(25),
         hair_color: i16_at(palette_at),

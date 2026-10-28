@@ -35,3 +35,10 @@ impl Vfs {
         Ok(None)
     }
 }
+
+impl Vfs {
+    /// Every file name in the GRFs (normalized, backslashes).
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.grfs.iter().flat_map(|g| g.names())
+    }
+}
