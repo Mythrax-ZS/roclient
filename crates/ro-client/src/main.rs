@@ -377,6 +377,7 @@ struct Mob {
 enum Pose {
     Attack,
     Hurt,
+    PickUp,
     Dead,
 }
 
@@ -406,6 +407,7 @@ impl Mob {
             (false, Pose::Attack) => 2,
             (false, Pose::Hurt) => 3,
             (false, Pose::Dead) => 4,
+            (_, Pose::PickUp) => 3,
         }
     }
 
@@ -1133,7 +1135,14 @@ impl App {
                 }
                 return;
             }
-            1 => return, // picked something up
+            1 => {
+                tracing::debug!(src = act.src, "pick-up animation");
+                // Picked something up: crouch (three frames, about 300 ms).
+                if let Some(m) = self.mob_mut(act.src) {
+                    m.set_pose(Pose::PickUp, 300.0);
+                }
+                return;
+            }
             _ => {}
         }
         if let Some(m) = self.mob_mut(act.src) {
