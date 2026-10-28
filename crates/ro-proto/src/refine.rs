@@ -160,3 +160,38 @@ impl Encode for GradeRequest {
         }
     }
 }
+
+/// Random enchant requests (the "Enchant" UI); `group` is the set the server opened.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EnchantRequest {
+    Random { group: u64, index: u16 },
+    Perfect { group: u64, index: u16, item: u32 },
+    Upgrade { group: u64, index: u16, slot: u16 },
+    Reset { group: u64, index: u16 },
+    Close,
+}
+
+impl Encode for EnchantRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            EnchantRequest::Random { group, index } | EnchantRequest::Reset { group, index } => {
+                d.put_u16_le(if matches!(self, EnchantRequest::Random { .. }) { 0x0b9b } else { 0x0b9e });
+                d.put_u64_le(*group);
+                d.put_u16_le(*index);
+            }
+            EnchantRequest::Perfect { group, index, item } => {
+                d.put_u16_le(0x0b9c);
+                d.put_u64_le(*group);
+                d.put_u16_le(*index);
+                d.put_u32_le(*item);
+            }
+            EnchantRequest::Upgrade { group, index, slot } => {
+                d.put_u16_le(0x0b9d);
+                d.put_u64_le(*group);
+                d.put_u16_le(*index);
+                d.put_u16_le(*slot);
+            }
+            EnchantRequest::Close => d.put_u16_le(0x0ba0),
+        }
+    }
+}

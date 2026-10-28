@@ -17,7 +17,8 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_NPC_BARTER_MARKET_ITEMINFO / EXPANDED_BARTER (barter shops)
 - [ ] ZC_STYLE_CHANGE_RES (stylist), ZC_DRESSROOM_OPEN
 - [ ] ZC_ADD_SKILL, ZC_SKILLINFO_UPDATE2, ZC_SKILLINFO_DELETE (`skill` / `bonus_script` skills)
-- [ ] ZC_UI_OPEN2 / V3, ZC_OPEN_REFORM_UI / ITEM_REFORM_ACK, ZC_RESPONSE_ENCHANT
+- [x] Random enchant (ZC_UI_OPEN_V3 + ZC_RESPONSE_ENCHANT) from the official enchantlist.lub (32-bit bytecode widened and run)
+- [ ] ZC_OPEN_REFORM_UI / ITEM_REFORM_ACK
 - [ ] ZC_REPUTE_INFO / OPEN
 - [ ] ZC_MERGE_ITEM_OPEN / ACK_MERGE_ITEM, ZC_RANDOM_COMBINE / RANDOM_UPGRADE_ITEM
 

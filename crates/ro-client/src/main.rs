@@ -22,6 +22,7 @@ mod ai;
 mod booking;
 mod battle;
 mod clan;
+mod enchant;
 mod market;
 mod customdata;
 mod navigation;
@@ -824,6 +825,7 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    enchant: enchant::Enchant,
     market: market::Market,
     /// Test hook: a market purchase to make once a shop opens.
     market_buy: Option<(usize, u32)>,
@@ -2528,6 +2530,18 @@ impl App {
             }
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
+            UiOpenV3 { kind: 10, data } => self.enchant.open(self.vfs.as_ref(), data),
+            UiOpenV3 { .. } => {}
+            EnchantResult { msg, item } => {
+                if msg == 3857 && item != 0 {
+                    if let Some((index, slot)) = self.enchant.filled_slot(&self.inventory.items) {
+                        if let Some(it) = self.inventory.items.get_mut(&index) {
+                            it.cards[slot] = item;
+                        }
+                    }
+                }
+                self.enchant.result(msg == 3857, item, self.item_db.as_ref());
+            }
             HatEffect { id, on, effects } => {
                 for e in effects {
                     let key = (id, e);
@@ -3933,6 +3947,12 @@ impl App {
                         }
                         None
                     }
+                    Some(("enchant", id)) => {
+                        if let Some(r) = id.parse().ok().and_then(item).and_then(|(index, _)| self.enchant.test_random(index)) {
+                            self.queued_commands.push(ro_net::Command::Enchant(r));
+                        }
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -4746,6 +4766,11 @@ impl App {
                 };
                 self.clan.show(ui.ctx());
                 {
+                    let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
+                    let reqs = self.enchant.show(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons, self.hud.status.zeny);
+                    self.queued_commands.extend(reqs.into_iter().map(ro_net::Command::Enchant));
+                }
+                {
                     let inv = &self.inventory;
                     let have = |id: u32| inv.items.values().filter(|i| i.id == id && i.equipped == 0).map(|i| i.amount as u32).sum::<u32>();
                     let reqs = self.market.show(ui.ctx(), self.item_db.as_ref(), &self.icons, self.hud.status.zeny, &have);
@@ -5322,6 +5347,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        enchant: Default::default(),
         market: Default::default(),
         market_buy: None,
         battle: Default::default(),

@@ -21,7 +21,7 @@ pub use ro_proto::quests::{Objective, Quest};
 pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, MerchantRequest, VendItem, WantedItem};
 pub use ro_proto::market::{BarterItem, MarketItem, MarketRequest};
 pub use ro_proto::bg::{apply_error as bg_apply_error, BgEvent, BgRequest, CastleRequest};
-pub use ro_proto::refine::{GradeOptions, GradeRequest, RefineOption, RefineRequest};
+pub use ro_proto::refine::{EnchantRequest, GradeOptions, GradeRequest, RefineOption, RefineRequest};
 use ro_proto::refine::*;
 use ro_proto::merchant::*;
 pub use ro_proto::progress::{AchRank, Achievement, ProgressRequest};
@@ -372,6 +372,10 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_UI_OPEN_V3: a UI with a 64-bit argument (type 10: the enchant window, its set).
+    UiOpenV3 { kind: u8, data: u64 },
+    /// ZC_RESPONSE_ENCHANT: (message id, the enchant added).
+    EnchantResult { msg: u32, item: u32 },
     /// ZC_EQUIPMENT_EFFECT: hat effects on (or off) a unit.
     HatEffect { id: u32, on: bool, effects: Vec<u16> },
     /// ZC_ACK_REQNAMEALL: a player's party, guild and rank names.
@@ -536,6 +540,7 @@ pub enum Command {
     Merchant(MerchantRequest),
     Refine(RefineRequest),
     Grade(GradeRequest),
+    Enchant(EnchantRequest),
     Bg(BgRequest),
     Castle(CastleRequest),
     Market(MarketRequest),
@@ -683,6 +688,7 @@ impl MapSession {
                     Some(Command::Merchant(r)) => self.send(r).await?,
                     Some(Command::Refine(r)) => self.send(r).await?,
                     Some(Command::Grade(r)) => self.send(r).await?,
+                    Some(Command::Enchant(r)) => self.send(r).await?,
                     Some(Command::Bg(r)) => self.send(r).await?,
                     Some(Command::Castle(r)) => self.send(r).await?,
                     Some(Command::Market(r)) => self.send(r).await?,
@@ -792,6 +798,8 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0b9a if data.len() >= 11 => Some(Event::UiOpenV3 { kind: data[2], data: u64::from_le_bytes(data[3..11].try_into().unwrap()) }),
+                        0x0b9f if data.len() >= 10 => Some(Event::EnchantResult { msg: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), item: u32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
                         0x0a3b if data.len() >= 9 => Some(Event::HatEffect { id: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), on: data[8] != 0, effects: data[9..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect() }),
                         0x0a30 => ro_proto::social::parse_name_all(&data).map(|(id, _, party, guild, rank)| Event::NameAll { id, party, guild, rank }),
                         0x0147 if data.len() >= 10 => Some(Event::AutorunSkill { id: u16::from_le_bytes([data[2], data[3]]), target: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), level: u16::from_le_bytes([data[8], data[9]]) }),

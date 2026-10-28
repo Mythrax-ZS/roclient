@@ -265,3 +265,67 @@ mod eval_tests {
         assert!(c.entries(desc).len() >= 3);
     }
 }
+
+/// Rewrites a Lua 5.1 chunk compiled with a 4-byte size_t (the client's 32-bit build) for
+/// a 64-bit Lua 5.1, which reads string lengths as 8 bytes. Returns other chunks as-is.
+pub fn widen_size_t(data: &[u8]) -> Result<Vec<u8>> {
+    ensure!(data.len() >= 12 && &data[..4] == b"\x1bLua" && data[4] == 0x51, "not a Lua 5.1 chunk");
+    if data[8] == 8 {
+        return Ok(data.to_vec());
+    }
+    ensure!(data[6] == 1 && data[7] == 4 && data[8] == 4 && data[9] == 4 && data[10] == 8, "unsupported Lua 5.1 build {:?}", &data[5..12]);
+    let mut r = Reader::new(&data[12..]);
+    let mut out = data[..12].to_vec();
+    out[8] = 8;
+    fn string(r: &mut Reader, out: &mut Vec<u8>) -> Result<()> {
+        let n = r.u32()? as usize;
+        out.extend((n as u64).to_le_bytes());
+        out.extend(r.bytes(n)?);
+        Ok(())
+    }
+    fn ints(r: &mut Reader, out: &mut Vec<u8>, each: usize) -> Result<usize> {
+        let n = r.u32()? as usize;
+        out.extend((n as u32).to_le_bytes());
+        out.extend(r.bytes(n * each)?);
+        Ok(n)
+    }
+    fn function(r: &mut Reader, out: &mut Vec<u8>, depth: u32) -> Result<()> {
+        ensure!(depth < 200, "Lua chunk nests too deeply");
+        string(r, out)?; // source
+        out.extend(r.bytes(4 + 4 + 4)?); // line defined, last line, nups/params/vararg/maxstack
+        ints(r, out, 4)?; // code
+        let k = r.u32()?;
+        out.extend(k.to_le_bytes());
+        for _ in 0..k {
+            let t = r.u8()?;
+            out.push(t);
+            match t {
+                0 => {}
+                1 => out.push(r.u8()?),
+                3 => out.extend(r.bytes(8)?),
+                4 => string(r, out)?,
+                t => bail!("bad constant type {t}"),
+            }
+        }
+        let p = r.u32()?;
+        out.extend(p.to_le_bytes());
+        for _ in 0..p {
+            function(r, out, depth + 1)?;
+        }
+        ints(r, out, 4)?; // line info
+        let locals = r.u32()?;
+        out.extend(locals.to_le_bytes());
+        for _ in 0..locals {
+            string(r, out)?;
+            out.extend(r.bytes(8)?);
+        }
+        let ups = r.u32()?;
+        out.extend(ups.to_le_bytes());
+        for _ in 0..ups {
+            string(r, out)?;
+        }
+        Ok(())
+    }
+    function(&mut r, &mut out, 0)?;
+    Ok(out)
+}
