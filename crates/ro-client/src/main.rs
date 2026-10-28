@@ -923,6 +923,8 @@ struct App {
     viewpoints: std::collections::HashMap<(u32, u8), ((f32, f32), egui::Color32, Option<std::time::Instant>)>,
     /// Party and guild members elsewhere on the map: id -> (cell, guild?).
     member_pos: std::collections::HashMap<u32, ((f32, f32), bool)>,
+    /// Spirit spheres per unit (ZC_SPIRITS).
+    spirits: std::collections::HashMap<u32, u16>,
     /// Our normal attack reach (ZC_ATTACK_RANGE).
     attack_range: i32,
     /// ZC_MAPPROPERTY_R2 flags of the current map.
@@ -2552,6 +2554,13 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            Spirits { id, count } => {
+                if count == 0 {
+                    self.spirits.remove(&id);
+                } else {
+                    self.spirits.insert(id, count);
+                }
+            }
             SkillAdded(mut s) => {
                 tracing::debug!(id = s.id, level = s.level, "skill added");
                 match self.skills.iter_mut().find(|k| k.id == s.id) {
@@ -4668,7 +4677,7 @@ impl App {
         // HUD: names under actors, status, chat. Laid out for the capture size when capturing.
         let size = self.capture.as_ref().map_or_else(|| r.size(), |(_, w, h)| (*w, *h));
         let mut labels = vec![];
-        for m in self.player.iter().chain(self.units.values()) {
+        for (uid, m) in self.player.iter().map(|p| (self.account_id, p)).chain(self.units.iter().map(|(i, m)| (*i, m))) {
             let shown = m.actor.alpha > 0.01 && self.world.as_ref().is_none_or(|w| w.shows_cell(m.walker.cell.0, m.walker.cell.1));
             if let (true, Some(color), Some(feet)) = (shown, m.label_color(), r.project(m.actor.pos, size)) {
                 // As the original: "Name (Party)", then "Guild [Rank]" on a second line.
@@ -4684,7 +4693,8 @@ impl App {
                     }
                 }
                 let emblem = (m.guild != 0).then(|| self.emblems.get(&m.guild).cloned().flatten()).flatten().map(|t| t.id());
-                labels.push(hud::Label { feet, text, color, emblem });
+                let orbs = self.spirits.get(&uid).copied().unwrap_or(0);
+                labels.push(hud::Label { feet, text, color, emblem, orbs });
             }
         }
         let floaters: Vec<_> = self.floaters.iter().filter_map(|(pos, text, color, age)| Some((r.project(*pos, size)?, text.clone(), *color, *age))).collect();
@@ -5604,6 +5614,7 @@ fn main() -> anyhow::Result<()> {
         talk_to: arg("--talk"),
         viewpoints: Default::default(),
         member_pos: Default::default(),
+        spirits: Default::default(),
         attack_range: 1,
         map_flags: 0,
         hat_files: Default::default(),

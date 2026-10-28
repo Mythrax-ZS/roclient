@@ -62,6 +62,8 @@ pub struct Label {
     pub color: Color32,
     /// Guild emblem drawn left of the name.
     pub emblem: Option<egui::TextureId>,
+    /// Spirit spheres circling the unit.
+    pub orbs: u16,
 }
 
 #[derive(Default)]
@@ -192,6 +194,18 @@ impl Hud {
                 painter.image(e, r, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
             }
             painter.text(pos, Align2::CENTER_TOP, &l.text, font, l.color);
+            if l.orbs > 0 {
+                // Spheres circling over the head, as the original draws them.
+                let t = ctx.input(|i| i.time) as f32;
+                let centre = egui::pos2(l.feet.x / ppp, l.feet.y / ppp - 95.0);
+                for k in 0..l.orbs.min(15) {
+                    let a = t * 1.6 + k as f32 * std::f32::consts::TAU / l.orbs.min(15) as f32;
+                    let p = centre + Vec2::new(a.cos() * 26.0, a.sin() * 9.0);
+                    painter.circle_filled(p, 7.0, Color32::from_rgba_unmultiplied(255, 160, 30, 90));
+                    painter.circle(p, 4.0, Color32::from_rgb(255, 215, 80), egui::Stroke::new(1.0, Color32::from_rgb(140, 70, 0)));
+                }
+                ctx.request_repaint();
+            }
         }
 
         // HP bars under monsters that have been hit.
