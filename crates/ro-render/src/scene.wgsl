@@ -19,11 +19,14 @@ struct Globals {
     sprite_light: vec4<f32>,
     // Pairs: (position, range), (colour, 0).
     lights: array<vec4<f32>, 64>,
+    // x: 1 when indoors (room mask active), y/z: mask size in cells, w: world units per cell
+    room: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var shadow_map: texture_depth_2d;
 @group(0) @binding(2) var shadow_samp: sampler_comparison;
+@group(0) @binding(3) var room_mask: texture_2d<f32>;
 @group(1) @binding(0) var tex: texture_2d<f32>;
 @group(1) @binding(1) var samp: sampler;
 @group(1) @binding(2) var lightmap: texture_2d<f32>;
@@ -70,6 +73,9 @@ struct FsOut {
 
 @fragment
 fn fs_main(in: VsOut) -> FsOut {
+    if !in_room(in.world) {
+        discard;
+    }
     let t = textureSample(tex, samp, in.uv);
     if t.a < 0.5 {
         discard;
@@ -119,4 +125,16 @@ fn point_light(world: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
         sum += g.lights[i * 2 + 1].rgb * f * f * wrap;
     }
     return sum * g.sprite_light.z;
+}
+
+/// Indoors, only the room the player is in is drawn (other rooms share the map).
+fn in_room(world: vec3<f32>) -> bool {
+    if g.room.x < 0.5 {
+        return true;
+    }
+    let cell = vec2<i32>(floor(world.xz / g.room.w));
+    if cell.x < 0 || cell.y < 0 || cell.x >= i32(g.room.y) || cell.y >= i32(g.room.z) {
+        return false;
+    }
+    return textureLoad(room_mask, cell, 0).r > 0.5;
 }

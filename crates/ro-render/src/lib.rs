@@ -48,6 +48,8 @@ struct Globals {
     sprite_light: [f32; 4],
     /// Point lights near the camera, as pairs: (position, range), (colour, 0).
     lights: [[f32; 4]; MAX_LIGHTS * 2],
+    /// Room mask: x 1 when active, y/z mask size in cells.
+    room: [f32; 4],
 }
 
 /// One frame of tessellated egui output.
@@ -110,6 +112,9 @@ pub struct Renderer {
     targets: Targets,
     globals: wgpu::Buffer,
     globals_bind: wgpu::BindGroup,
+    globals_layout: wgpu::BindGroupLayout,
+    /// Indoor room mask size in cells (None: draw everything).
+    room: Option<(u32, u32)>,
     grid: wgpu::RenderPipeline,
     scene_pipeline: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
@@ -240,6 +245,17 @@ impl Renderer {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+                // Room mask (indoor maps): which cells are drawn, one texel per GAT cell.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
             ],
@@ -431,15 +447,8 @@ impl Renderer {
         });
         // The sun shadow map is bound with the globals so world shaders can sample it.
         let shadow = shadow::Shadow::new(&device, &sprite_layout);
-        let globals_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("globals"),
-            layout: &globals_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shadow.view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&shadow.compare) },
-            ],
-        });
+        let room_mask = room_mask_view(&device, &queue, 1, 1, &[255]);
+        let globals_bind = globals_bind_group(&device, &globals_layout, &globals, &shadow, &room_mask);
         let effect_pipeline = pipeline(
             "effect",
             include_str!("effect.wgsl"),
@@ -477,6 +486,8 @@ impl Renderer {
             targets,
             globals,
             globals_bind,
+            globals_layout,
+            room: None,
             grid,
             scene_pipeline,
             texture_layout,
@@ -555,6 +566,17 @@ impl Renderer {
         let h = glam::Vec2::new(d.x, d.z).try_normalize().unwrap_or(glam::Vec2::new(0.6, 0.8));
         let (s, c) = elev.to_radians().sin_cos();
         glam::Vec3::new(h.x * c, -s, h.y * c)
+    }
+
+    /// Indoor maps: draw only cells set in `mask` (`w` x `h`, one byte per GAT cell, row 0
+    /// = cell y 0). None draws everything.
+    pub fn set_room_mask(&mut self, mask: Option<(u32, u32, &[u8])>) {
+        let view = match mask {
+            Some((w, h, cells)) => room_mask_view(&self.device, &self.queue, w, h, cells),
+            None => room_mask_view(&self.device, &self.queue, 1, 1, &[255]),
+        };
+        self.room = mask.map(|(w, h, _)| (w, h));
+        self.globals_bind = globals_bind_group(&self.device, &self.globals_layout, &self.globals, &self.shadow, &view);
     }
 
     /// Uploads a texture for code-drawn effects (light columns, ground circles).
@@ -831,6 +853,10 @@ impl Renderer {
                 out[..lights.len()].copy_from_slice(&lights);
                 out
             },
+            room: match self.room {
+                Some((w, h)) => [1.0, w as f32, h as f32, CELL],
+                None => [0.0; 4],
+            },
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
@@ -1056,4 +1082,39 @@ impl Renderer {
         let ndc = clip.truncate() / clip.w;
         Some(glam::Vec2::new((ndc.x + 1.0) * 0.5 * w, (1.0 - ndc.y) * 0.5 * h))
     }
+}
+
+/// A one-texel-per-cell mask (255 drawn, 0 hidden) for indoor maps.
+fn room_mask_view(device: &wgpu::Device, queue: &wgpu::Queue, w: u32, h: u32, cells: &[u8]) -> wgpu::TextureView {
+    let size = wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 };
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("room mask"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        tex.as_image_copy(),
+        cells,
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w.max(1)), rows_per_image: None },
+        size,
+    );
+    tex.create_view(&Default::default())
+}
+
+fn globals_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, shadow: &shadow::Shadow, room: &wgpu::TextureView) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("globals"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shadow.view) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&shadow.compare) },
+            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(room) },
+        ],
+    })
 }

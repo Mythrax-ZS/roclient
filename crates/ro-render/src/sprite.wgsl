@@ -22,6 +22,8 @@ struct Globals {
     // x: sprite lighting, y: rim, z: point light intensity, w: light count
     sprite_light: vec4<f32>,
     lights: array<vec4<f32>, 64>,
+    // x: 1 when indoors (room mask active), y/z: mask size in cells, w: world units per cell
+    room: vec4<f32>,
 };
 
 /// World units (about two cells) a sprite's depth is pulled toward the camera.
@@ -30,6 +32,7 @@ const DEPTH_PULL: f32 = 10.0;
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var shadow_map: texture_depth_2d;
 @group(0) @binding(2) var shadow_samp: sampler_comparison;
+@group(0) @binding(3) var room_mask: texture_2d<f32>;
 @group(1) @binding(0) var tex: texture_2d<f32>;
 @group(1) @binding(1) var samp: sampler;
 
@@ -117,6 +120,9 @@ struct FsOut {
 
 @fragment
 fn fs_main(in: VsOut) -> FsOut {
+    if !in_room(in.anchor) {
+        discard;
+    }
     // Premultiplied texture: tint colour, scale everything by the layer alpha.
     let s = textureSample(tex, samp, in.uv);
     // Rim: texels whose neighbour toward the sun is transparent are lit edges.
@@ -142,4 +148,16 @@ fn fs_main(in: VsOut) -> FsOut {
         rgb += srgb_to_linear(g.diffuse.rgb) * edge * g.sprite_light.y * up;
     }
     return FsOut(vec4(rgb * t.a, t.a), vec4(distance(in.anchor, g.eye.xyz), 1.0, 0.0, 0.0));
+}
+
+/// Indoors, only the room the player is in is drawn (other rooms share the map).
+fn in_room(world: vec3<f32>) -> bool {
+    if g.room.x < 0.5 {
+        return true;
+    }
+    let cell = vec2<i32>(floor(world.xz / g.room.w));
+    if cell.x < 0 || cell.y < 0 || cell.x >= i32(g.room.y) || cell.y >= i32(g.room.z) {
+        return false;
+    }
+    return textureLoad(room_mask, cell, 0).r > 0.5;
 }

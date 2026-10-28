@@ -374,6 +374,63 @@ struct World {
     name: String,
     ground: ro_render::SceneMesh,
     gat: Option<ro_formats::gat::Gat>,
+    /// Indoor maps: the cells of the room we are in, plus its walls (one byte per cell).
+    room: Option<Vec<u8>>,
+}
+
+/// Cells around a room's floor still drawn, so its walls and furniture show.
+const ROOM_MARGIN: i32 = 5;
+
+impl World {
+    /// Interior maps pack many rooms (linked by warps) into one map.
+    fn indoor(&self) -> bool {
+        self.name.contains("_in")
+    }
+
+    /// Whether a cell is drawn (always, outdoors).
+    fn shows_cell(&self, x: i32, y: i32) -> bool {
+        match (&self.room, &self.gat) {
+            (Some(room), Some(g)) => x >= 0 && y >= 0 && (x as u32) < g.width && (y as u32) < g.height && room[(y as u32 * g.width + x as u32) as usize] != 0,
+            _ => true,
+        }
+    }
+
+    /// The room containing `start`: walkable cells reachable from it, grown by ROOM_MARGIN.
+    fn room_of(&self, start: (i32, i32)) -> Option<Vec<u8>> {
+        let g = self.gat.as_ref()?;
+        let (w, h) = (g.width as i32, g.height as i32);
+        if !g.walkable(start.0, start.1) {
+            return None;
+        }
+        let mut floor = vec![false; (w * h) as usize];
+        let mut stack = vec![start];
+        floor[(start.1 * w + start.0) as usize] = true;
+        while let Some((x, y)) = stack.pop() {
+            for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let (nx, ny) = (x + dx, y + dy);
+                if nx >= 0 && ny >= 0 && nx < w && ny < h && !floor[(ny * w + nx) as usize] && g.walkable(nx, ny) {
+                    floor[(ny * w + nx) as usize] = true;
+                    stack.push((nx, ny));
+                }
+            }
+        }
+        // Grow by the margin (separable: rows, then columns).
+        let mut rows = vec![false; floor.len()];
+        for y in 0..h {
+            for x in 0..w {
+                rows[(y * w + x) as usize] = (x - ROOM_MARGIN..=x + ROOM_MARGIN).any(|sx| sx >= 0 && sx < w && floor[(y * w + sx) as usize]);
+            }
+        }
+        let mut out = vec![0u8; floor.len()];
+        for y in 0..h {
+            for x in 0..w {
+                if (y - ROOM_MARGIN..=y + ROOM_MARGIN).any(|sy| sy >= 0 && sy < h && rows[(sy * w + x) as usize]) {
+                    out[(y * w + x) as usize] = 255;
+                }
+            }
+        }
+        Some(out)
+    }
 }
 
 /// Fractional cell (centre plus the server's twelfth-of-a-cell offset) of a floor item.
@@ -792,7 +849,8 @@ impl App {
                 if let Some(a) = self.audio.as_mut() {
                     a.enter_map(vfs, name);
                 }
-                self.world = Some(World { name: name.to_string(), ground: map.mesh, gat });
+                r.set_room_mask(None);
+                self.world = Some(World { name: name.to_string(), ground: map.mesh, gat, room: None });
                 self.ready_at = Some(std::time::Instant::now());
             }
             Err(e) => tracing::error!("map {name}: {e:#}"),
@@ -1786,6 +1844,20 @@ impl App {
         }
     }
 
+    /// Indoors: recompute which room we are in when we step outside the current one (map
+    /// entry, warps within the map) and hand the renderer its mask.
+    fn update_room(&mut self) {
+        let (Some(w), Some(p)) = (self.world.as_mut(), self.player.as_ref()) else { return };
+        if !w.indoor() || (w.room.is_some() && w.shows_cell(p.walker.cell.0, p.walker.cell.1)) {
+            return;
+        }
+        let Some(room) = w.room_of(p.walker.cell) else { return };
+        if let (Some(r), Some(g)) = (self.renderer.as_mut(), w.gat.as_ref()) {
+            r.set_room_mask(Some((g.width, g.height, &room)));
+        }
+        w.room = Some(room);
+    }
+
     /// The cursor for what is under the mouse, as the original client shows it.
     fn hover_cursor(&self) -> usize {
         use hud::cursor::*;
@@ -2531,6 +2603,7 @@ impl App {
             self.next_hop();
         }
 
+        self.update_room();
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         r.actors.clear();
         r.warps = self
@@ -2538,6 +2611,9 @@ impl App {
             .values()
             .filter_map(|&(x, y)| {
                 let w = self.world.as_ref()?;
+                if !w.shows_cell(x as i32, y as i32) {
+                    return None;
+                }
                 let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
                 let (wx, wz) = (fx * ro_render::CELL, fy * ro_render::CELL);
                 let h = w.gat.as_ref().and_then(|g| g.height_at(fx, fy)).map_or_else(|| w.ground.height_at(wx, wz), |h| -h);
@@ -2614,7 +2690,8 @@ impl App {
         let size = self.capture.as_ref().map_or_else(|| r.size(), |(_, w, h)| (*w, *h));
         let mut labels = vec![];
         for m in self.player.iter().chain(self.units.values()) {
-            if let (Some(color), Some(feet)) = (m.label_color(), r.project(m.actor.pos, size)) {
+            let shown = self.world.as_ref().is_none_or(|w| w.shows_cell(m.walker.cell.0, m.walker.cell.1));
+            if let (true, Some(color), Some(feet)) = (shown, m.label_color(), r.project(m.actor.pos, size)) {
                 labels.push(hud::Label { feet, text: m.name.clone(), color });
             }
         }
@@ -2681,7 +2758,7 @@ impl App {
             let dots: Vec<_> = self
                 .units
                 .values()
-                .filter(|m| m.dying.is_none())
+                .filter(|m| m.dying.is_none() && self.world.as_ref().is_none_or(|w| w.shows_cell(m.walker.cell.0, m.walker.cell.1)))
                 .filter_map(|m| {
                     let color = match m.kind {
                         0 if party.contains(m.name.as_str()) => egui::Color32::from_rgb(255, 130, 200),

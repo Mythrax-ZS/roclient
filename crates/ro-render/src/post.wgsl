@@ -103,7 +103,10 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
     let blur_ao = mix(1.0, textureSample(ao_tex, samp, in.uv).r, 1.0 - inf.y);
     var c = mix(sharp, textureSample(blurred, samp, in.uv).rgb * blur_ao, t);
     // Distance haze toward the far parts of the view, tinted by the map's ambient light.
-    let haze = smoothstep(p.depth.z, p.depth.w, depth) * p.fog.a;
+    // Nothing drawn there (the void around indoor rooms): leave it dark.
+    // (MSAA edges average real depth with the void's 60000, so anything far past the fog
+    // range counts as void too.)
+    let haze = smoothstep(p.depth.z, p.depth.w, depth) * p.fog.a * select(1.0, 0.0, depth > p.depth.w * 3.0);
     c = mix(c, p.fog.rgb, haze);
     c += textureSample(bloom_tex, samp, in.uv).rgb * p.bloom.z;
     c += textureSample(rays_tex, samp, in.uv).rgb * p.rays.z;
