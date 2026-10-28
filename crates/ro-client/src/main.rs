@@ -2115,7 +2115,15 @@ impl App {
             }
             GuildInfo(info) => {
                 self.guild.name = info.name.clone();
+                // Fetch the emblem when it is new or changed.
+                if info.emblem != 0 && self.guild.emblem.as_ref().is_none_or(|e| e.0 != info.emblem) {
+                    self.send(ro_net::Command::Guild(ro_net::GuildRequest::Emblem(info.id)));
+                }
                 self.guild.info = Some(info);
+            }
+            GuildEmblem { guild, version, data } => {
+                let ctx = self.egui_ctx.clone();
+                self.guild.set_emblem(&ctx, guild, version, &data);
             }
             GuildMembers(m) => self.guild.members = m,
             GuildRankNames(names) => {
@@ -3842,6 +3850,12 @@ impl App {
                         }
                         None
                     }
+                    Some(("emblem", f)) => {
+                        if let Some(c) = self.guild.upload_emblem(f) {
+                            self.queued_commands.push(c);
+                        }
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -5284,6 +5298,7 @@ fn main() -> anyhow::Result<()> {
         ui_scale: 1.0, // from settings below
     };
     app.class_names = app.vfs.as_ref().map(load_class_names).unwrap_or_default();
+    app.guild.client_dir = app.client_dir.clone();
     app.ui_scale = app.settings.ui_scale;
     if args.iter().any(|a| matches!(a.as_str(), "--front-login" | "--front-create" | "--front-make" | "--front-start")) {
         app.queued_commands.push(ro_net::Command::Login { user: cfg_user.clone(), pass: cfg_pass.clone() });

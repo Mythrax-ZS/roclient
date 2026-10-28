@@ -23,6 +23,10 @@ pub enum GuildRequest {
     Positions(Vec<Position>),
     /// Move a member to a rank.
     SetRank { account_id: u32, char_id: u32, position: i32 },
+    /// CZ_REQ_GUILD_EMBLEM_IMG: ask for a guild's emblem.
+    Emblem(u32),
+    /// CZ_REGISTER_GUILD_EMBLEM_IMG: upload a zlib-compressed 24x24 BMP.
+    SetEmblem(Vec<u8>),
 }
 
 impl Encode for GuildRequest {
@@ -68,6 +72,15 @@ impl Encode for GuildRequest {
                 d.put_slice(&body);
             }
             // CZ_REQ_CHANGE_MEMBERPOS (0x0155).
+            GuildRequest::Emblem(guild) => {
+                d.put_u16_le(0x0151);
+                d.put_u32_le(*guild);
+            }
+            GuildRequest::SetEmblem(data) => {
+                d.put_u16_le(0x0153);
+                d.put_u16_le((4 + data.len()) as u16);
+                d.put_slice(data);
+            }
             GuildRequest::SetRank { account_id, char_id, position } => {
                 d.put_u16_le(0x0155);
                 d.put_u16_le(16);
@@ -108,6 +121,7 @@ pub struct GuildInfo {
     pub name: String,
     pub castle: String,
     pub master: String,
+    pub emblem: u32,
 }
 
 pub fn parse_guild_info(data: &[u8]) -> GuildInfo {
@@ -119,12 +133,13 @@ pub fn parse_guild_info(data: &[u8]) -> GuildInfo {
     let average_level = b.get_i32_le();
     let exp = b.get_i32_le();
     let max_exp = b.get_i32_le();
-    b.advance(4 * 4); // points, honor, virtue, emblem version
+    b.advance(4 * 3); // points, honor, virtue
+    let emblem = b.get_u32_le();
     let name = get_fixed_str(&mut b, 24);
     let castle = get_fixed_str(&mut b, 16);
     b.advance(4 + 4); // zeny, master char id
     let master = get_fixed_str(&mut b, 24);
-    GuildInfo { id, level, members, max_members, average_level, exp, max_exp, name, castle, master }
+    GuildInfo { id, level, members, max_members, average_level, exp, max_exp, name, castle, master, emblem }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

@@ -372,6 +372,8 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_GUILD_EMBLEM_IMG: (guild, emblem version, zlib-compressed image).
+    GuildEmblem { guild: u32, version: u32, data: Vec<u8> },
     /// ZC_MVP: someone got the MVP of a boss.
     Mvp(u32),
     /// ZC_MVP_GETTING_ITEM / SPECIAL_EXP / THROW_MVPITEM.
@@ -775,6 +777,7 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0152 if data.len() >= 12 => Some(Event::GuildEmblem { guild: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), version: u32::from_le_bytes([data[8], data[9], data[10], data[11]]), data: data[12..].to_vec() }),
                         0x010c if data.len() >= 6 => Some(Event::Mvp(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x010a if data.len() >= 6 => Some(Event::MvpItem(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x010b if data.len() >= 6 => Some(Event::MvpExp(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),

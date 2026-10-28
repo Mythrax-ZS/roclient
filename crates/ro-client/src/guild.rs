@@ -41,6 +41,12 @@ pub struct Guild {
     edit_notice: Option<(String, String)>,
     /// Ask for info and members next time the window shows.
     pub needs_refresh: bool,
+    /// Our emblem: (version, texture).
+    pub emblem: Option<(u32, egui::TextureHandle)>,
+    /// The client folder, where Emblem*.bmp files are picked from.
+    pub client_dir: Option<std::path::PathBuf>,
+    emblem_files: Option<Vec<String>>,
+    pub emblem_status: String,
 }
 
 /// What the window needs from the rest of the client.
@@ -91,7 +97,7 @@ impl Guild {
             });
             ui.separator();
             match self.tab {
-                Tab::Info => self.info(ui),
+                Tab::Info => self.info(ui, &mut out),
                 Tab::Members => self.members(ui, c, &mut out),
                 Tab::Positions => self.positions(ui, &mut out),
                 Tab::Skills => self.skills(ui, &mut out),
@@ -119,11 +125,23 @@ impl Guild {
         ui.label(RichText::new("Or type /guild \"Name\" in chat.").color(crate::classic::ink(Color32::GRAY)).size(11.5));
     }
 
-    fn info(&self, ui: &mut egui::Ui) {
-        let Some(i) = &self.info else {
+    fn info(&mut self, ui: &mut egui::Ui, out: &mut Vec<Command>) {
+        let Some(i) = self.info.clone() else {
             ui.label(RichText::new("Loading...").color(crate::classic::ink(Color32::GRAY)));
             return;
         };
+        ui.horizontal(|ui| {
+            match &self.emblem {
+                Some((_, t)) => ui.image((t.id(), Vec2::splat(48.0))),
+                None => ui.allocate_exact_size(Vec2::splat(48.0), egui::Sense::hover()).1,
+            };
+            ui.label(RichText::new(&i.name).strong().size(17.0));
+        });
+        if self.master {
+            self.emblem_picker(ui, out);
+        }
+        ui.separator();
+        let i = &i;
         egui::Grid::new("guild info").num_columns(2).spacing(Vec2::new(16.0, 6.0)).show(ui, |ui| {
             let row = |ui: &mut egui::Ui, k: &str, v: String| {
                 ui.label(RichText::new(k).color(crate::classic::ink(Color32::GRAY)));
@@ -334,4 +352,85 @@ fn guild_skill_name(internal: &str) -> String {
         _ => "",
     };
     if known.is_empty() { internal.trim_start_matches("GD_").replace('_', " ") } else { known.to_string() }
+}
+
+impl Guild {
+    /// The leader's emblem change: 24x24 BMPs from the client's Emblem folder, as the
+    /// original client lists them.
+    fn emblem_picker(&mut self, ui: &mut egui::Ui, out: &mut Vec<Command>) {
+        let Some(dir) = self.client_dir.as_ref().map(|d| d.join("Emblem")) else { return };
+        let files = self.emblem_files.get_or_insert_with(|| {
+            let mut v: Vec<String> = std::fs::read_dir(&dir)
+                .map(|r| r.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.to_lowercase().ends_with(".bmp")).collect())
+                .unwrap_or_default();
+            v.sort();
+            v
+        }).clone();
+        let mut rescan = false;
+        let mut pick = None;
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("emblem_pick").selected_text("Change emblem...").show_ui(ui, |ui| {
+                if files.is_empty() {
+                    ui.label(format!("Put 24x24 .bmp files in {}", dir.display()));
+                }
+                for f in files.iter() {
+                    if ui.selectable_label(false, f).clicked() {
+                        pick = Some(f.clone());
+                    }
+                }
+            });
+            rescan = ui.small_button("Rescan").clicked();
+        });
+        if rescan {
+            self.emblem_files = None;
+        }
+        if let Some(f) = pick {
+            out.extend(self.upload_emblem(&f));
+        }
+        if !self.emblem_status.is_empty() {
+            ui.label(RichText::new(&self.emblem_status).size(11.0).color(crate::classic::ink(Color32::GRAY)));
+        }
+    }
+
+    /// Reads Emblem<f> and makes the upload request (checks it is a 24x24 BMP).
+    pub fn upload_emblem(&mut self, f: &str) -> Option<Command> {
+        let dir = self.client_dir.as_ref()?.join("Emblem");
+        {
+            match std::fs::read(dir.join(f)) {
+                Ok(bmp) if bmp.len() > 26 && &bmp[..2] == b"BM" && u32::from_le_bytes([bmp[18], bmp[19], bmp[20], bmp[21]]) == 24 && i32::from_le_bytes([bmp[22], bmp[23], bmp[24], bmp[25]]).unsigned_abs() == 24 => {
+                    use std::io::Write;
+                    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+                    let _ = z.write_all(&bmp);
+                    let data = z.finish().ok()?;
+                    self.emblem_status = format!("Uploading {f}...");
+                    Some(Command::Guild(GuildRequest::SetEmblem(data)))
+                }
+                Ok(_) => {
+                    self.emblem_status = "The emblem must be a 24x24 BMP.".into();
+                    None
+                }
+                Err(e) => {
+                    self.emblem_status = format!("Can't read {f}: {e}");
+                    None
+                }
+            }
+        }
+    }
+
+    /// An emblem arrived (zlib-compressed BMP or GIF).
+    pub fn set_emblem(&mut self, ctx: &egui::Context, guild: u32, version: u32, data: &[u8]) {
+        if guild != self.id {
+            return;
+        }
+        use std::io::Read;
+        let mut raw = vec![];
+        if flate2::read::ZlibDecoder::new(data).read_to_end(&mut raw).is_err() {
+            return;
+        }
+        let Ok(img) = ro_formats::image::decode(&raw, "emblem.bmp") else { return };
+        // Magenta is transparent, as in other client art.
+        let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
+        self.emblem = Some((version, ctx.load_texture(format!("emblem {guild} {version}"), color, egui::TextureOptions::NEAREST)));
+        self.emblem_status.clear();
+    }
 }

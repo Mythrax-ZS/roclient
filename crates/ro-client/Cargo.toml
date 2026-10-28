@@ -4,6 +4,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+flate2.workspace = true
 ro-net = { path = "../ro-net" }
 ro-render = { path = "../ro-render" }
 ro-formats = { path = "../ro-formats" }
