@@ -372,6 +372,14 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_MVP: someone got the MVP of a boss.
+    Mvp(u32),
+    /// ZC_MVP_GETTING_ITEM / SPECIAL_EXP / THROW_MVPITEM.
+    MvpItem(u32),
+    MvpExp(u32),
+    MvpDropped,
+    /// Party / guild member positions for the minimap (ZC_NOTIFY_POSITION_TO_GROUPM / GUILDM).
+    MemberPos { id: u32, x: u16, y: u16, guild: bool },
     /// An NPC market shop opened (limited stock).
     Market(Vec<MarketItem>),
     MarketResult { ok: bool, bought: Vec<(u32, u16, u32)> },
@@ -767,6 +775,11 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x010c if data.len() >= 6 => Some(Event::Mvp(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x010a if data.len() >= 6 => Some(Event::MvpItem(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x010b if data.len() >= 6 => Some(Event::MvpExp(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x010d => Some(Event::MvpDropped),
+                        0x0107 | 0x01eb if data.len() >= 10 => Some(Event::MemberPos { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), x: u16::from_le_bytes([data[6], data[7]]), y: u16::from_le_bytes([data[8], data[9]]), guild: opcode == 0x01eb }),
                         0x0b7a => Some(Event::Market(ro_proto::market::parse_market(&data))),
                         0x0b4e => ro_proto::market::parse_market_result(&data).map(|(ok, bought)| Event::MarketResult { ok, bought }),
                         0x0b78 => Some(Event::Barter { items: ro_proto::market::parse_barter(&data), expanded: false }),

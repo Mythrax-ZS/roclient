@@ -900,6 +900,8 @@ struct App {
     talk_to: Option<String>,
     /// Script minimap marks (viewpoint): (npc, mark id) -> (cell, colour, blinking until).
     viewpoints: std::collections::HashMap<(u32, u8), ((f32, f32), egui::Color32, Option<std::time::Instant>)>,
+    /// Party and guild members elsewhere on the map: id -> (cell, guild?).
+    member_pos: std::collections::HashMap<u32, ((f32, f32), bool)>,
     /// Test hook (--npc-answers): replies to NPC dialog steps, in order.
     npc_answers: std::collections::VecDeque<String>,
     /// `--attack`: attack the nearest monster once one is in view (scripted test).
@@ -2491,6 +2493,26 @@ impl App {
                 }
             }
             RemoveEffect { .. } => {}
+            Mvp(id) => {
+                if let Some(pos) = self.unit_pos(id) {
+                    self.play_fx("mvp", pos);
+                }
+                let who = if id == self.account_id { self.hud.status.name.clone() } else { self.units.get(&id).map_or_else(|| "Someone".into(), |m| m.name.clone()) };
+                self.hud.push_chat(ro_net::ChatKind::Broadcast, format!("{who} is the MVP!"));
+            }
+            MvpItem(item) => {
+                let name = self.item_db.as_ref().map_or_else(|| format!("Item #{item}"), |d| d.name(item, true));
+                self.hud.push_chat(ro_net::ChatKind::System, format!("MVP reward: {name}."));
+            }
+            MvpExp(exp) => self.hud.push_chat(ro_net::ChatKind::System, format!("MVP reward: {exp} experience.")),
+            MvpDropped => self.hud.push_chat(ro_net::ChatKind::System, "You are the MVP, but the reward dropped to the floor because you are overweight.".into()),
+            MemberPos { id, x, y, guild } => {
+                if x == 0xffff || y == 0xffff {
+                    self.member_pos.remove(&id);
+                } else {
+                    self.member_pos.insert(id, ((x as f32, y as f32), guild));
+                }
+            }
             UnitEffect { id, effect } => {
                 if let (Some(name), Some(pos)) = (fx::misc_effect(effect), self.unit_pos(id)) {
                     self.play_fx(name, pos);
@@ -2504,6 +2526,7 @@ impl App {
             MapMove { map, x, y } => {
                 // Respawning at the save point arrives as a map move.
                 self.viewpoints.clear();
+                self.member_pos.clear();
                 self.revive();
                 self.units.clear();
                 self.floor.clear();
@@ -4488,6 +4511,7 @@ impl App {
                     Some(((m.walker.cell.0 as f32, m.walker.cell.1 as f32), color))
                 })
                 .collect();
+            dots.extend(self.member_pos.iter().filter(|(id, _)| !self.units.contains_key(id) && **id != self.account_id).map(|(_, (c, guild))| (*c, if *guild { egui::Color32::from_rgb(170, 255, 170) } else { egui::Color32::from_rgb(255, 130, 200) })));
             dots.extend(self.battle.team_dots().into_iter().map(|c| (c, egui::Color32::from_rgb(255, 160, 200))));
             let me = self.player.as_ref().map(|p| (p.walker.cell.0 as f32, p.walker.cell.1 as f32));
             let map_name = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
@@ -5227,6 +5251,7 @@ fn main() -> anyhow::Result<()> {
         script: arg("--do").map(|s| s.split(",").map(str::to_string).collect()).unwrap_or_default(),
         talk_to: arg("--talk"),
         viewpoints: Default::default(),
+        member_pos: Default::default(),
         npc_answers: arg("--npc-answers").map(|s| s.split(',').map(str::to_string).collect()).unwrap_or_default(),
         auto_attack: args.iter().any(|a| a == "--attack"),
         units: Default::default(),
