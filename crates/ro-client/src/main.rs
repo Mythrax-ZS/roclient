@@ -67,7 +67,6 @@ fn open_vfs(cfg: &Config) -> anyhow::Result<Option<ro_vfs::Vfs>> {
     Ok(Some(vfs))
 }
 
-/// Reads a map's ground and textures from the VFS.
 /// Character appearance, as the char server describes it.
 #[derive(Clone)]
 struct Look {
@@ -76,10 +75,16 @@ struct Look {
     male: bool,
     hair: u16,
     hair_color: u16,
+    gear: ro_net::Look,
 }
 
-/// Loads body, head (with hair dye) and shadow sheets for a player character.
-fn load_character(vfs: &ro_vfs::Vfs, r: &mut ro_render::Renderer, look: &Look) -> anyhow::Result<ro_render::Actor> {
+/// Loads body, head (with hair dye), worn headgear and weapon, and shadow sheets.
+fn load_character(
+    vfs: &ro_vfs::Vfs,
+    r: &mut ro_render::Renderer,
+    look: &Look,
+    tables: &ro_game::looks::LookTables,
+) -> anyhow::Result<ro_render::Actor> {
     let sex = if look.male { "남" } else { "여" };
     let mut sheet = |base: &str, palette: Option<String>| -> anyhow::Result<ro_render::SheetId> {
         let read = |p: String| vfs.read(&p)?.with_context(|| format!("{p} not found"));
@@ -95,10 +100,32 @@ fn load_character(vfs: &ro_vfs::Vfs, r: &mut ro_render::Renderer, look: &Look) -
         (look.hair_color > 0).then(|| format!("data\\palette\\머리\\머리{}_{sex}_{}.pal", look.hair, look.hair_color)),
     )?;
     let shadow = sheet("data\\sprite\\shadow", None).inspect_err(|e| tracing::warn!("shadow sprite: {e:#}")).ok();
+    // Equipment is optional: a missing sprite just isn't drawn.
+    let g = look.gear;
+    let mut headgear = vec![];
+    for view in [g.head_bottom, g.head_mid, g.head_top] {
+        if view == 0 {
+            continue;
+        }
+        // A headgear on several slots (e.g. top+mid) is drawn once.
+        if let Some(name) = tables.accessory(view as u32) {
+            match sheet(&format!("data\\sprite\\악세사리\\{sex}\\{sex}{name}"), None) {
+                Ok(id) if !headgear.contains(&id) => headgear.push(id),
+                Ok(_) => {}
+                Err(e) => tracing::debug!(view, "headgear sprite: {e:#}"),
+            }
+        }
+    }
+    let weapon = (g.weapon != 0)
+        .then(|| tables.weapon(g.weapon))
+        .flatten()
+        .and_then(|name| sheet(&format!("data\\sprite\\인간족\\{}\\{}_{sex}{name}", look.job, look.job), None).inspect_err(|e| tracing::debug!(weapon = g.weapon, "weapon sprite: {e:#}")).ok());
     Ok(ro_render::Actor {
         pos: Default::default(),
         body,
         head: Some(head),
+        headgear,
+        weapon,
         shadow,
         action: 0,
         dir: ro_render::Dir::S,
@@ -342,6 +369,8 @@ struct Mob {
     /// Playing the death animation; removed when it runs out (None for the player).
     dying: Option<f32>,
     hp: Option<(i32, i32)>,
+    /// Player-sprite appearance (None for NPCs and monsters).
+    look: Option<Look>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -364,6 +393,7 @@ impl Mob {
             sitting: false,
             dying: None,
             hp: None,
+            look: None,
         }
     }
 
@@ -563,6 +593,7 @@ struct App {
     /// Warp portals in view (drawn as an effect, not a sprite), by unit id.
     warps: std::collections::HashMap<u32, (u16, u16)>,
     class_names: std::collections::HashMap<i16, String>,
+    look_tables: ro_game::looks::LookTables,
     /// Loaded actor templates by sprite key (None: not available, don't retry).
     sprites: std::collections::HashMap<String, Option<ro_render::Actor>>,
     /// When the current map became ready (for --capture-after).
@@ -605,12 +636,17 @@ impl App {
 
     /// Actor template for a player look, cached so sheets upload once per look.
     fn player_actor(&mut self, look: &Look) -> Option<ro_render::Actor> {
-        let key = format!("player:{}:{}:{}:{}", look.job, look.male, look.hair, look.hair_color);
+        let key = format!("player:{}:{}:{}:{}:{:?}", look.job, look.male, look.hair, look.hair_color, look.gear);
         if let Some(a) = self.sprites.get(&key) {
             return a.clone();
         }
         let (r, vfs) = (self.renderer.as_mut()?, self.vfs.as_ref()?);
-        let actor = load_character(vfs, r, look).inspect_err(|e| tracing::warn!("player sprites {key}: {e:#}")).ok();
+        // Weapons arrive as item ids; their sprite class is the item's ClassNum (iteminfo).
+        let mut resolved = look.clone();
+        if let Some(info) = self.item_db.as_ref().and_then(|d| d.get(look.gear.weapon)) {
+            resolved.gear.weapon = info.view;
+        }
+        let actor = load_character(vfs, r, &resolved, &self.look_tables).inspect_err(|e| tracing::warn!("player sprites {key}: {e:#}")).ok();
         self.sprites.insert(key, actor.clone());
         actor
     }
@@ -633,7 +669,7 @@ impl App {
             Some((spr, act)) => {
                 let body = r.add_sheet(&spr, act, None);
                 let shadow = self.sprites.get("shadow").cloned().flatten().and_then(|a| a.shadow);
-                Some(ro_render::Actor { pos: Default::default(), body, head: None, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false })
+                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: None, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false })
             }
             None => {
                 tracing::debug!(job, %name, "no sprite for class");
@@ -651,7 +687,28 @@ impl App {
             self.sprites.insert("shadow".into(), Some(actor.clone()));
             let mut mob = Mob::new(actor, cell, dir, speed);
             mob.name = self.hud.status.name.clone();
+            mob.look = Some(look.clone());
             self.player = Some(mob);
+        }
+    }
+
+    /// Applies a ZC_SPRITE_CHANGE to a player-sprite unit (us or another player).
+    fn look_change(&mut self, id: u32, kind: u8, value: u32, value2: u32) {
+        let Some(mut look) = self.mob_mut(id).and_then(|m| m.look.clone()) else { return };
+        match kind {
+            1 => look.hair = value.max(1) as u16,
+            2 => (look.gear.weapon, look.gear.shield) = (value, value2),
+            3 => look.gear.head_bottom = value as u16,
+            4 => look.gear.head_top = value as u16,
+            5 => look.gear.head_mid = value as u16,
+            6 => look.hair_color = value as u16,
+            _ => return,
+        }
+        let Some(fresh) = self.player_actor(&look) else { return };
+        if let Some(m) = self.mob_mut(id) {
+            // Keep position, pose and timing; swap the layers.
+            (m.actor.body, m.actor.head, m.actor.headgear, m.actor.weapon) = (fresh.body, fresh.head, fresh.headgear, fresh.weapon);
+            m.look = Some(look);
         }
     }
 
@@ -682,16 +739,16 @@ impl App {
             111 | 139 | 32767 => return,
             _ => {}
         }
-        let actor = if is_player_class(info.job) {
-            let look = Look {
-                job: job_sprite(info.job).to_string(),
-                male: info.sex == 1,
-                hair: info.hair.max(1),
-                hair_color: info.hair_color.max(0) as u16,
-            };
-            self.player_actor(&look)
-        } else {
-            self.class_actor(info.job)
+        let look = is_player_class(info.job).then(|| Look {
+            job: job_sprite(info.job).to_string(),
+            male: info.sex == 1,
+            hair: info.hair.max(1),
+            hair_color: info.hair_color.max(0) as u16,
+            gear: info.look,
+        });
+        let actor = match &look {
+            Some(l) => self.player_actor(l),
+            None => self.class_actor(info.job),
         };
         let Some(actor) = actor else { return };
         let (cell, dir) = match info.pos {
@@ -703,6 +760,7 @@ impl App {
         mob.name = info.name.split('#').next().unwrap_or_default().trim().to_string();
         mob.kind = info.object_type;
         mob.human = is_player_class(info.job);
+        mob.look = look;
         if let ro_net::UnitPos::Walking { from, to } = info.pos {
             let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
             mob.walk(gat, from, to);
@@ -769,6 +827,7 @@ impl App {
                     male: character.sex == 1,
                     hair: character.head.max(1) as u16,
                     hair_color: character.hair_color as u16,
+                    gear: character.look,
                 };
                 let s = &mut self.hud.status;
                 s.name = character.name.clone();
@@ -841,6 +900,7 @@ impl App {
                 self.attack = Some((target, range.max(1)));
                 self.request_walk(target_cell);
             }
+            LookChange { id, kind, value, value2 } => self.look_change(id, kind, value, value2),
             InventoryStart => self.inventory.items.clear(),
             Items(list) => {
                 for it in list {
@@ -1016,7 +1076,7 @@ impl App {
         let actor = match (spr, act) {
             (Some(spr), Some(act)) => {
                 let body = r.add_sheet(&spr, act, None);
-                Some(ro_render::Actor { pos: Default::default(), body, head: None, shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false })
+                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: None, shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false })
             }
             _ => None,
         };
@@ -1693,7 +1753,7 @@ fn main() -> anyhow::Result<()> {
         still: args.iter().any(|a| a == "--still"),
         distance: arg("--distance").and_then(|d| d.parse().ok()),
         yaw: arg("--yaw").and_then(|d| d.parse().ok()),
-        look: Look { job: arg("--job").unwrap_or_else(|| "초보자".into()), male: arg("--sex").is_none_or(|s| s != "f"), hair: 1, hair_color: 0 },
+        look: Look { job: arg("--job").unwrap_or_else(|| "초보자".into()), male: arg("--sex").is_none_or(|s| s != "f"), hair: 1, hair_color: 0, gear: Default::default() },
         action: arg("--action").and_then(|a| a.parse().ok()).unwrap_or(0),
         dir: arg("--dir").and_then(|d| d.parse::<usize>().ok()).unwrap_or(0) % 8,
         capture_after: arg("--capture-after").and_then(|d| d.parse().ok()).unwrap_or(0.0),
@@ -1733,6 +1793,7 @@ fn main() -> anyhow::Result<()> {
         units: Default::default(),
         warps: Default::default(),
         class_names: Default::default(),
+        look_tables: Default::default(),
         sprites: Default::default(),
         ready_at: None,
         last_tick: std::time::Instant::now(),
@@ -1764,6 +1825,13 @@ fn main() -> anyhow::Result<()> {
             }
             Some(Err(e)) => tracing::warn!("iteminfo: {e:#}"),
             None => tracing::warn!("System/iteminfo.lub not found; items will show by id"),
+        }
+        let info = |n: &str| read(&format!(r"data\luafiles514\lua files\datainfo\{n}.lub"));
+        if let (Some(a), Some(b), Some(c)) = (info("accessoryid"), info("accname"), info("weapontable")) {
+            match ro_game::looks::LookTables::from_lubs(&a, &b, &c) {
+                Ok(t) => app.look_tables = t,
+                Err(e) => tracing::warn!("equipment sprite tables: {e:#}"),
+            }
         }
         let skills = read(r"data\luafiles514\lua files\skillinfoz\skillinfolist.lub").map(|d| ro_game::skills::SkillNames::from_lub(&d));
         match skills {

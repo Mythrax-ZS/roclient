@@ -11,7 +11,7 @@ use ro_proto::{id, packets::*, Frame, RoCodec, ServerTable};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-pub use ro_proto::packets::{sp, Act, CharInfo, ChatKind, NpcDialog, NpcReply, UnitInfo, UnitPos};
+pub use ro_proto::packets::{sp, Act, CharInfo, ChatKind, Look, NpcDialog, NpcReply, UnitInfo, UnitPos};
 pub use ro_proto::items::{FloorItem, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
 
@@ -169,6 +169,8 @@ pub enum Event {
     Npc(NpcDialog),
     /// A unit left view (reason: 0 out of sight, 1 died, 2 logged out, 3 teleported).
     Vanish { id: u32, reason: u8 },
+    /// A unit's appearance changed (see `parse_sprite_change` kinds).
+    LookChange { id: u32, kind: u8, value: u32, value2: u32 },
     /// The server is about to resend the whole inventory.
     InventoryStart,
     Items(Vec<ItemData>),
@@ -340,6 +342,10 @@ impl MapSession {
                         }
                         0x0add | 0x009d => parse_floor_item(opcode, &data).map(Event::FloorItem),
                         0x00a1 => Some(Event::FloorItemGone(parse_item_disappear(&data))),
+                        0x01d7 => {
+                            let (id, kind, value, value2) = parse_sprite_change(&data);
+                            Some(Event::LookChange { id, kind, value, value2 })
+                        }
                         0x00bd => Some(Event::Stats(parse_status(&data))),
                         0x00bc => {
                             let (stat, ok, value) = parse_status_change_ack(&data);

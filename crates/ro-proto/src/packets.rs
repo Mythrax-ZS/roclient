@@ -236,6 +236,7 @@ pub struct CharInfo {
     pub base_level: i16,
     /// Milliseconds per cell.
     pub speed: i16,
+    pub look: Look,
     pub name: String,
     pub slot: u8,
     pub hair_color: u8,
@@ -258,9 +259,15 @@ pub fn parse_char_info(mut b: &[u8]) -> CharInfo {
     let job = b.get_i16_le();
     let head = b.get_i16_le();
     let _body = b.get_i16_le();
-    let _weapon = b.get_i16_le();
+    let weapon = b.get_i16_le();
     let base_level = b.get_i16_le();
-    b.advance(2 * 7); // sppoint, accessories, shield, palettes
+    let _sppoint = b.get_i16_le();
+    let head_bottom = b.get_i16_le() as u16;
+    let shield = b.get_i16_le() as u16 as u32;
+    let head_top = b.get_i16_le() as u16;
+    let head_mid = b.get_i16_le() as u16;
+    b.advance(4); // palettes
+    let look = Look { weapon: weapon as u16 as u32, shield, head_top, head_mid, head_bottom };
     let name = get_fixed_str(&mut b, 24);
     b.advance(6); // stats
     let slot = b.get_u8();
@@ -269,7 +276,7 @@ pub fn parse_char_info(mut b: &[u8]) -> CharInfo {
     let map = get_fixed_str(&mut b, 16);
     b.advance(4 * 4);
     let sex = b.get_u8();
-    CharInfo { char_id, base_exp, zeny, job_level, hp, max_hp, sp, max_sp, job, head, base_level, speed, name, slot, hair_color, map, sex }
+    CharInfo { char_id, base_exp, zeny, job_level, hp, max_hp, sp, max_sp, job, head, base_level, speed, look, name, slot, hair_color, map, sex }
 }
 
 /// 0x006b: 3 + 20 bytes of header data, then characters.
@@ -425,6 +432,7 @@ pub struct UnitInfo {
     pub job: i16,
     pub hair: u16,
     pub hair_color: i16,
+    pub look: Look,
     pub sex: u8,
     pub name: String,
     pub pos: UnitPos,
@@ -464,6 +472,13 @@ pub fn parse_unit(opcode: u16, data: &[u8]) -> Option<UnitInfo> {
         job: i16_at(23),
         hair: u16_at(25),
         hair_color: i16_at(palette_at),
+        look: Look {
+            weapon: u32_at(27),
+            shield: u32_at(31),
+            head_bottom: u16_at(35),
+            head_top: u16_at(if walking { 41 } else { 37 }),
+            head_mid: u16_at(if walking { 43 } else { 39 }),
+        },
         sex: data[sex_at],
         name,
         pos,
@@ -800,4 +815,21 @@ mod combat_tests {
         CzRequestAct { target: 9, action: 7 }.encode(&mut b);
         assert_eq!(b.len(), client_packet("ActionRequest").len as usize);
     }
+}
+
+/// Worn equipment views: weapon/shield sprite classes and headgear view ids.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Look {
+    pub weapon: u32,
+    pub shield: u32,
+    pub head_top: u16,
+    pub head_mid: u16,
+    pub head_bottom: u16,
+}
+
+/// ZC_SPRITE_CHANGE (0x01d7): (unit, kind, value, value2). Kinds: 1 hair, 2 weapon
+/// (value2 = shield), 3 lower headgear, 4 upper, 5 middle, 6 hair colour.
+pub fn parse_sprite_change(data: &[u8]) -> (u32, u8, u32, u32) {
+    let mut b = &data[2..];
+    (b.get_u32_le(), b.get_u8(), b.get_u32_le(), b.get_u32_le())
 }

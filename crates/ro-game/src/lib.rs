@@ -1,6 +1,7 @@
 //! Client-side game state: walking along server-confirmed paths.
 
 pub mod items;
+pub mod looks;
 pub mod path;
 pub mod skills;
 

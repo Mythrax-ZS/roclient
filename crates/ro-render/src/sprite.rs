@@ -55,6 +55,10 @@ pub struct Actor {
     pub pos: Vec3,
     pub body: SheetId,
     pub head: Option<SheetId>,
+    /// Headgear layers (lower, middle, upper), attached like the head.
+    pub headgear: Vec<SheetId>,
+    /// Weapon layer: same frames as the body, no anchor shift.
+    pub weapon: Option<SheetId>,
     pub shadow: Option<SheetId>,
     /// Action group (0 idle, 1 walk, 2 sit, ...); the ACT index is `action * 8 + dir`.
     pub action: usize,
@@ -174,18 +178,43 @@ pub(crate) fn actor_quads(sheets: &[Sheet], a: &Actor) -> Vec<(usize, Vec<Vertex
     body.emit(bf, a.pos, [0.0, 0.0], &mut v);
     out.push((a.body.0, v));
 
-    // The head follows the body's frame index so its anchor lines up every frame
-    // (a separate timer lets the two drift and the head bobs).
-    if let Some(head) = a.head.and_then(|id| sheets.get(id.0)) {
-        if let Some(hf) = head.frame(index, body_frame) {
-            let shift = match (bf.anchors.first(), hf.anchors.first()) {
+    // Facing away (NW/N/NE): the weapon is held in front of the body from the camera's view
+    // only when facing us, so draw it first when facing away.
+    let facing_away = matches!(a.dir, Dir::NW | Dir::N | Dir::NE);
+    let weapon = |out: &mut Vec<(usize, Vec<Vertex>)>| {
+        if let Some(w) = a.weapon.and_then(|id| sheets.get(id.0)) {
+            if let Some(wf) = w.frame(index, body_frame) {
+                let mut v = vec![];
+                w.emit(wf, a.pos, [0.0, 0.0], &mut v);
+                out.push((a.weapon.unwrap().0, v));
+            }
+        }
+    };
+    if facing_away {
+        weapon(&mut out);
+    }
+
+    let mut v = vec![];
+    body.emit(bf, a.pos, [0.0, 0.0], &mut v);
+    out.push((a.body.0, v));
+
+    // Head and headgear follow the body's frame index and attach at the body's anchor
+    // (a separate timer lets them drift and the head bobs).
+    let attached = a.head.iter().chain(a.headgear.iter());
+    for &id in attached {
+        let Some(sheet) = sheets.get(id.0) else { continue };
+        if let Some(f) = sheet.frame(index, body_frame) {
+            let shift = match (bf.anchors.first(), f.anchors.first()) {
                 (Some(b), Some(h)) => [(b[0] - h[0]) as f32, (b[1] - h[1]) as f32],
                 _ => [0.0, 0.0],
             };
             let mut v = vec![];
-            head.emit(hf, a.pos, shift, &mut v);
-            out.push((a.head.unwrap().0, v));
+            sheet.emit(f, a.pos, shift, &mut v);
+            out.push((id.0, v));
         }
+    }
+    if !facing_away {
+        weapon(&mut out);
     }
     out
 }
