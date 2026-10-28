@@ -71,22 +71,38 @@ Settings → Visual. The same fields are in `settings.toml` under `[visual]`.
 `PostSettings` also holds `bloom_threshold`, `dof_band`, `exposure` and
 `shadow_softness` for finer tuning.
 
-## Roadmap, in order of visual impact
+## Lighting, atmosphere and stability
 
-1. **Sprite lighting.** Tint sprites by the map's ambient and diffuse light and by the
-   shadow map at their feet, so characters darken under trees and awnings. Add a rim light
-   from the sun direction for the "lit paper cut-out" edge.
-2. **Point lights.** RSW maps list light sources (torches, lamps). Upload the nearest
-   N (~32) as a storage buffer, add their falloff to ground, models and sprites, and give
-   bright ones a small additive glow sprite. Pairs with bloom.
-3. **Fog and light shafts.** Height fog toward the horizon edges (tinted by map
-   ambient), plus a screen-space radial blur of the bloom bright pass from the sun's
-   projected position for god rays.
-4. **Ambient occlusion.** Bake per-vertex AO for RSM models at load (hemisphere rays
-   against the GAT/model heights), or add a half-resolution SSAO pass once depth is
-   resolved to a sampleable texture.
-5. **Depth-aware DoF.** Resolve depth (or write linear depth into a second target) and
-   blend the tilt-shift mask with real distance from the focal plane, so tall
-   foreground objects blur correctly.
-6. **Pixel stability.** Snap sprite anchors to the screen pixel grid at integer zooms,
-   and keep sprite sampling nearest-neighbour when the camera is close.
+All six roadmap items are implemented:
+
+1. **Sprite lighting** (`sprite.wgsl`). Each sprite takes the map light at its feet
+   relative to full sun, so it keeps its colours in the open and darkens in shadow. Feet
+   shadow comes from the shadow map, sampled a little toward the sun so a sprite never shades
+   itself. Nearby light sources add to it, and a sun-coloured rim lights the edges whose
+   neighbour toward the sun is transparent.
+2. **Point lights**. RSW light sources (colour floats, range; position centred like models,
+   y flipped) go to the renderer. The 32 nearest the camera ride in the globals and light
+   ground and models (half-wrapped, smooth falloff) and sprites.
+3. **Fog and god rays** (`post.wgsl`). Fog: linear distance from the depth-info target
+   blends toward a pale sky tinted by the map ambient, from 1.15x to 2.6x the camera
+   distance. God rays: the bloom bright pass is marched toward the sun's screen
+   position (24 taps with decay) and added in the composite.
+4. **Ambient occlusion** (`fs_ao`). A 12-tap spiral over linear depth at half
+   resolution; nearby neighbours closer to the eye occlude, with range limits against
+   halos. Sprites neither cast nor receive it.
+5. **Depth-aware DoF**. Every world and sprite pixel writes `(distance, is_sprite)` to an
+   `Rg16Float` target alongside colour, resolved from MSAA. The composite blur is the
+   larger of the tilt-shift band and real distance from the focal plane (the player).
+6. **Pixel stability**. Sprite anchors snap to whole screen pixels (`params.w`), so
+   sprites don't shimmer as the camera glides.
+
+Settings → Visual adds sliders for sprite lighting, rim light, light sources, fog,
+god rays and ambient occlusion, plus a pixel-snapping toggle (`PostSettings` fields of
+the same names).
+
+### Ideas beyond this
+
+- Per-light shadow maps for the brightest torches.
+- Light flicker on fire-coloured sources, and small additive glow sprites on light positions.
+- Baked per-vertex AO for models (cheaper and steadier than screen-space AO).
+- Nearest-neighbour sprite sampling at high zoom.

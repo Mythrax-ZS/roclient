@@ -170,7 +170,8 @@ impl Rsw {
                 2 => {
                     let name = r.string(80)?;
                     let pos = vec3(&mut r)?;
-                    let color = [r.i32()? as f32, r.i32()? as f32, r.i32()? as f32];
+                    // Colour channels are floats (0..1), not integers.
+                    let color = [r.f32()?, r.f32()?, r.f32()?];
                     let range = r.f32()?;
                     lights.push(PointLight { name, pos, color, range });
                 }

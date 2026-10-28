@@ -36,6 +36,13 @@ pub struct Visual {
     pub warmth: f32,
     pub saturation: f32,
     pub contrast: f32,
+    pub sprite_light: f32,
+    pub rim_light: f32,
+    pub point_lights: f32,
+    pub fog: f32,
+    pub god_rays: f32,
+    pub ambient_occlusion: f32,
+    pub pixel_snap: bool,
 }
 
 impl Default for Visual {
@@ -51,6 +58,13 @@ impl Default for Visual {
             warmth: p.warmth,
             saturation: p.saturation,
             contrast: p.contrast,
+            sprite_light: p.sprite_light,
+            rim_light: p.rim_light,
+            point_lights: p.point_lights,
+            fog: p.fog,
+            god_rays: p.god_rays,
+            ambient_occlusion: p.ambient_occlusion,
+            pixel_snap: p.pixel_snap,
         }
     }
 }
@@ -67,6 +81,13 @@ impl Visual {
             warmth: self.warmth,
             saturation: self.saturation,
             contrast: self.contrast,
+            sprite_light: self.sprite_light,
+            rim_light: self.rim_light,
+            point_lights: self.point_lights,
+            fog: self.fog,
+            god_rays: self.god_rays,
+            ambient_occlusion: self.ambient_occlusion,
+            pixel_snap: self.pixel_snap,
             ..Default::default()
         }
     }
@@ -142,6 +163,21 @@ impl Settings {
                 ui.end_row();
                 ui.add_enabled_ui(v.hd2d, |ui| ui.label("Contrast"));
                 ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.contrast, 0.7..=1.4));
+                ui.end_row();
+                for (label, value, max) in [
+                    ("Sprite lighting", &mut v.sprite_light, 1.0),
+                    ("Rim light", &mut v.rim_light, 1.0),
+                    ("Light sources", &mut v.point_lights, 2.0),
+                    ("Fog", &mut v.fog, 1.0),
+                    ("God rays", &mut v.god_rays, 1.0),
+                    ("Ambient occlusion", &mut v.ambient_occlusion, 1.0),
+                ] {
+                    ui.add_enabled_ui(v.hd2d, |ui| ui.label(label));
+                    ui.add_enabled(v.hd2d, egui::Slider::new(value, 0.0..=max));
+                    ui.end_row();
+                }
+                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Pixel snapping"));
+                ui.add_enabled(v.hd2d, egui::Checkbox::new(&mut v.pixel_snap, "Crisp sprites"));
                 ui.end_row();
                 if ui.add_enabled(v.hd2d, egui::Button::new("Reset look")).clicked() {
                     *v = Visual { hd2d: true, ..Visual::default() };

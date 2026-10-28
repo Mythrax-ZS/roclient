@@ -1,6 +1,10 @@
 // Screen-aligned sprite layers. Offsets are added in clip space around the actor's feet,
 // so sprites keep their pixel-art proportions, scale with perspective, and share the
 // feet's depth (they never cut into the ground or sort per-layer).
+//
+// HD-2D lighting: sprites take the map's light at their feet (ambient + sun, darkened by
+// the sun shadow map), nearby point lights, and a sun-coloured rim on the edges that face
+// the sun, so the flat pixel art sits in the lit diorama instead of floating on it.
 
 struct Globals {
     view_proj: mat4x4<f32>,
@@ -9,14 +13,23 @@ struct Globals {
     light_dir: vec4<f32>,
     ambient: vec4<f32>,
     diffuse: vec4<f32>,
-    // x: seconds, y/z: clip units per sprite pixel (x, y) at w = 1
+    // x: seconds, y/z: clip units per sprite pixel (x, y) at w = 1, w: 1 to snap to pixels
     params: vec4<f32>,
+    light_vp: mat4x4<f32>,
+    shadow: vec4<f32>,
+    // w, h, 1/w, 1/h
+    screen: vec4<f32>,
+    // x: sprite lighting, y: rim, z: point light intensity, w: light count
+    sprite_light: vec4<f32>,
+    lights: array<vec4<f32>, 64>,
 };
 
 /// World units (about two cells) a sprite's depth is pulled toward the camera.
 const DEPTH_PULL: f32 = 10.0;
 
 @group(0) @binding(0) var<uniform> g: Globals;
+@group(0) @binding(1) var shadow_map: texture_depth_2d;
+@group(0) @binding(2) var shadow_samp: sampler_comparison;
 @group(1) @binding(0) var tex: texture_2d<f32>;
 @group(1) @binding(1) var samp: sampler;
 
@@ -31,11 +44,20 @@ struct VsOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) @interpolate(flat) anchor: vec3<f32>,
+    // Screen direction toward the sun (for the rim light).
+    @location(3) @interpolate(flat) sun_dir: vec2<f32>,
 };
 
 @vertex
 fn vs_main(v: VsIn) -> VsOut {
     var clip = g.view_proj * vec4(v.anchor, 1.0);
+    // Pixel stability: put the anchor on a whole screen pixel so sprites don't shimmer as
+    // the camera moves.
+    if g.params.w > 0.5 {
+        let px = (clip.xy / clip.w * 0.5 + 0.5) * g.screen.xy;
+        clip = vec4((floor(px) + 0.5) * g.screen.zw * 2.0 - 1.0, clip.z / clip.w, 1.0) * clip.w;
+    }
     clip.x += v.offset.x * g.params.y;
     clip.y -= v.offset.y * g.params.z;
     // Depth comes from a point pulled toward the camera, so the shadow and feet are not
@@ -43,10 +65,14 @@ fn vs_main(v: VsIn) -> VsOut {
     let toward_eye = normalize(g.eye.xyz - v.anchor) * DEPTH_PULL;
     let d = g.view_proj * vec4(v.anchor + toward_eye, 1.0);
     clip.z = d.z / d.w * clip.w;
+    let a = g.view_proj * vec4(v.anchor, 1.0);
+    let s = g.view_proj * vec4(v.anchor - g.light_dir.xyz * 20.0, 1.0);
     var o: VsOut;
     o.pos = clip;
     o.uv = v.uv;
     o.color = v.color;
+    o.anchor = v.anchor;
+    o.sun_dir = normalize(s.xy / s.w - a.xy / a.w + vec2(1e-5, 0.0)) * vec2(1.0, -1.0);
     return o;
 }
 
@@ -54,14 +80,66 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
     return select(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, c <= vec3(0.04045));
 }
 
+/// Sun visibility at a world point from the sprite shadow map (1 lit .. 0 shadowed).
+fn sun_visible(world: vec3<f32>) -> f32 {
+    let lp = g.light_vp * vec4(world, 1.0);
+    let ndc = lp.xyz / lp.w;
+    let uv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if any(uv < vec2(0.0)) || any(uv > vec2(1.0)) {
+        return 1.0;
+    }
+    var lit = 0.0;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            lit += textureSampleCompareLevel(shadow_map, shadow_samp, uv + vec2(f32(x), f32(y)) * g.shadow.y * 2.0, ndc.z - 0.002);
+        }
+    }
+    return lit / 9.0;
+}
+
+/// Map light-source contribution at a point.
+fn point_light(world: vec3<f32>) -> vec3<f32> {
+    var sum = vec3(0.0);
+    let count = i32(g.sprite_light.w);
+    for (var i = 0; i < count; i++) {
+        let l = g.lights[i * 2];
+        let f = saturate(1.0 - distance(l.xyz, world) / max(l.w, 1.0));
+        sum += g.lights[i * 2 + 1].rgb * f * f;
+    }
+    return sum * g.sprite_light.z;
+}
+
+struct FsOut {
+    @location(0) color: vec4<f32>,
+    // x: distance from the eye, y: 1 (sprite)
+    @location(1) info: vec4<f32>,
+};
+
 @fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+fn fs_main(in: VsOut) -> FsOut {
     // Premultiplied texture: tint colour, scale everything by the layer alpha.
     let s = textureSample(tex, samp, in.uv);
+    // Rim: texels whose neighbour toward the sun is transparent are lit edges.
+    let texel = 1.0 / vec2<f32>(textureDimensions(tex));
+    let edge = s.a * (1.0 - textureSample(tex, samp, in.uv + in.sun_dir * texel * 1.5).a);
     let t = vec4(s.rgb * in.color.rgb * in.color.a, s.a * in.color.a);
     if t.a < 0.02 {
         discard;
     }
-    // Convert the straight colour to linear, then premultiply again.
-    return vec4(srgb_to_linear(t.rgb / t.a) * t.a, t.a);
+    var rgb = srgb_to_linear(t.rgb / t.a);
+
+    let k = g.sprite_light.x;
+    if k > 0.0 {
+        // The ground light at the feet relative to full sun, so sprites in the open keep
+        // their original colours and darken in shadow. The sample point sits a little
+        // toward the sun so a sprite does not shade itself.
+        let up = max(dot(vec3(0.0, 1.0, 0.0), -g.light_dir.xyz), 0.0);
+        let full = g.ambient.rgb + g.diffuse.rgb * up;
+        let feet = in.anchor - normalize(vec3(g.light_dir.x, 0.0, g.light_dir.z) + vec3(1e-4, 0.0, 0.0)) * 6.0 + vec3(0.0, 1.0, 0.0);
+        let here = g.ambient.rgb + g.diffuse.rgb * up * mix(1.0, sun_visible(feet), g.shadow.x);
+        let shade = here / max(full, vec3(0.05));
+        rgb = rgb * mix(vec3(1.0), shade, k) + rgb * point_light(in.anchor + vec3(0.0, 8.0, 0.0)) * k;
+        rgb += srgb_to_linear(g.diffuse.rgb) * edge * g.sprite_light.y * up;
+    }
+    return FsOut(vec4(rgb * t.a, t.a), vec4(distance(in.anchor, g.eye.xyz), 1.0, 0.0, 0.0));
 }

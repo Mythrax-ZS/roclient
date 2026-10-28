@@ -14,6 +14,11 @@ struct Globals {
     light_vp: mat4x4<f32>,
     // x: strength (0 off), y: shadow-map texel size, z: softness in texels
     shadow: vec4<f32>,
+    screen: vec4<f32>,
+    // x: sprite lighting, y: rim, z: point light intensity, w: light count
+    sprite_light: vec4<f32>,
+    // Pairs: (position, range), (colour, 0).
+    lights: array<vec4<f32>, 64>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -57,8 +62,14 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
     return select(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, c <= vec3(0.04045));
 }
 
+struct FsOut {
+    @location(0) color: vec4<f32>,
+    // x: distance from the eye, y: 0 (not a sprite)
+    @location(1) info: vec4<f32>,
+};
+
 @fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+fn fs_main(in: VsOut) -> FsOut {
     let t = textureSample(tex, samp, in.uv);
     if t.a < 0.5 {
         discard;
@@ -67,7 +78,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let ndl = max(dot(normalize(in.normal), -g.light_dir.xyz), 0.0);
     let light = clamp(g.ambient.rgb + g.diffuse.rgb * ndl, vec3(0.0), vec3(1.0)) * lm.a;
     let rgb = clamp(t.rgb * in.color * light + lm.rgb, vec3(0.0), vec3(1.0));
-    return vec4(srgb_to_linear(rgb) * sprite_shadow(in.world), 1.0);
+    let lit = srgb_to_linear(rgb) * sprite_shadow(in.world) + srgb_to_linear(t.rgb * in.color) * point_light(in.world, normalize(in.normal));
+    return FsOut(vec4(lit, 1.0), vec4(distance(in.world, g.eye.xyz), 0.0, 0.0, 0.0));
 }
 
 // How lit a point is by the sun with only sprites as casters: 1 lit, 1 - strength fully
@@ -91,4 +103,20 @@ fn sprite_shadow(world: vec3<f32>) -> f32 {
     }
     lit /= 25.0;
     return 1.0 - g.shadow.x * (1.0 - lit);
+}
+
+// Light from the map's light sources (torches, lamps): smooth falloff to their range,
+// half-wrapped around surfaces so lamps also light what is beside them.
+fn point_light(world: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+    var sum = vec3(0.0);
+    let count = i32(g.sprite_light.w);
+    for (var i = 0; i < count; i++) {
+        let l = g.lights[i * 2];
+        let to = l.xyz - world;
+        let d = length(to);
+        let f = saturate(1.0 - d / max(l.w, 1.0));
+        let wrap = saturate(dot(n, to / max(d, 1e-3)) * 0.5 + 0.5);
+        sum += g.lights[i * 2 + 1].rgb * f * f * wrap;
+    }
+    return sum * g.sprite_light.z;
 }

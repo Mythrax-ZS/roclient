@@ -162,6 +162,8 @@ struct LoadedMap {
     mesh: ro_render::SceneMesh,
     images: Vec<Option<ro_render::Rgba>>,
     lighting: ro_render::Lighting,
+    /// Light sources (torches, lamps) in world space.
+    lights: Vec<ro_render::PointLight>,
     water: Option<(ro_render::WaterMesh, Vec<Option<ro_render::Rgba>>)>,
 }
 
@@ -237,7 +239,17 @@ fn load_map(vfs: &ro_vfs::Vfs, name: &str) -> anyhow::Result<LoadedMap> {
         ms = started.elapsed().as_millis() as u64,
         "loaded map"
     );
-    Ok(LoadedMap { mesh, images, water, lighting: ro_render::Lighting::from_rsw(&rsw.light) })
+    // RSW light positions are centred on the map with y pointing down, like model placements.
+    let lights = rsw
+        .lights
+        .iter()
+        .map(|l| ro_render::PointLight {
+            pos: glam::Vec3::new(l.pos[0] + gnd.width as f32 * gnd.zoom / 2.0, -l.pos[1], l.pos[2] + gnd.height as f32 * gnd.zoom / 2.0),
+            color: l.color,
+            range: l.range,
+        })
+        .collect();
+    Ok(LoadedMap { mesh, images, water, lighting: ro_render::Lighting::from_rsw(&rsw.light), lights })
 }
 
 fn default_ui_scale() -> f32 {
@@ -738,6 +750,8 @@ impl App {
         match load_map(vfs, name) {
             Ok(map) => {
                 r.set_scene(&map.mesh, map.images, map.lighting);
+                tracing::info!(count = map.lights.len(), first = ?map.lights.first(), "map light sources");
+                r.point_lights = map.lights;
                 if let Some((mesh, images)) = map.water {
                     r.set_water(&mesh, images);
                 }

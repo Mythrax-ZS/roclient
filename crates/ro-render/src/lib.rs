@@ -42,6 +42,12 @@ struct Globals {
     light_vp: [[f32; 4]; 4],
     /// x: shadow strength (0 off), y: shadow-map texel size, z: softness (texels)
     shadow: [f32; 4],
+    /// Output size in pixels: w, h, 1/w, 1/h.
+    screen: [f32; 4],
+    /// x: sprite lighting strength, y: rim light, z: point light intensity, w: light count.
+    sprite_light: [f32; 4],
+    /// Point lights near the camera, as pairs: (position, range), (colour, 0).
+    lights: [[f32; 4]; MAX_LIGHTS * 2],
 }
 
 /// One frame of tessellated egui output.
@@ -49,6 +55,17 @@ pub struct UiFrame {
     pub primitives: Vec<egui::ClippedPrimitive>,
     pub textures: egui::TexturesDelta,
     pub pixels_per_point: f32,
+}
+
+/// Point lights sent to the shaders each frame (the nearest to the camera).
+pub const MAX_LIGHTS: usize = 32;
+
+/// A map light source (RSW): torches, lamps, glowing crystals.
+#[derive(Clone, Copy, Debug)]
+pub struct PointLight {
+    pub pos: glam::Vec3,
+    pub color: [f32; 3],
+    pub range: f32,
 }
 
 /// Map-wide sun lighting (from the RSW), in the renderer's y-up space.
@@ -78,6 +95,8 @@ struct Targets {
     depth: wgpu::TextureView,
     /// None when MSAA is off.
     msaa: Option<wgpu::TextureView>,
+    /// Multisampled depth-info target (resolved into `post.info`); None when MSAA is off.
+    msaa_info: Option<wgpu::TextureView>,
     /// HDR scene and post-processing intermediates.
     post: post::PostTargets,
 }
@@ -118,6 +137,8 @@ pub struct Renderer {
     shadow: shadow::Shadow,
     /// The HD-2D look (bloom, tilt-shift, grading); `enabled = false` for the classic look.
     pub post_settings: PostSettings,
+    /// The map's light sources.
+    pub point_lights: Vec<PointLight>,
     /// Code-drawn effects playing this frame; the client advances and removes them.
     pub procs: Vec<ProcFx>,
     /// STR effects playing this frame; the client advances and removes them.
@@ -353,11 +374,16 @@ impl Renderer {
                     module: &shader,
                     entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: post::HDR_FORMAT,
-                        blend,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
+                    targets: &[
+                        Some(wgpu::ColorTargetState { format: post::HDR_FORMAT, blend, write_mask: wgpu::ColorWrites::ALL }),
+                        // Depth info for post-processing (AO, fog, depth of field): written by
+                        // the opaque world and by sprites only.
+                        Some(wgpu::ColorTargetState {
+                            format: post::INFO_FORMAT,
+                            blend: None,
+                            write_mask: if matches!(label, "scene" | "sprite") { wgpu::ColorWrites::ALL } else { wgpu::ColorWrites::empty() },
+                        }),
+                    ],
                 }),
                 multiview_mask: None,
                 cache: None,
@@ -471,6 +497,7 @@ impl Renderer {
             post,
             shadow,
             post_settings: PostSettings::default(),
+            point_lights: vec![],
             procs: vec![],
             effects: vec![],
             effect_pipeline,
@@ -596,6 +623,7 @@ impl Renderer {
         Targets {
             depth: tex("depth", DEPTH_FORMAT),
             msaa: (samples > 1).then(|| tex("msaa", post::HDR_FORMAT)),
+            msaa_info: (samples > 1).then(|| tex("msaa info", post::INFO_FORMAT)),
             post: post::PostTargets::new(device, config.width, config.height),
         }
     }
@@ -717,6 +745,12 @@ impl Renderer {
         // The sun's view of the area around the player, for sprite shadows.
         let light_vp = shadow::Shadow::light_vp(cam.target, self.shadow_dir(), (cam.distance * 0.75).clamp(120.0, 600.0));
         let shadow_strength = if self.post_settings.enabled { self.post_settings.shadow_strength } else { 0.0 };
+        // The point lights nearest the camera target, flattened into (pos, range), (colour, 0).
+        let lights: Vec<[f32; 4]> = {
+            let mut near: Vec<&PointLight> = self.point_lights.iter().collect();
+            near.sort_by(|a, b| a.pos.distance_squared(cam.target).total_cmp(&b.pos.distance_squared(cam.target)));
+            near.iter().take(MAX_LIGHTS).flat_map(|l| [l.pos.extend(l.range).to_array(), [l.color[0], l.color[1], l.color[2], 0.0]]).collect()
+        };
         let globals = Globals {
             view_proj: cam.view_proj(aspect).to_cols_array_2d(),
             focus: [cam.target.x, CELL, cam.target.z, cam.distance * 4.0],
@@ -728,10 +762,22 @@ impl Renderer {
                 // Clip units per sprite pixel at w = 1 (horizontal, vertical).
                 let f = 1.0 / (cam.fovy / 2.0).tan();
                 let s = CELL / sprite::PIXELS_PER_CELL;
-                [self.started.elapsed().as_secs_f32(), s * f / aspect, s * f, 0.0]
+                let snap = self.post_settings.enabled && self.post_settings.pixel_snap;
+                [self.started.elapsed().as_secs_f32(), s * f / aspect, s * f, if snap { 1.0 } else { 0.0 }]
             },
             light_vp: light_vp.to_cols_array_2d(),
             shadow: [shadow_strength, 1.0 / shadow::SIZE as f32, self.post_settings.shadow_softness, 0.0],
+            screen: [size.0 as f32, size.1 as f32, 1.0 / size.0 as f32, 1.0 / size.1 as f32],
+            sprite_light: {
+                let p = &self.post_settings;
+                let on = if p.enabled { 1.0 } else { 0.0 };
+                [p.sprite_light * on, p.rim_light * on, p.point_lights * on, lights.len() as f32 / 2.0]
+            },
+            lights: {
+                let mut out = [[0.0; 4]; MAX_LIGHTS * 2];
+                out[..lights.len()].copy_from_slice(&lights);
+                out
+            },
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
@@ -768,12 +814,22 @@ impl Renderer {
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: color,
-                    depth_slice: None,
-                    resolve_target: resolve,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(CLEAR), store: wgpu::StoreOp::Store },
-                })],
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: color,
+                        depth_slice: None,
+                        resolve_target: resolve,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(CLEAR), store: wgpu::StoreOp::Store },
+                    }),
+                    // Depth info: x linear distance from the eye (far where nothing drew),
+                    // y 1 on sprites.
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: targets.msaa_info.as_ref().unwrap_or(&targets.post.info),
+                        depth_slice: None,
+                        resolve_target: targets.msaa_info.as_ref().map(|_| &targets.post.info),
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 60000.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                    }),
+                ],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &targets.depth,
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
@@ -878,7 +934,19 @@ impl Renderer {
         }
 
         // HD-2D post-processing: HDR scene -> bloom, tilt-shift, grading -> swapchain.
-        self.post.record(&self.device, &self.queue, &mut enc, &targets.post, view, &self.post_settings);
+        let frame = {
+            let vp = cam.view_proj(aspect);
+            let sun = vp * (cam.target - self.shadow_dir() * cam.distance * 4.0).extend(1.0);
+            let amb = glam::Vec3::from(self.lighting.ambient);
+            // Haze: the map's ambient light lifted toward a pale sky, in linear space.
+            let fog = amb.lerp(glam::Vec3::new(0.85, 0.88, 0.95), 0.6).powf(2.2);
+            post::FrameInfo {
+                focus: cam.distance,
+                fog_color: fog.to_array(),
+                sun_uv: (sun.w > 0.0).then(|| [sun.x / sun.w * 0.5 + 0.5, 0.5 - sun.y / sun.w * 0.5]),
+            }
+        };
+        self.post.record(&self.device, &self.queue, &mut enc, &targets.post, view, &self.post_settings, &frame);
 
         // UI on top of the resolved frame.
         if let Some(ui) = self.ui.take() {
