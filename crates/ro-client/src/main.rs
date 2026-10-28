@@ -783,6 +783,8 @@ struct App {
     last_whisper_from: Option<String>,
     /// Chat lines typed this frame, sent at the start of the next.
     queued_chat: Vec<String>,
+    /// When a paused (`wait:`) test script carries on.
+    script_resume: Option<std::time::Instant>,
     pad: gamepad::Pad,
     /// The unit the controller acts on (highlighted), the walk direction being held and
     /// time until the walk is re-aimed.
@@ -1205,6 +1207,21 @@ impl App {
                     self.play_sound("_chat_whisper.wav");
                 }
                 self.hud.push_chat(kind, text);
+            }
+            Menu(menu) => {
+                // Icons for items that may not be in the inventory (poisons, arrows to make).
+                let ids: Vec<u32> = match &menu {
+                    ro_net::Menu::Items(ids) | ro_net::Menu::Make { items: ids, .. } => ids.clone(),
+                    ro_net::Menu::Produce(list) => list.iter().flat_map(|(id, m)| std::iter::once(*id).chain(m.iter().copied())).collect(),
+                    _ => vec![],
+                };
+                self.load_icons_for(&ids);
+                self.windows.menu = Some(menu);
+            }
+            MakeResult { ok, item } => {
+                let name = self.item_db.as_ref().map_or_else(|| format!("item {item}"), |d| d.name(item, true));
+                let msg = if ok { format!("You made {name}.") } else { format!("Making {name} failed.") };
+                self.hud.push_chat(ro_net::ChatKind::System, msg);
             }
             Emotion { id, kind } => {
                 self.emotes.insert(id, (kind, 0.0));
@@ -1800,6 +1817,7 @@ impl App {
                 self.send(Command::Item(ItemRequest::CardTargets { card }));
             }
             InsertCard { card, equip } => self.send(Command::Item(ItemRequest::InsertCard { card, equip })),
+            Menu(reply) => self.send(Command::Menu(reply)),
             SkillUp(id) => self.send(Command::Stat(StatRequest::SkillUp(id))),
             UseSkill(id) => {
                 let level = self.skills.iter().find(|s| s.id == id).map_or(0, |s| s.level);
@@ -2701,13 +2719,38 @@ impl App {
                 _ => {}
             }
         }
-        if !self.script.is_empty() && !self.inventory.items.is_empty() && self.stats.is_some() && self.ready_at.is_some_and(|t| t.elapsed().as_millis() > 1500) {
-            for step in std::mem::take(&mut self.script) {
+        if !self.script.is_empty() && !self.inventory.items.is_empty() && self.stats.is_some() && self.ready_at.is_some_and(|t| t.elapsed().as_millis() > 1500) && self.script_resume.is_none_or(|t| std::time::Instant::now() >= t) {
+            let mut steps = std::mem::take(&mut self.script).into_iter();
+            while let Some(step) = steps.next() {
+                // wait:ms pauses the script; the rest runs on a later frame.
+                if let Some(ms) = step.strip_prefix("wait:").and_then(|m| m.parse::<u64>().ok()) {
+                    self.script = steps.collect();
+                    self.script_resume = Some(std::time::Instant::now() + std::time::Duration::from_millis(ms));
+                    break;
+                }
                 let item = |id: u32| self.inventory.items.values().find(|i| i.id == id).map(|i| (i.index, i.location));
                 let action = match step.split_once(':') {
                     Some(("equip", id)) => id.parse().ok().and_then(item).map(|(index, location)| windows::UiAction::Equip { index, location }),
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some(("card", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::CardTargets(index)),
+                    // pick:id answers the open menu with that item/skill id (or inventory index).
+                    Some(("pick", id)) => {
+                        let id: u32 = id.parse().unwrap_or(0);
+                        self.windows.menu.take().and_then(|menu| {
+                            use ro_net::{Menu, MenuReply};
+                            let reply = match menu {
+                                Menu::Items(ids) => ids.contains(&id).then_some(MenuReply::Item(id)),
+                                Menu::Make { kind, items } => items.contains(&id).then_some(MenuReply::Make { kind, item: id }),
+                                Menu::Produce(list) => list.iter().find(|(i, _)| *i == id).map(|(i, m)| MenuReply::Produce { item: *i, materials: *m }),
+                                Menu::AutoSpell(s) => s.contains(&id).then_some(MenuReply::AutoSpell(id)),
+                                Menu::Skill { flag, skills } => skills.contains(&(id as u16)).then_some(MenuReply::Skill { flag, skill: id as u16 }),
+                                Menu::Identify(_) => Some(MenuReply::Identify(id as u16)),
+                                Menu::Egg(_) => Some(MenuReply::Egg(id as u16)),
+                                Menu::Warp { skill, maps } => maps.get(id as usize).map(|m| MenuReply::Warp { skill, map: m.clone() }),
+                            };
+                            reply.map(windows::UiAction::Menu)
+                        })
+                    }
                     Some(("raise", n)) => n.parse().ok().map(windows::UiAction::RaiseStat),
                     Some(("skillup", id)) => id.parse().ok().map(windows::UiAction::SkillUp),
                     // hotkey:slot=skill_id (at its learned level), key:slot presses it.
@@ -3654,6 +3697,7 @@ fn main() -> anyhow::Result<()> {
         emotes: Default::default(),
         last_whisper_from: None,
         queued_chat: vec![],
+        script_resume: None,
         pad: gamepad::Pad::new(),
         pad_target: None,
         pad_dir: None,

@@ -19,6 +19,8 @@ pub enum UiAction {
     /// Ask which equipment can take this card (inventory index).
     CardTargets(u16),
     InsertCard { card: u16, equip: u16 },
+    /// Answer the open skill/item menu.
+    Menu(ro_net::MenuReply),
     SkillUp(u16),
     UseSkill(u16),
     /// Activate shortcut slot n (row * HOTKEYS_PER_ROW + column).
@@ -43,6 +45,8 @@ pub struct Windows {
     pub skill_tab: Option<usize>,
     /// A card being inserted and the equipment the server offered for it.
     pub card_pick: Option<(u16, Vec<u16>)>,
+    /// A pick-one menu from a skill or item (poisons, warp points, eggs...).
+    pub menu: Option<ro_net::Menu>,
     /// How long a stat "+" has been held, for repeating.
     stat_hold: f32,
     pub party: bool,
@@ -484,6 +488,98 @@ impl Windows {
             self.stats = open;
             if !held {
                 self.stat_hold = 0.0;
+            }
+        }
+
+        // Skill and item menus: one choice answers the server.
+        if let Some(menu) = self.menu.clone() {
+            use ro_net::{Menu, MenuReply};
+            let title = match &menu {
+                Menu::Items(_) => "Select an Item",
+                Menu::Produce(_) | Menu::Make { .. } => "Create",
+                Menu::Warp { .. } => "Warp Portal",
+                Menu::AutoSpell(_) => "Auto Spell",
+                Menu::Identify(_) => "Item Appraisal",
+                Menu::Skill { .. } => "Select a Skill",
+                Menu::Egg(_) => "Hatch an Egg",
+            };
+            let skill_name = |id: u16| v.skill_info.and_then(|i| i.internal(id)).map_or_else(|| format!("Skill {id}"), |n| (v.skill_names)(n));
+            let item_name_of = |id: u32| v.db.map_or_else(|| format!("Item #{id}"), |d| d.name(id, true));
+            let inv = |index: u16| v.items.iter().find(|it| it.index == index).copied();
+            let mut chosen = None;
+            let mut open = true;
+            egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
+                egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
+                    // An item row: icon (when loaded) and a button with its name.
+                    let item_row = |ui: &mut egui::Ui, id: u32, label: String| {
+                        ui.horizontal(|ui| {
+                            let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::hover());
+                            paint_icon(ui.painter(), rect, v.icons.get(&id), Color32::WHITE);
+                            ui.button(label).clicked()
+                        })
+                        .inner
+                    };
+                    match &menu {
+                        Menu::Items(ids) | Menu::Make { items: ids, .. } => {
+                            for &id in ids {
+                                if item_row(ui, id, item_name_of(id)) {
+                                    chosen = Some(match &menu {
+                                        Menu::Make { kind, .. } => MenuReply::Make { kind: *kind, item: id },
+                                        _ => MenuReply::Item(id),
+                                    });
+                                }
+                            }
+                        }
+                        Menu::Produce(list) => {
+                            for (id, materials) in list {
+                                let extra: Vec<String> = materials.iter().filter(|&&m| m != 0).map(|&m| item_name_of(m)).collect();
+                                let label = if extra.is_empty() { item_name_of(*id) } else { format!("{}  ({})", item_name_of(*id), extra.join(", ")) };
+                                if item_row(ui, *id, label) {
+                                    chosen = Some(MenuReply::Produce { item: *id, materials: *materials });
+                                }
+                            }
+                        }
+                        Menu::Identify(list) | Menu::Egg(list) => {
+                            for &index in list {
+                                let Some(it) = inv(index) else { continue };
+                                if item_row(ui, it.id, item_name(v.db, it)) {
+                                    chosen = Some(if matches!(menu, Menu::Egg(_)) { MenuReply::Egg(index) } else { MenuReply::Identify(index) });
+                                }
+                            }
+                        }
+                        Menu::Warp { skill, maps } => {
+                            for map in maps {
+                                if ui.button(map.trim_end_matches(".gat")).clicked() {
+                                    chosen = Some(MenuReply::Warp { skill: *skill, map: map.clone() });
+                                }
+                            }
+                        }
+                        Menu::AutoSpell(skills) => {
+                            for &id in skills {
+                                if ui.button(skill_name(id as u16)).clicked() {
+                                    chosen = Some(MenuReply::AutoSpell(id));
+                                }
+                            }
+                        }
+                        Menu::Skill { flag, skills } => {
+                            for &id in skills {
+                                if ui.button(skill_name(id)).clicked() {
+                                    chosen = Some(MenuReply::Skill { flag: *flag, skill: id });
+                                }
+                            }
+                        }
+                    }
+                });
+            });
+            if let Some(reply) = chosen {
+                action = Some(UiAction::Menu(reply));
+                self.menu = None;
+            } else if !open {
+                // Closing the portal menu tells the server to drop the cast.
+                if let Menu::Warp { skill, .. } = menu {
+                    action = Some(UiAction::Menu(MenuReply::Warp { skill, map: "cancel".into() }));
+                }
+                self.menu = None;
             }
         }
 

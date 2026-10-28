@@ -16,6 +16,8 @@ pub use ro_proto::items::{Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill,
 use ro_proto::items::*;
 pub use ro_proto::guild::{GuildInfo, GuildMember, GuildRequest, GuildSkill, Position};
 use ro_proto::guild::*;
+pub use ro_proto::menus::{Menu, MenuReply};
+use ro_proto::menus::*;
 pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
 use ro_proto::social::*;
 
@@ -274,6 +276,10 @@ pub enum Event {
     Emotion { id: u32, kind: u8 },
     /// ZC_ACK_WHISPER: 0 sent, 1 not online, 2 ignored by them, 3 they ignore everyone.
     WhisperResult(u8),
+    /// A pick-one menu from a skill or item.
+    Menu(Menu),
+    /// ZC_ACK_REQMAKINGITEM: making an item (ok, item id).
+    MakeResult { ok: bool, item: u32 },
     /// ZC_ACH_UPDATE: an achievement's progress changed (id, now complete).
     Achievement { id: u32, completed: bool },
     /// A lasting ground effect (Sanctuary, Fire Wall, traps...) appeared or ended.
@@ -329,6 +335,8 @@ pub enum Command {
     Whisper { to: String, text: String },
     /// Show an emote (ET_* id).
     Emotion(u8),
+    /// Answer a skill or item menu.
+    Menu(MenuReply),
     /// Login screen.
     Login { user: String, pass: String },
     SelectServer(usize),
@@ -454,6 +462,7 @@ impl MapSession {
                     Some(Command::Chat(text)) => self.send(CzChat { name, text: &text }).await?,
                     Some(Command::Whisper { to, text }) => self.send(CzWhisper { to: &to, text: &text }).await?,
                     Some(Command::Emotion(e)) => self.send(CzEmotion(e)).await?,
+                    Some(Command::Menu(reply)) => self.send(reply).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
@@ -661,6 +670,8 @@ impl MapSession {
                         }
                         0x00c0 if data.len() >= 7 => Some(Event::Emotion { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), kind: data[6] }),
                         0x09df if data.len() >= 3 => Some(Event::WhisperResult(data[2])),
+                        0x01ad | 0x018d | 0x025a | 0x0abe | 0x0afb | 0x0177 | 0x0442 | 0x01a6 => parse_menu(opcode, &data).map(Event::Menu),
+                        0x018f => parse_make_result(&data).map(|(ok, item)| Event::MakeResult { ok, item }),
                         0x0a24 if data.len() >= 21 => Some(Event::Achievement {
                             id: u32::from_le_bytes([data[16], data[17], data[18], data[19]]),
                             completed: data[20] != 0,
