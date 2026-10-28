@@ -2615,7 +2615,12 @@ impl App {
                 }
                 let _ = tx.send(ro_net::Command::Npc { npc, reply });
             }
-            state.handle_platform_output(window, out.platform_output);
+            // The game draws its own cursor; egui would otherwise show the system one again.
+            let mut platform = out.platform_output;
+            if self.cursor_sprite.is_some() {
+                platform.cursor_icon = egui::CursorIcon::None;
+            }
+            state.handle_platform_output(window, platform);
             let primitives = self.egui_ctx.tessellate(out.shapes, out.pixels_per_point);
             r.set_ui(ro_render::UiFrame { primitives, textures: out.textures_delta, pixels_per_point: out.pixels_per_point });
             if let (Some(text), Some((tx, _))) = (sent, self.net.as_ref()) {
