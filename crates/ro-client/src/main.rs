@@ -2554,6 +2554,13 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            Turned { id, dir } => {
+                if let Some(m) = self.mob_mut(id) {
+                    if !m.walker.is_walking() {
+                        m.walker.dir = (dir % 8) as usize;
+                    }
+                }
+            }
             Spirits { id, count } => {
                 if count == 0 {
                     self.spirits.remove(&id);

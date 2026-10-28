@@ -326,7 +326,7 @@ pub fn parse_accept_enter(data: &[u8]) -> AcceptEnter {
         start_time,
         x: (p[0] << 2) | (p[1] >> 6),
         y: ((p[1] & 0x3f) << 4) | (p[2] >> 4),
-        dir: (p[2] & 0x0f) as u8,
+        dir: server_dir((p[2] & 0x0f) as u8),
     }
 }
 
@@ -359,7 +359,8 @@ mod tests {
         data.extend_from_slice(&p);
         data.extend_from_slice(&[5, 5, 0, 0]);
         let a = parse_accept_enter(&data);
-        assert_eq!((a.x, a.y, a.dir), (150, 200, 3));
+        // Server direction 3 (south-west) is sprite direction 1.
+        assert_eq!((a.x, a.y, a.dir), (150, 200, 1));
     }
 }
 
@@ -944,4 +945,10 @@ pub fn parse_delete_reply(data: &[u8]) -> (u32, i32, u32) {
     let id = b.get_u32_le();
     let result = b.get_i32_le();
     (id, result, if b.remaining() >= 4 { b.get_u32_le() } else { 0 })
+}
+
+/// rAthena directions (0 north, 1 north-west, ... 4 south) as sprite directions (0 south,
+/// 1 south-west, ... 4 north).
+pub fn server_dir(d: u8) -> u8 {
+    (12 - (d & 7)) % 8
 }
