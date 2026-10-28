@@ -13,7 +13,7 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_MSG_COLOR, ZC_MSG_VALUE, ZC_MSG_SKILL, and every ZC_MSG id (was: only two)
 - [x] ZC_SPECIALPOPUP (System/spopup.lub: chat and/or floating banner), ZC_SKILLMSG
 - [x] ZC_REMOVE_EFFECT, ZC_EQUIPMENT_EFFECT
-- [ ] ZC_NOTIFY_EFFECT3
+- [x] ZC_NOTIFY_EFFECT3 (0x0284 / 0x0b69: effect plus green heal numbers)
 - [x] ZC_NPC_MARKET_OPEN / PURCHASE_RESULT (market shops)
 - [x] ZC_NPC_BARTER_MARKET_ITEMINFO / EXPANDED_BARTER (barter shops)
 - [x] Stylist (openstylist: hair, hair colour, clothes colour, live preview)

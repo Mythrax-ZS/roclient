@@ -2746,6 +2746,17 @@ impl App {
                     self.member_pos.insert(id, ((x as f32, y as f32), guild));
                 }
             }
+            EffectValue { id, effect, num } => {
+                /// rAthena's EF_GREEN_NUMBER: the number is a heal.
+                const EF_GREEN_NUMBER: u32 = 657;
+                if effect == EF_GREEN_NUMBER {
+                    if let Some(pos) = self.unit_pos(id) {
+                        self.floaters.push((pos, num.to_string(), egui::Color32::from_rgb(110, 255, 110), 0.0));
+                    }
+                } else {
+                    self.handle(ScriptEffect { id, effect });
+                }
+            }
             SpecialPopup(id) => {
                 let popup = self.vfs.as_ref().and_then(|v| v.read(r"System\spopup.lub").ok().flatten()).and_then(|d| ro_formats::lub::eval(&d).ok()).and_then(|c| {
                     let t = c.globals.get("popuptbl")?.clone();

@@ -543,6 +543,8 @@ pub enum Event {
     UnitEffect { id: u32, effect: u32 },
     /// ZC_NOTIFY_EFFECT2 (specialeffect): an rAthena EF_* id on a unit.
     ScriptEffect { id: u32, effect: u32 },
+    /// ZC_NOTIFY_EFFECT3: an EF_* effect with a number (EF_GREEN_NUMBER shows it as a heal).
+    EffectValue { id: u32, effect: u32, num: i64 },
     /// ZC_SPECIALPOPUP: show System\spopup.lub entry `id` (map entry notices).
     SpecialPopup(u32),
     /// ZC_SKILLMSG: a skill notice (Gospel effects, Full Strip failing).
@@ -1199,7 +1201,12 @@ impl MapSession {
                             remain_ms: (opcode == 0x0983 && data.len() >= 17).then(|| i32::from_le_bytes([data[13], data[14], data[15], data[16]])).filter(|&ms| ms > 0).map(|ms| ms as u32),
                         }),
                         0x0148 => Some(Event::Resurrected(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
-                        0x0bbe => Some(Event::SpecialPopup(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x0284 | 0x0b69 if data.len() >= 14 => Some(Event::EffectValue {
+                            id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]),
+                            effect: u32::from_le_bytes([data[6], data[7], data[8], data[9]]),
+                            num: if opcode == 0x0b69 && data.len() >= 18 { i64::from_le_bytes(data[10..18].try_into().unwrap()) } else { i32::from_le_bytes([data[10], data[11], data[12], data[13]]) as i64 },
+                        }),
+                        0x0bbe =>Some(Event::SpecialPopup(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x0215 => Some(Event::SkillMsg(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x01f3 if data.len() >= 10 => Some(Event::ScriptEffect { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), effect: u32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
                         0x019b => {
