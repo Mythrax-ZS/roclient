@@ -264,6 +264,29 @@ fn item_tooltip(ui: &mut egui::Ui, db: Option<&ItemDb>, it: &InvItem) {
     }
 }
 
+/// The item's tooltip; for unworn equipment, beside whatever is worn in the same slots.
+fn compare_tooltip(ui: &mut egui::Ui, db: Option<&ItemDb>, it: &InvItem, items: &[&InvItem]) {
+    let worn: Vec<&&InvItem> = if it.is_equipment() && it.equipped == 0 { items.iter().filter(|w| w.equipped & it.location != 0).collect() } else { vec![] };
+    if worn.is_empty() {
+        item_tooltip(ui, db, it);
+        return;
+    }
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.set_max_width(260.0);
+            item_tooltip(ui, db, it);
+        });
+        for w in worn {
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.set_max_width(260.0);
+                ui.label(RichText::new("Currently worn").color(Color32::GRAY).size(11.5));
+                item_tooltip(ui, db, w);
+            });
+        }
+    });
+}
+
 fn strip_colors(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
@@ -374,7 +397,7 @@ impl Windows {
                     .collect();
                 egui::Grid::new("inv").spacing(Vec2::splat(4.0)).show(ui, |ui| {
                     for (i, it) in shown.iter().enumerate() {
-                        let resp = item_slot(ui, v.icons, it, 38.0).on_hover_ui(|ui| item_tooltip(ui, v.db, it));
+                        let resp = item_slot(ui, v.icons, it, 38.0).on_hover_ui(|ui| compare_tooltip(ui, v.db, it, v.items));
                         // Usable items and equipment can go on the shortcut bar.
                         if it.is_usable() || it.is_equipment() {
                             resp.dnd_set_drag_payload(Hotkey { skill: false, id: it.id, count: 0 });

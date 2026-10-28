@@ -172,9 +172,180 @@ impl Encode for MerchantRequest {
     }
 }
 
+/// An item a buying store wants.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WantedItem {
+    pub price: u32,
+    pub amount: u16,
+    pub kind: u8,
+    pub id: u32,
+}
+
+fn wanted(mut b: &[u8]) -> Vec<WantedItem> {
+    let mut items = vec![];
+    while b.len() >= 11 {
+        items.push(WantedItem { price: b.get_u32_le(), amount: b.get_u16_le(), kind: b.get_u8(), id: b.get_u32_le() });
+    }
+    items
+}
+
+/// ZC_MYITEMLIST_BUYING_STORE (0x0813): our buying store as opened, (zeny limit, items).
+pub fn parse_my_buying_store(data: &[u8]) -> Option<(u32, Vec<WantedItem>)> {
+    let mut b = data.get(8..)?;
+    let limit = b.get_u32_le();
+    Some((limit, wanted(b)))
+}
+
+/// ZC_ACK_ITEMLIST_BUYING_STORE (0x0818): someone's buying store, (buyer, store id, zeny limit, items).
+pub fn parse_buying_store(data: &[u8]) -> Option<(u32, u32, u32, Vec<WantedItem>)> {
+    let mut b = data.get(4..)?;
+    if b.len() < 12 {
+        return None;
+    }
+    let (aid, store, limit) = (b.get_u32_le(), b.get_u32_le(), b.get_u32_le());
+    Some((aid, store, limit, wanted(b)))
+}
+
+/// ZC_UPDATE_ITEM_FROM_BUYING_STORE2 (0x09e6): we bought something, (item id, amount bought, zeny paid, zeny limit left).
+pub fn parse_buying_update(data: &[u8]) -> Option<(u32, u16, u32, u32)> {
+    let mut b = data.get(2..16)?;
+    Some((b.get_u32_le(), b.get_u16_le(), b.get_u32_le(), b.get_u32_le()))
+}
+
+/// ZC_ITEM_DELETE_BUYING_STORE (0x081c): we sold to a buying store, (index, amount, price each).
+pub fn parse_sold_to_buyer(data: &[u8]) -> Option<(u16, u16, u32)> {
+    let mut b = data.get(2..10)?;
+    Some((b.get_u16_le(), b.get_u16_le(), b.get_u32_le()))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BuyingStoreRequest {
+    /// CZ_REQ_OPEN_BUYING_STORE: (item id, amount, price) entries.
+    Open { limit: u32, title: String, items: Vec<(u32, u16, u32)> },
+    /// CZ_REQ_CLOSE_BUYING_STORE.
+    Close,
+    /// CZ_REQ_CLICK_TO_BUYING_STORE.
+    Browse(u32),
+    /// CZ_REQ_TRADE_BUYING_STORE: sell (inventory index, item id, amount) entries.
+    Sell { buyer: u32, store: u32, items: Vec<(u16, u32, u16)> },
+}
+
+impl Encode for BuyingStoreRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            BuyingStoreRequest::Open { limit, title, items } => {
+                d.put_u16_le(0x0811);
+                d.put_u16_le((89 + items.len() * 10) as u16);
+                d.put_u32_le(*limit);
+                d.put_u8(1);
+                let (t, _, _) = encoding_rs::EUC_KR.encode(title);
+                let mut name = [0u8; 80];
+                let n = t.len().min(79);
+                name[..n].copy_from_slice(&t[..n]);
+                d.put_slice(&name);
+                for (id, amount, price) in items {
+                    d.put_u32_le(*id);
+                    d.put_u16_le(*amount);
+                    d.put_u32_le(*price);
+                }
+            }
+            BuyingStoreRequest::Close => d.put_u16_le(0x0815),
+            BuyingStoreRequest::Browse(aid) => {
+                d.put_u16_le(0x0817);
+                d.put_u32_le(*aid);
+            }
+            BuyingStoreRequest::Sell { buyer, store, items } => {
+                d.put_u16_le(0x0819);
+                d.put_u16_le((12 + items.len() * 8) as u16);
+                d.put_u32_le(*buyer);
+                d.put_u32_le(*store);
+                for (index, id, amount) in items {
+                    d.put_u16_le(*index);
+                    d.put_u32_le(*id);
+                    d.put_u16_le(*amount);
+                }
+            }
+        }
+    }
+}
+
+/// The cash shop (0x0b6d open, 0x08c9 list, 0x0848 buy).
+#[derive(Debug, Clone, PartialEq)]
+pub enum CashShopRequest {
+    Open,
+    List,
+    Close,
+    /// (item id, amount, tab) entries, paying `kafra` of the price in Kafra points.
+    Buy { kafra: u32, items: Vec<(u32, u32, u16)> },
+}
+
+impl Encode for CashShopRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            CashShopRequest::Open => {
+                d.put_u16_le(0x0b6d);
+                d.put_u32_le(0);
+            }
+            CashShopRequest::List => d.put_u16_le(0x08c9),
+            CashShopRequest::Close => d.put_u16_le(0x084a),
+            CashShopRequest::Buy { kafra, items } => {
+                d.put_u16_le(0x0848);
+                d.put_u16_le((10 + items.len() * 10) as u16);
+                d.put_u16_le(items.len() as u16);
+                d.put_u32_le(*kafra);
+                for (id, amount, tab) in items {
+                    d.put_u32_le(*id);
+                    d.put_u32_le(*amount);
+                    d.put_u16_le(*tab);
+                }
+            }
+        }
+    }
+}
+
+/// ZC_SE_CASHSHOP_OPEN (0x0b6e): (cash points, kafra points).
+pub fn parse_cash_open(data: &[u8]) -> Option<(u32, u32)> {
+    let mut b = data.get(2..10)?;
+    Some((b.get_u32_le(), b.get_u32_le()))
+}
+
+/// ZC_ACK_SCHEDULER_CASHITEM (0x08ca): a tab's (item id, price) list.
+pub fn parse_cash_tab(data: &[u8]) -> Option<(u16, Vec<(u32, u32)>)> {
+    let mut b = data.get(4..)?;
+    if b.len() < 4 {
+        return None;
+    }
+    let (count, tab) = (b.get_u16_le(), b.get_u16_le());
+    let mut items = vec![];
+    while b.len() >= 8 && items.len() < count as usize {
+        items.push((b.get_u32_le(), b.get_u32_le()));
+    }
+    Some((tab, items))
+}
+
+/// ZC_SE_PC_BUY_CASHITEM_RESULT (0x0849): (result, cash points, kafra points).
+pub fn parse_cash_result(data: &[u8]) -> Option<(u16, u32, u32)> {
+    let mut b = data.get(6..16)?;
+    Some((b.get_u16_le(), b.get_u32_le(), b.get_u32_le()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encodes_buying_store() {
+        let mut d = BytesMut::new();
+        BuyingStoreRequest::Open { limit: 5000, title: "Buying".into(), items: vec![(909, 10, 50)] }.encode(&mut d);
+        assert_eq!(d.len(), 99);
+        assert_eq!(d[8], 1);
+        let mut d = BytesMut::new();
+        BuyingStoreRequest::Sell { buyer: 1, store: 2, items: vec![(3, 909, 4)] }.encode(&mut d);
+        assert_eq!(d.len(), 20);
+        let mut d = BytesMut::new();
+        CashShopRequest::Buy { kafra: 0, items: vec![(501, 2, 0)] }.encode(&mut d);
+        assert_eq!(d.len(), 20);
+    }
 
     #[test]
     fn encodes_open_shop() {

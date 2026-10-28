@@ -20,6 +20,7 @@ mod emotes;
 mod settings;
 mod skilltree;
 mod status_icons;
+mod stores;
 mod splash;
 mod social;
 mod windows;
@@ -795,6 +796,8 @@ struct App {
     quests: quests::QuestLog,
     /// Cart, vending and shops.
     merchant: merchant::Merchant,
+    /// Buying stores and the cash shop.
+    stores: stores::Stores,
     /// The item information / card illustration window.
     item_info: iteminfo::ItemInfo,
     refine: refine::Refine,
@@ -816,6 +819,10 @@ struct App {
     fx_test: Option<&'static str>,
     alt: bool,
     queued_action: Option<windows::UiAction>,
+    /// A pointer move the test script queued (UI points); egui keeps the position.
+    fake_pointer: Option<egui::Pos2>,
+    /// A click the test script queued there; pressed one frame, released the next.
+    fake_click: Option<(egui::Pos2, bool)>,
     social: social::Social,
     /// The player we asked to trade, until they answer.
     trade_partner: Option<String>,
@@ -1324,6 +1331,76 @@ impl App {
                     }
                     stock.retain(|i| i.amount > 0);
                 }
+            }
+            BuySign { aid, title } => {
+                if title.is_empty() {
+                    self.stores.signs.remove(&aid);
+                } else {
+                    self.stores.signs.insert(aid, title);
+                }
+            }
+            BuyStoreSetup(slots) => {
+                let limit = self.hud.status.zeny.max(0).to_string();
+                self.stores.setup = Some((slots, format!("{} is buying", self.hud.status.name), limit, Default::default()));
+            }
+            MyBuyStore { limit, items } => {
+                self.stores.mine = Some((limit, items));
+                let ids = self.stores.item_ids();
+                self.load_icons_for(&ids);
+            }
+            BuyStore { buyer, store, limit, items } => {
+                let amounts = vec![0; items.len()];
+                self.stores.browsing = Some((buyer, store, limit, items, amounts));
+                let ids = self.stores.item_ids();
+                self.load_icons_for(&ids);
+            }
+            BoughtThroughStore { id, amount, zeny, limit } => {
+                let name = self.item_db.as_ref().map_or_else(|| format!("Item #{id}"), |d| d.name(id, true));
+                self.hud.push_chat(ro_net::ChatKind::System, format!("Your buying store bought {amount} x {name} for {zeny} z."));
+                if let Some((l, items)) = self.stores.mine.as_mut() {
+                    *l = limit;
+                    if let Some(i) = items.iter_mut().find(|i| i.id == id) {
+                        i.amount = i.amount.saturating_sub(amount);
+                    }
+                }
+            }
+            SoldToStore { index, amount, price } => {
+                let name = self.inventory.items.get(&index).and_then(|i| self.item_db.as_ref().map(|d| d.name(i.id, true))).unwrap_or_else(|| "an item".into());
+                self.hud.push_chat(ro_net::ChatKind::System, format!("Sold {amount} x {name} for {} z.", amount as u64 * price as u64));
+                self.inventory.remove(index, amount);
+            }
+            BuyStoreNotice(msg) => {
+                if msg.contains("closed") {
+                    self.stores.mine = None;
+                }
+                self.hud.push_chat(ro_net::ChatKind::System, msg);
+            }
+            CashShop { cash, kafra } => {
+                self.stores.cash = Some((cash, kafra));
+                // The server sends the item list once per login.
+                if self.stores.cash_tabs.is_empty() {
+                    self.send(ro_net::Command::CashShop(ro_net::CashShopRequest::List));
+                }
+            }
+            CashTab { tab, items } => {
+                self.stores.cash_tabs.insert(tab, items);
+                let ids = self.stores.item_ids();
+                self.load_icons_for(&ids);
+            }
+            CashResult { result, cash, kafra } => {
+                if let Some(c) = self.stores.cash.as_mut() {
+                    *c = (cash, kafra);
+                }
+                let msg = match result {
+                    0 => "Purchase complete.",
+                    2 => "You don't have enough points.",
+                    3 => "That item isn't for sale.",
+                    4 => "You are carrying too much weight.",
+                    5 => "You can't carry that many items.",
+                    6 => "You can't buy anything right now.",
+                    _ => "The purchase failed.",
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, msg.into());
             }
             ShopBuyResult(code) => {
                 let msg = match code {
@@ -2396,6 +2473,12 @@ impl App {
         }
     }
 
+    /// Opens the cash shop (the server answers with our points) or closes it.
+    fn toggle_cash_shop(&mut self) {
+        let req = if self.stores.cash.take().is_some() { ro_net::CashShopRequest::Close } else { ro_net::CashShopRequest::Open };
+        self.queued_commands.push(ro_net::Command::CashShop(req));
+    }
+
     fn proc_fx(&mut self, tex: &'static str, shape: ro_render::Shape, pos: glam::Vec3, color: [f32; 3], duration_ms: f32) {
         let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
         if let Some(tex) = self.fx.texture(r, vfs, tex) {
@@ -2992,6 +3075,54 @@ impl App {
                         }
                         None
                     }
+                    // Buying store / cash shop tests: buystore:id:amount:price opens a store
+                    // from the set-up; buybrowse:aid looks in one; sellall sells everything it
+                    // wants that we carry; cashshop toggles the shop; cashbuy:id buys one.
+                    Some(("buystore", spec)) => {
+                        let f: Vec<u32> = spec.split(':').filter_map(|v| v.parse().ok()).collect();
+                        if let (Some((_, title, _, _)), [id, amount, price]) = (self.stores.setup.take(), f.as_slice()) {
+                            let limit = self.hud.status.zeny.clamp(0, u32::MAX as i64) as u32;
+                            self.queued_commands.push(ro_net::Command::BuyingStore(ro_net::BuyingStoreRequest::Open { limit, title, items: vec![(*id, *amount as u16, *price)] }));
+                        }
+                        None
+                    }
+                    Some(("buybrowse", aid)) => {
+                        aid.parse().ok().map(|aid| self.queued_commands.push(ro_net::Command::BuyingStore(ro_net::BuyingStoreRequest::Browse(aid))));
+                        None
+                    }
+                    Some(("sellall", _)) => {
+                        if let Some((buyer, store, _, items, _)) = self.stores.browsing.take() {
+                            let list = items
+                                .iter()
+                                .filter_map(|w| self.inventory.items.values().find(|i| i.id == w.id && i.equipped == 0).map(|i| (i.index, w.id, w.amount.min(i.amount))))
+                                .collect();
+                            self.queued_commands.push(ro_net::Command::BuyingStore(ro_net::BuyingStoreRequest::Sell { buyer, store, items: list }));
+                        }
+                        None
+                    }
+                    // hover:x:y holds the UI pointer there (UI points), for tooltips.
+                    Some(("hover", at)) => {
+                        let f: Vec<f32> = at.split(':').filter_map(|v| v.parse().ok()).collect();
+                        self.fake_pointer = (f.len() == 2).then(|| egui::pos2(f[0], f[1]));
+                        None
+                    }
+                    // click:x:y clicks the UI there.
+                    Some(("click", at)) => {
+                        let f: Vec<f32> = at.split(':').filter_map(|v| v.parse().ok()).collect();
+                        self.fake_click = (f.len() == 2).then(|| (egui::pos2(f[0], f[1]), true));
+                        None
+                    }
+                    Some(("cashshop", _)) => {
+                        self.toggle_cash_shop();
+                        None
+                    }
+                    Some(("cashbuy", id)) => {
+                        let id: u32 = id.parse().unwrap_or(0);
+                        if let Some(tab) = self.stores.cash_tabs.iter().find(|(_, items)| items.iter().any(|(i, _)| *i == id)).map(|(t, _)| *t) {
+                            self.queued_commands.push(ro_net::Command::CashShop(ro_net::CashShopRequest::Buy { kafra: 0, items: vec![(id, 1, tab)] }));
+                        }
+                        None
+                    }
                     Some(("browse", aid)) => {
                         aid.parse().ok().map(|aid| self.queued_commands.push(ro_net::Command::Merchant(ro_net::MerchantRequest::Browse(aid))));
                         None
@@ -3355,6 +3486,12 @@ impl App {
             .keys()
             .filter_map(|id| { let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) }?; Some((*id, r.project(m.actor.pos + glam::Vec3::Y * ro_render::CELL * 3.2, size)?)) })
             .collect();
+        let buy_signs: Vec<(u32, glam::Vec2)> = self
+            .stores
+            .signs
+            .keys()
+            .filter_map(|id| { let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) }?; Some((*id, r.project(m.actor.pos + glam::Vec3::Y * ro_render::CELL * 3.2, size)?)) })
+            .collect();
         // Quest marks over NPC heads (screen pixels).
         let quest_marks: Vec<(glam::Vec2, u16, u16)> = self
             .quests
@@ -3372,6 +3509,16 @@ impl App {
             .collect();
         if let Some(state) = self.egui_state.as_mut() {
             let mut input = state.take_egui_input(window);
+            if let Some(p) = self.fake_pointer.take() {
+                input.events.push(egui::Event::PointerMoved(p));
+            }
+            if let Some((p, pressed)) = self.fake_click.take() {
+                input.events.push(egui::Event::PointerMoved(p));
+                input.events.push(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() });
+                if pressed {
+                    self.fake_click = Some((p, false));
+                }
+            }
             let ppp = window.scale_factor() as f32 * self.ui_scale;
             input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size.0 as f32, size.1 as f32) / ppp));
             self.egui_ctx.set_pixels_per_point(ppp);
@@ -3502,6 +3649,16 @@ impl App {
                 }
                 if let Some(aid) = self.merchant.show_signs(ui.ctx(), &shop_signs) {
                     self.queued_commands.push(ro_net::Command::Merchant(ro_net::MerchantRequest::Browse(aid)));
+                }
+                if let Some(aid) = self.stores.show_signs(ui.ctx(), &buy_signs) {
+                    self.queued_commands.push(ro_net::Command::BuyingStore(ro_net::BuyingStoreRequest::Browse(aid)));
+                }
+                let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
+                if let Some(req) = self.stores.show_buying(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons, zeny) {
+                    self.queued_commands.push(ro_net::Command::BuyingStore(req));
+                }
+                if let Some(req) = self.stores.show_cash(ui.ctx(), self.item_db.as_ref(), &self.icons) {
+                    self.queued_commands.push(ro_net::Command::CashShop(req));
                 }
                 if let Some((quest, active)) = self.quests.show(ui.ctx()) {
                     self.queued_commands.push(ro_net::Command::QuestActive { quest, active });
@@ -3836,6 +3993,7 @@ impl ApplicationHandler for App {
                         "u" => self.quests.open = !self.quests.open,
                         "w" => self.merchant.cart_open = !self.merchant.cart_open,
                         "b" => self.toggle_bank(),
+                        "c" => self.toggle_cash_shop(),
                         // Alt+1..Alt+0: the emote shortcuts.
                         d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => {
                             if let Some((tx, _)) = self.net.as_ref() {
@@ -4037,6 +4195,7 @@ fn main() -> anyhow::Result<()> {
         buffs: Default::default(),
         quests: Default::default(),
         merchant: Default::default(),
+        stores: Default::default(),
         item_info: Default::default(),
         refine: Default::default(),
         show_equip: None,
@@ -4050,6 +4209,8 @@ fn main() -> anyhow::Result<()> {
         fx_test: arg("--fx").map(|s| &*s.leak()),
         alt: false,
         queued_action: None,
+        fake_pointer: None,
+        fake_click: None,
         social: Default::default(),
         trade_partner: None,
         player_menu: None,

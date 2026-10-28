@@ -18,7 +18,7 @@ pub use ro_proto::guild::{GuildInfo, GuildMember, GuildRequest, GuildSkill, Posi
 use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
 pub use ro_proto::quests::{Objective, Quest};
-pub use ro_proto::merchant::{BankRequest, MerchantRequest, VendItem};
+pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, MerchantRequest, VendItem, WantedItem};
 pub use ro_proto::refine::{RefineOption, RefineRequest};
 use ro_proto::refine::*;
 use ro_proto::merchant::*;
@@ -313,6 +313,26 @@ pub enum Event {
     ShopBuyResult(u8),
     /// The refine window opened (an NPC or @refineui).
     RefineOpen,
+    /// A buying store sign over a player (empty title: gone).
+    BuySign { aid: u32, title: String },
+    /// The buying store skill was used: set one up with this many slots.
+    BuyStoreSetup(u8),
+    /// Our buying store as it opened.
+    MyBuyStore { limit: u32, items: Vec<WantedItem> },
+    /// Someone's buying store, opened to sell to.
+    BuyStore { buyer: u32, store: u32, limit: u32, items: Vec<WantedItem> },
+    /// We bought something through our store: (item, amount bought, zeny paid, limit left).
+    BoughtThroughStore { id: u32, amount: u16, zeny: u32, limit: u32 },
+    /// We sold an item to a buying store.
+    SoldToStore { index: u16, amount: u16, price: u32 },
+    /// A buying store message (failure or closure).
+    BuyStoreNotice(String),
+    /// The cash shop opened: (cash points, kafra points).
+    CashShop { cash: u32, kafra: u32 },
+    /// One tab of the cash shop: (item id, price).
+    CashTab { tab: u16, items: Vec<(u32, u32)> },
+    /// After buying from the cash shop.
+    CashResult { result: u16, cash: u32, kafra: u32 },
     /// Another player's equipment.
     ViewEquip { name: String, job: i16, items: Vec<ItemData> },
     /// ZC_CONFIG: our "show equipment" setting as the server has it.
@@ -389,6 +409,8 @@ pub enum Command {
     Merchant(MerchantRequest),
     Refine(RefineRequest),
     Bank(BankRequest),
+    BuyingStore(BuyingStoreRequest),
+    CashShop(CashShopRequest),
     /// Look at a player's equipment.
     ViewEquip(u32),
     /// Let others look at ours.
@@ -523,6 +545,8 @@ impl MapSession {
                     Some(Command::Merchant(r)) => self.send(r).await?,
                     Some(Command::Refine(r)) => self.send(r).await?,
                     Some(Command::Bank(r)) => self.send(r).await?,
+                    Some(Command::BuyingStore(r)) => self.send(r).await?,
+                    Some(Command::CashShop(r)) => self.send(r).await?,
                     Some(Command::ViewEquip(aid)) => self.send(CzViewEquip(aid)).await?,
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
@@ -680,6 +704,31 @@ impl MapSession {
                         0x012d if data.len() >= 4 => Some(Event::ShopSetup(u16::from_le_bytes([data[2], data[3]]))),
                         0x0b40 => Some(Event::MyShop(parse_my_shop(&data))),
                         0x0aa0 => Some(Event::RefineOpen),
+                        0x0814 => parse_store_entry(&data).map(|(aid, title)| Event::BuySign { aid, title }),
+                        0x0816 if data.len() >= 6 => Some(Event::BuySign { aid: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), title: String::new() }),
+                        0x0810 if data.len() >= 3 => Some(Event::BuyStoreSetup(data[2])),
+                        0x0813 => parse_my_buying_store(&data).map(|(limit, items)| Event::MyBuyStore { limit, items }),
+                        0x0818 => parse_buying_store(&data).map(|(buyer, store, limit, items)| Event::BuyStore { buyer, store, limit, items }),
+                        0x09e6 => parse_buying_update(&data).map(|(id, amount, zeny, limit)| Event::BoughtThroughStore { id, amount, zeny, limit }),
+                        0x081c => parse_sold_to_buyer(&data).map(|(index, amount, price)| Event::SoldToStore { index, amount, price }),
+                        0x0812 if data.len() >= 8 => Some(Event::BuyStoreNotice(match data[2] {
+                            2 => format!("You would be overweight, so the buying store can't open ({} weight).", u32::from_le_bytes([data[4], data[5], data[6], data[7]]) / 10),
+                            8 => "No purchase information.".into(),
+                            _ => "Failed to open the buying store.".into(),
+                        })),
+                        0x081a if data.len() >= 4 => Some(Event::BuyStoreNotice(match data[2] {
+                            3 => "Your buying store spent its whole zeny limit and closed.".into(),
+                            4 => "Your buying store bought everything and closed.".into(),
+                            _ => "Your buying store closed.".into(),
+                        })),
+                        0x0824 if data.len() >= 4 => Some(Event::BuyStoreNotice(match data[2] {
+                            6 => "The buyer doesn't want that many.".into(),
+                            7 => "The buyer can't pay for that.".into(),
+                            _ => "The deal failed.".into(),
+                        })),
+                        0x0b6e => parse_cash_open(&data).map(|(cash, kafra)| Event::CashShop { cash, kafra }),
+                        0x08ca => parse_cash_tab(&data).map(|(tab, items)| Event::CashTab { tab, items }),
+                        0x0849 => parse_cash_result(&data).map(|(result, cash, kafra)| Event::CashResult { result, cash, kafra }),
                         0x0b37 => parse_view_equip(&data).map(|(name, job, items)| Event::ViewEquip { name, job, items }),
                         0x02d9 if data.len() >= 10 && data[2..6] == [0, 0, 0, 0] => Some(Event::ShowEquip(data[6] != 0)),
                         0x09a6 => parse_bank_balance(&data).map(|balance| Event::Bank { balance, reply: None }),
