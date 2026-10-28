@@ -102,6 +102,7 @@ fn load_character(vfs: &ro_vfs::Vfs, r: &mut ro_render::Renderer, look: &Look) -
         action: 0,
         dir: ro_render::Dir::S,
         time_ms: 0.0,
+        once: false,
     })
 }
 
@@ -304,12 +305,62 @@ struct Mob {
     name: String,
     /// Unit object type (0 player, 1/6 NPC, 5 monster, ...).
     kind: u8,
+    /// Uses the player body/head sprites (whose action groups differ from monsters').
+    human: bool,
+    /// A timed pose (attack, hurt) overriding idle: (pose, remaining ms).
+    pose: Option<(Pose, f32)>,
+    sitting: bool,
+    /// Playing the death animation; removed when it runs out (None for the player).
+    dying: Option<f32>,
+    hp: Option<(i32, i32)>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Pose {
+    Attack,
+    Hurt,
+    Dead,
 }
 
 impl Mob {
     fn new(actor: ro_render::Actor, cell: (u16, u16), dir: usize, speed: i16) -> Self {
         let speed = if speed > 0 { speed as f32 } else { 150.0 };
-        Self { actor, walker: ro_game::Walker::new((cell.0 as i32, cell.1 as i32), dir, speed), name: String::new(), kind: 0 }
+        Self {
+            actor,
+            walker: ro_game::Walker::new((cell.0 as i32, cell.1 as i32), dir, speed),
+            name: String::new(),
+            kind: 0,
+            human: true,
+            pose: None,
+            sitting: false,
+            dying: None,
+            hp: None,
+        }
+    }
+
+    /// Action group for a pose: player sprites and monster sprites order them differently.
+    fn action_for(&self, pose: Pose) -> usize {
+        match (self.human, pose) {
+            (true, Pose::Attack) => 5,
+            (true, Pose::Hurt) => 6,
+            (true, Pose::Dead) => 8,
+            (false, Pose::Attack) => 2,
+            (false, Pose::Hurt) => 3,
+            (false, Pose::Dead) => 4,
+        }
+    }
+
+    fn set_pose(&mut self, pose: Pose, ms: f32) {
+        self.pose = Some((pose, ms.max(200.0)));
+        self.actor.time_ms = 0.0;
+    }
+
+    /// Turns to face a cell.
+    fn face(&mut self, cell: (i32, i32)) {
+        let c = self.walker.cell;
+        if c != cell {
+            self.walker.dir = ro_game::dir_from_step(cell.0 - c.0, cell.1 - c.1);
+        }
     }
 
     /// Name label colour, or None when the original client would not show one
@@ -354,7 +405,25 @@ impl Mob {
             .and_then(|g| g.height_at(fx + 0.5, fy + 0.5))
             .map_or_else(|| world.ground.height_at(x, z), |h| -h);
         self.actor.pos = glam::Vec3::new(x, y, z);
-        self.actor.action = if walking { 1 } else { idle_action };
+        if let Some((_, left)) = self.pose.as_mut() {
+            *left -= dt;
+            if *left <= 0.0 && self.pose.is_some_and(|(p, _)| p != Pose::Dead) {
+                self.pose = None;
+                self.actor.time_ms = 0.0;
+            }
+        }
+        if let Some(left) = self.dying.as_mut() {
+            *left -= dt;
+        }
+        let (action, once) = match self.pose {
+            Some((Pose::Dead, _)) => (self.action_for(Pose::Dead), true),
+            Some((p, _)) if !walking => (self.action_for(p), true),
+            _ if walking => (1, false),
+            _ if self.sitting => (2, false),
+            _ => (idle_action, false),
+        };
+        self.actor.action = action;
+        self.actor.once = once;
         self.actor.dir = DIRS[(self.walker.dir as i32 + octant).rem_euclid(8) as usize];
         self.actor.time_ms += dt;
         self.actor.clone()
@@ -428,8 +497,16 @@ struct App {
     cutin: Option<hud::Cutin>,
     /// NPC to talk to once we have walked into range.
     pending_npc: Option<u32>,
+    /// The monster we keep attacking, and our reach (cells) once the server tells us.
+    attack: Option<(u32, i16)>,
+    /// Walking toward the attack target after the server said it was out of reach.
+    chasing: bool,
+    /// Floating damage numbers: (world position, text, colour, age ms).
+    floaters: Vec<(glam::Vec3, String, egui::Color32, f32)>,
     /// `--talk name`: talk to the first NPC with this name once in view (scripted test).
     talk_to: Option<String>,
+    /// `--attack`: attack the nearest monster once one is in view (scripted test).
+    auto_attack: bool,
     /// Other units in view, by id.
     units: std::collections::HashMap<u32, Mob>,
     class_names: std::collections::HashMap<i16, String>,
@@ -503,7 +580,7 @@ impl App {
             Some((spr, act)) => {
                 let body = r.add_sheet(&spr, act, None);
                 let shadow = self.sprites.get("shadow").cloned().flatten().and_then(|a| a.shadow);
-                Some(ro_render::Actor { pos: Default::default(), body, head: None, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0 })
+                Some(ro_render::Actor { pos: Default::default(), body, head: None, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false })
             }
             None => {
                 tracing::debug!(job, %name, "no sprite for class");
@@ -561,6 +638,7 @@ impl App {
         // NPC names may carry a "#unique-suffix" that the client never shows.
         mob.name = info.name.split('#').next().unwrap_or_default().trim().to_string();
         mob.kind = info.object_type;
+        mob.human = is_player_class(info.job);
         if let ro_net::UnitPos::Walking { from, to } = info.pos {
             let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
             mob.walk(gat, from, to);
@@ -659,8 +737,39 @@ impl App {
             Stat { id, value } => self.hud.status.set(id, value),
             Chat { kind, text, .. } => self.hud.push_chat(kind, text),
             Npc(d) => self.npc_dialog(d),
-            Vanish { id, .. } => {
-                self.units.remove(&id);
+            Vanish { id, reason } => {
+                if self.attack.is_some_and(|(t, _)| t == id) {
+                    self.attack = None;
+                }
+                if id == self.account_id {
+                    if reason == 1 {
+                        if let Some(p) = self.player.as_mut() {
+                            p.set_pose(Pose::Dead, f32::MAX);
+                        }
+                        self.hud.push_chat(ro_net::ChatKind::System, "You have died.".into());
+                    }
+                } else if reason == 1 {
+                    // Died: play the death animation, then remove.
+                    if let Some(m) = self.units.get_mut(&id) {
+                        m.walker.stop_at(m.walker.cell);
+                        m.set_pose(Pose::Dead, f32::MAX);
+                        m.dying = Some(1500.0);
+                    }
+                } else {
+                    self.units.remove(&id);
+                }
+            }
+            Act(act) => self.act(act),
+            OutOfRange { target, target_cell, range } => {
+                // Walk toward the target; the attack is re-sent once in reach.
+                self.chasing = true;
+                self.attack = Some((target, range.max(1)));
+                self.request_walk(target_cell);
+            }
+            MonsterHp { id, hp, max_hp } => {
+                if let Some(m) = self.units.get_mut(&id) {
+                    m.hp = Some((hp, max_hp));
+                }
             }
             MapMove { map, x, y } => {
                 self.units.clear();
@@ -675,6 +784,64 @@ impl App {
                 tracing::error!("disconnected: {reason}");
                 self.status = Some(format!("disconnected: {reason}"));
             }
+        }
+    }
+
+    /// The player or a unit by id.
+    fn mob_mut(&mut self, id: u32) -> Option<&mut Mob> {
+        if id == self.account_id { self.player.as_mut() } else { self.units.get_mut(&id) }
+    }
+
+    /// Someone acted on someone: animate both, and show what happened.
+    fn act(&mut self, act: ro_net::Act) {
+        let me = self.account_id;
+        let cell_of = |app: &Self, id: u32| -> Option<(i32, i32)> {
+            if id == me { app.player.as_ref().map(|p| p.walker.cell) } else { app.units.get(&id).map(|m| m.walker.cell) }
+        };
+        let (src_cell, target_cell) = (cell_of(self, act.src), cell_of(self, act.target));
+        match act.kind {
+            2 | 3 => {
+                if let Some(m) = self.mob_mut(act.src) {
+                    m.sitting = act.kind == 2;
+                }
+                return;
+            }
+            1 => return, // picked something up
+            _ => {}
+        }
+        if let Some(m) = self.mob_mut(act.src) {
+            if let Some(c) = target_cell {
+                m.face(c);
+            }
+            m.set_pose(Pose::Attack, act.src_speed as f32);
+        }
+        let damage = act.damage + act.left_damage;
+        if let Some(m) = self.mob_mut(act.target) {
+            if damage > 0 && act.kind != 4 && act.kind != 9 {
+                if let Some(c) = src_cell {
+                    m.face(c);
+                }
+                m.set_pose(Pose::Hurt, act.dmg_speed as f32);
+            }
+            let pos = m.actor.pos;
+            let (text, color) = match act.kind {
+                11 => ("Lucky".to_string(), egui::Color32::from_rgb(140, 220, 255)),
+                _ if damage <= 0 => ("Miss".to_string(), egui::Color32::from_rgb(200, 200, 200)),
+                10 => (format!("{damage}!"), egui::Color32::from_rgb(255, 210, 60)),
+                _ if act.target == me => (damage.to_string(), egui::Color32::from_rgb(255, 90, 90)),
+                _ => (damage.to_string(), egui::Color32::WHITE),
+            };
+            self.floaters.push((pos, text, color, 0.0));
+        }
+    }
+
+    /// Attacks a monster until it dies or we pick something else.
+    fn attack_unit(&mut self, id: u32) {
+        self.walk_goal = None;
+        self.pending_npc = None;
+        self.attack = Some((id, 1));
+        if let Some((tx, _)) = self.net.as_ref() {
+            let _ = tx.send(ro_net::Command::Attack { target: id, keep: true });
         }
     }
 
@@ -800,6 +967,41 @@ impl App {
             self.handle(e);
         }
 
+        // Chasing an out-of-reach target: attack again once close enough (or arrived).
+        if self.chasing {
+            if let (Some((target, range)), Some(p)) = (self.attack, self.player.as_ref()) {
+                let near = self.units.get(&target).is_some_and(|m| {
+                    let (a, b) = (p.walker.cell, m.walker.cell);
+                    (a.0 - b.0).abs().max((a.1 - b.1).abs()) <= range as i32
+                });
+                if near || (self.walk_goal.is_none() && !p.walker.is_walking()) {
+                    self.chasing = false;
+                    self.attack_unit(target);
+                }
+            } else {
+                self.chasing = false;
+            }
+        }
+        self.units.retain(|_, m| m.dying.is_none_or(|t| t > 0.0));
+        self.floaters.retain_mut(|f| {
+            f.3 += dt;
+            f.3 < 1200.0
+        });
+
+        if self.auto_attack {
+            let me = self.player.as_ref().map(|p| p.walker.cell);
+            let nearest = me.and_then(|a| {
+                self.units
+                    .iter()
+                    .filter(|(_, m)| m.kind == 5 && m.dying.is_none())
+                    .min_by_key(|(_, m)| (m.walker.cell.0 - a.0).abs().max((m.walker.cell.1 - a.1).abs()))
+                    .map(|(id, _)| *id)
+            });
+            if let Some(id) = nearest {
+                self.auto_attack = false;
+                self.attack_unit(id);
+            }
+        }
         if let Some(name) = self.talk_to.clone() {
             if let Some(id) = self.units.iter().find(|(_, m)| m.name.eq_ignore_ascii_case(&name)).map(|(id, _)| *id) {
                 self.talk_to = None;
@@ -842,6 +1044,16 @@ impl App {
                 labels.push(hud::Label { feet, text: m.name.clone(), color });
             }
         }
+        let floaters: Vec<_> = self.floaters.iter().filter_map(|(pos, text, color, age)| Some((r.project(*pos, size)?, text.clone(), *color, *age))).collect();
+        let bars: Vec<_> = self
+            .units
+            .values()
+            .filter(|m| m.dying.is_none())
+            .filter_map(|m| {
+                let (hp, max) = m.hp?;
+                Some((r.project(m.actor.pos, size)?, hp as f32 / max.max(1) as f32))
+            })
+            .collect();
         if let Some(state) = self.egui_state.as_mut() {
             let mut input = state.take_egui_input(window);
             let ppp = window.scale_factor() as f32 * self.ui_scale;
@@ -850,7 +1062,7 @@ impl App {
             let mut sent = None;
             let mut answer = None;
             let out = self.egui_ctx.run_ui(input, |ui| {
-                sent = self.hud.show(ui.ctx(), &labels);
+                sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars);
                 answer = self.hud.show_dialog(ui.ctx(), &mut self.dialog, self.cutin.as_ref());
             });
             if let (Some((npc, reply)), Some((tx, _))) = (answer, self.net.as_ref()) {
@@ -1021,9 +1233,14 @@ impl ApplicationHandler for App {
                     // NPCs: talk (walking over first if needed).
                     Some((id, 1 | 6)) => {
                         self.walk_goal = None;
+                        self.attack = None;
                         self.talk(id);
                     }
+                    // Monsters: attack until it dies (the server walks us within reach).
+                    Some((id, 5)) => self.attack_unit(id),
                     _ => {
+                        self.attack = None;
+                        self.chasing = false;
                         if let Some(cell) = self.pick() {
                             self.pending_npc = None;
                             self.request_walk(cell);
@@ -1093,7 +1310,11 @@ fn main() -> anyhow::Result<()> {
         dialog: None,
         cutin: None,
         pending_npc: None,
+        attack: None,
+        chasing: false,
+        floaters: vec![],
         talk_to: arg("--talk"),
+        auto_attack: args.iter().any(|a| a == "--attack"),
         units: Default::default(),
         class_names: Default::default(),
         sprites: Default::default(),

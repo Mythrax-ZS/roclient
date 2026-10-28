@@ -111,7 +111,8 @@ impl Hud {
     }
 
     /// Draws the HUD; returns a chat line the player submitted.
-    pub fn show(&mut self, ctx: &egui::Context, labels: &[Label]) -> Option<String> {
+    /// `floaters`: (screen pos, text, colour, age ms) damage numbers; `bars`: (feet, hp fraction).
+    pub fn show(&mut self, ctx: &egui::Context, labels: &[Label], floaters: &[(glam::Vec2, String, Color32, f32)], bars: &[(glam::Vec2, f32)]) -> Option<String> {
         // Names under actors, outlined for readability on any background.
         let painter = ctx.layer_painter(egui::LayerId::background());
         let ppp = ctx.pixels_per_point();
@@ -122,6 +123,27 @@ impl Hud {
                 painter.text(pos + Vec2::new(dx, dy), Align2::CENTER_TOP, &l.text, font.clone(), Color32::BLACK);
             }
             painter.text(pos, Align2::CENTER_TOP, &l.text, font, l.color);
+        }
+
+        // HP bars under monsters that have been hit.
+        for &(feet, frac) in bars {
+            let c = egui::pos2(feet.x / ppp, feet.y / ppp + 4.0);
+            let rect = egui::Rect::from_center_size(c, Vec2::new(40.0, 5.0));
+            painter.rect_filled(rect.expand(1.0), 1.0, Color32::BLACK);
+            let mut fill = rect;
+            fill.set_width(rect.width() * frac.clamp(0.0, 1.0));
+            painter.rect_filled(fill, 1.0, Color32::from_rgb(220, 60, 60));
+        }
+        // Damage numbers rise and fade over their lifetime.
+        for (pos, text, color, age) in floaters {
+            let t = age / 1200.0;
+            let p = egui::pos2(pos.x / ppp, pos.y / ppp - 60.0 - t * 40.0);
+            let alpha = ((1.0 - t) * 255.0) as u8;
+            let font = FontId::proportional(20.0);
+            for (dx, dy) in [(-1.5, 0.0), (1.5, 0.0), (0.0, -1.5), (0.0, 1.5)] {
+                painter.text(p + Vec2::new(dx, dy), Align2::CENTER_BOTTOM, text, font.clone(), Color32::from_black_alpha(alpha));
+            }
+            painter.text(p, Align2::CENTER_BOTTOM, text, font, Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha));
         }
 
         let s = &self.status;

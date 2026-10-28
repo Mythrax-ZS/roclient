@@ -11,7 +11,7 @@ use ro_proto::{id, packets::*, Frame, RoCodec, ServerTable};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-pub use ro_proto::packets::{sp, CharInfo, ChatKind, NpcDialog, NpcReply, UnitInfo, UnitPos};
+pub use ro_proto::packets::{sp, Act, CharInfo, ChatKind, NpcDialog, NpcReply, UnitInfo, UnitPos};
 
 type Conn = Framed<TcpStream, RoCodec<ServerTable>>;
 
@@ -158,6 +158,11 @@ pub enum Event {
     Chat { kind: ChatKind, from: Option<u32>, text: String },
     /// Another unit came into view, or (Walking) started moving.
     Unit(UnitInfo),
+    /// Someone attacked (or sat, stood, picked up...).
+    Act(Act),
+    /// Our attack target is out of range: it stands at `target_cell`, we can reach `range`.
+    OutOfRange { target: u32, target_cell: (u16, u16), range: i16 },
+    MonsterHp { id: u32, hp: i32, max_hp: i32 },
     /// An NPC script wants something shown.
     Npc(NpcDialog),
     /// A unit left view (reason: 0 out of sight, 1 died, 2 logged out, 3 teleported).
@@ -169,6 +174,8 @@ pub enum Event {
 #[derive(Debug, Clone)]
 pub enum Command {
     Move { x: u16, y: u16 },
+    /// Attack a unit (continuously when `keep`).
+    Attack { target: u32, keep: bool },
     /// Talk to an NPC or answer its dialog.
     Npc { npc: u32, reply: NpcReply },
     /// Say something in public chat.
@@ -267,6 +274,7 @@ impl MapSession {
                     None => return Ok(None),
                     Some(Command::Move { x, y }) => self.send(CzRequestMove { x, y, dir: 0 }).await?,
                     Some(Command::Chat(text)) => self.send(CzChat { name, text: &text }).await?,
+                    Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Npc { npc, reply }) => self.send(CzNpc { npc, reply: &reply }).await?,
                 },
                 f = self.conn.next() => {
@@ -289,6 +297,15 @@ impl MapSession {
                         }
                         0x09fd | 0x09fe | 0x09ff => parse_unit(opcode, &data).map(Event::Unit),
                         0x00b4 | 0x00b5 | 0x00b6 | 0x00b7 | 0x0142 | 0x01d4 | 0x08d6 | 0x01b3 => parse_npc_dialog(opcode, &data).map(Event::Npc),
+                        id::ZC_NOTIFY_ACT => Some(Event::Act(parse_act(&data))),
+                        id::ZC_ATTACK_FAILURE_FOR_DISTANCE => {
+                            let (target, target_cell, _, range) = parse_attack_out_of_range(&data);
+                            Some(Event::OutOfRange { target, target_cell, range })
+                        }
+                        0x0977 => {
+                            let (id, hp, max_hp) = parse_monster_hp(&data);
+                            Some(Event::MonsterHp { id, hp, max_hp })
+                        }
                         0x00b0 | 0x00b1 | 0x0acb => parse_par_change(opcode, &data).map(|(id, value)| Event::Stat { id, value }),
                         0x008d | 0x008e | 0x02c1 | 0x09de | 0x009a | 0x01c3 => {
                             parse_chat(opcode, &data).map(|(kind, from, text)| Event::Chat { kind, from, text })

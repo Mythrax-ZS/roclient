@@ -710,3 +710,94 @@ mod npc_tests {
         assert_eq!(b.len(), client_packet("NpcSelectMenu").len as usize);
     }
 }
+
+// ---------------------------------------------------------------- map: combat
+
+/// ZC_NOTIFY_ACT (0x08c8): someone acted on someone (attack, sit, stand, pick up...).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Act {
+    pub src: u32,
+    pub target: u32,
+    /// Attacker's attack motion time and the target's flinch time, in ms.
+    pub src_speed: i32,
+    pub dmg_speed: i32,
+    pub damage: i32,
+    pub hits: i16,
+    /// 0 hit, 1 pick up, 2 sit, 3 stand, 4 endure, 8 multi-hit, 9 multi-hit endure,
+    /// 10 critical, 11 lucky dodge.
+    pub kind: u8,
+    pub left_damage: i32,
+}
+
+pub fn parse_act(data: &[u8]) -> Act {
+    let mut b = &data[2..];
+    Act {
+        src: b.get_u32_le(),
+        target: b.get_u32_le(),
+        src_speed: {
+            b.advance(4); // server tick
+            b.get_i32_le()
+        },
+        dmg_speed: b.get_i32_le(),
+        damage: b.get_i32_le(),
+        hits: {
+            b.advance(1); // isSPDamage
+            b.get_i16_le()
+        },
+        kind: b.get_u8(),
+        left_damage: b.get_i32_le(),
+    }
+}
+
+/// ZC_ATTACK_FAILURE_FOR_DISTANCE (0x0139): (target, target cell, our cell, attack range).
+pub fn parse_attack_out_of_range(data: &[u8]) -> (u32, (u16, u16), (u16, u16), i16) {
+    let mut b = &data[2..];
+    let target = b.get_u32_le();
+    let t = (b.get_i16_le() as u16, b.get_i16_le() as u16);
+    let me = (b.get_i16_le() as u16, b.get_i16_le() as u16);
+    (target, t, me, b.get_i16_le())
+}
+
+/// ZC_NOTIFY_MONSTER_HP (0x0977): (monster id, hp, max hp).
+pub fn parse_monster_hp(data: &[u8]) -> (u32, i32, i32) {
+    let mut b = &data[2..];
+    (b.get_u32_le(), b.get_i32_le(), b.get_i32_le())
+}
+
+/// CZ_REQUEST_ACT (ActionRequest): 0 attack once, 7 keep attacking, 2 sit, 3 stand.
+pub struct CzRequestAct {
+    pub target: u32,
+    pub action: u8,
+}
+
+impl Encode for CzRequestAct {
+    fn encode(&self, d: &mut BytesMut) {
+        put_db_packet(d, "ActionRequest", &[&self.target.to_le_bytes(), &[self.action]]);
+    }
+}
+
+#[cfg(test)]
+mod combat_tests {
+    use super::*;
+
+    #[test]
+    fn notify_act_layout() {
+        let mut p = vec![0xc8, 0x08];
+        p.extend_from_slice(&5u32.to_le_bytes()); // src
+        p.extend_from_slice(&9u32.to_le_bytes()); // target
+        p.extend_from_slice(&0u32.to_le_bytes()); // tick
+        p.extend_from_slice(&400i32.to_le_bytes());
+        p.extend_from_slice(&300i32.to_le_bytes());
+        p.extend_from_slice(&17i32.to_le_bytes()); // damage
+        p.push(0);
+        p.extend_from_slice(&1i16.to_le_bytes());
+        p.push(10); // critical
+        p.extend_from_slice(&0i32.to_le_bytes());
+        assert_eq!(p.len(), 34);
+        let a = parse_act(&p);
+        assert_eq!((a.src, a.target, a.src_speed, a.dmg_speed, a.damage, a.hits, a.kind), (5, 9, 400, 300, 17, 1, 10));
+        let mut b = BytesMut::new();
+        CzRequestAct { target: 9, action: 7 }.encode(&mut b);
+        assert_eq!(b.len(), client_packet("ActionRequest").len as usize);
+    }
+}

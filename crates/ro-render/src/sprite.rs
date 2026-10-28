@@ -61,6 +61,8 @@ pub struct Actor {
     pub dir: Dir,
     /// Milliseconds into the current action.
     pub time_ms: f32,
+    /// Play the action once and hold its last frame (death) instead of looping.
+    pub once: bool,
 }
 
 pub(crate) struct Sheet {
@@ -111,8 +113,11 @@ impl Sheet {
     }
 
     /// Frame index of `action` at `time_ms`, looping.
-    fn frame_index(&self, action: usize, time_ms: f32) -> usize {
-        self.action(action).map_or(0, |a| (time_ms / a.delay_ms.max(1.0)) as usize % a.frames.len())
+    fn frame_index(&self, action: usize, time_ms: f32, once: bool) -> usize {
+        self.action(action).map_or(0, |a| {
+            let i = (time_ms / a.delay_ms.max(1.0)) as usize;
+            if once { i.min(a.frames.len() - 1) } else { i % a.frames.len() }
+        })
     }
 
     /// Frame `i` of `action`, wrapping if this sheet has fewer frames.
@@ -163,7 +168,7 @@ pub(crate) fn actor_quads(sheets: &[Sheet], a: &Actor) -> Vec<(usize, Vec<Vertex
     let Some(body) = sheets.get(a.body.0) else { return out };
     // Idle and sitting frames are head-turn poses (straight / left / right) whose anchors
     // differ, not an animation: hold the pose (straight) for body and head alike.
-    let body_frame = if still_head { 0 } else { body.frame_index(index, a.time_ms) };
+    let body_frame = if still_head { 0 } else { body.frame_index(index, a.time_ms, a.once) };
     let Some(bf) = body.frame(index, body_frame) else { return out };
     let mut v = vec![];
     body.emit(bf, a.pos, [0.0, 0.0], &mut v);
