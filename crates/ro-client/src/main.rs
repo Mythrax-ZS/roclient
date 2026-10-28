@@ -2838,6 +2838,12 @@ impl App {
             let me = self.player.as_ref().map(|p| (p.walker.cell.0 as f32, p.walker.cell.1 as f32));
             let map_name = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
             let out = self.egui_ctx.run_ui(input, |ui| {
+                // The game cursor on every screen (its own top layer, so draw order does not matter).
+                if let (Some(c), Some((x, y))) = (self.cursor_sprite.as_ref(), self.cursor) {
+                    let time = ui.ctx().input(|i| i.time);
+                    let action = if self.front.is_some() { hud::cursor::ARROW } else { self.cursor_action };
+                    c.draw(ui.ctx(), egui::pos2(x as f32 / ppp, y as f32 / ppp), action, time);
+                }
                 // Start-up splash (age rating), then the title art behind the login screens.
                 if let (Some(s), true) = (self.splash.as_mut(), self.front.is_some()) {
                     if s.intro(ui.ctx()) {
@@ -2862,10 +2868,6 @@ impl App {
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars);
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
                     hud::show_minimap(ui.ctx(), map, &map_name, me, &dots);
-                }
-                if let (Some(c), Some((x, y))) = (self.cursor_sprite.as_ref(), self.cursor) {
-                    let time = ui.ctx().input(|i| i.time);
-                    c.draw(ui.ctx(), egui::pos2(x as f32 / ppp, y as f32 / ppp), self.cursor_action, time);
                 }
                 if self.dead {
                     let hint = self.pad.in_use().then_some(if self.pad.playstation { "Cross" } else { "A" });
