@@ -373,6 +373,9 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_REPUTE_INFO: (faction, points).
+    Reputation(Vec<(u64, i64)>),
+    ReputationOpen,
     /// ZC_CONFIG (other than the equipment window): (type, on).
     Config { kind: u32, on: bool },
     /// ZC_PARTY_CONFIG: we refuse party invites.
@@ -837,6 +840,8 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0b8e => Some(Event::ReputationOpen),
+                        0x0b8d if data.len() >= 5 => Some(Event::Reputation(data[5..].chunks_exact(16).map(|c| (u64::from_le_bytes(c[..8].try_into().unwrap()), i64::from_le_bytes(c[8..].try_into().unwrap()))).collect())),
                         0x02d9 if data.len() >= 10 && data[2..6] != [0, 0, 0, 0] => Some(Event::Config { kind: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), on: data[6] != 0 }),
                         0x02c9 if data.len() >= 3 => Some(Event::DenyPartyInvites(data[2] != 0)),
                         0x07d8 if data.len() >= 8 => Some(Event::PartyOptions { exp_share: data[2] != 0, pickup_share: data[6] != 0, item_share: data[7] != 0 }),

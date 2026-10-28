@@ -21,7 +21,7 @@ Ticked items are handled and tested in game against the local server.
 - [x] Random enchant (ZC_UI_OPEN_V3 + ZC_RESPONSE_ENCHANT) from the official enchantlist.lub (32-bit bytecode widened and run)
 - [x] Item reform (ZC_OPEN_REFORM_UI / ITEM_REFORM_ACK) from itemreformsystem.lub
 - [x] Failed item adds (full inventory, overweight) now say why
-- [ ] ZC_REPUTE_INFO / OPEN
+- [x] Reputation window (ZC_REPUTE_INFO / OPEN, names from contentdataepute*.bson)
 - [ ] ZC_MERGE_ITEM_OPEN / ACK_MERGE_ITEM, ZC_RANDOM_COMBINE / RANDOM_UPGRADE_ITEM
 
 ## Items and skills

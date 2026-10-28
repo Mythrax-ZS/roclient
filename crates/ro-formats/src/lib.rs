@@ -1,6 +1,7 @@
 //! Parsers for RO data formats. Pure: bytes in, structs out.
 
 pub mod act;
+pub mod bson;
 pub mod gat;
 pub mod gnd;
 pub mod image;

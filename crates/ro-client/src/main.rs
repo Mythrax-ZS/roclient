@@ -22,6 +22,7 @@ mod ai;
 mod booking;
 mod battle;
 mod clan;
+mod reputation;
 mod gameopts;
 mod ranking;
 mod storesearch;
@@ -830,6 +831,7 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    reputation: reputation::Reputation,
     game_opts: gameopts::GameOptions,
     ranking: ranking::Ranking,
     store_search: storesearch::StoreSearch,
@@ -2549,6 +2551,11 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            Reputation(list) => self.reputation.points.extend(list),
+            ReputationOpen => {
+                self.reputation.load(self.vfs.as_ref());
+                self.reputation.open = true;
+            }
             Config { kind, on } => self.game_opts.config(kind, on),
             DenyPartyInvites(d) => self.game_opts.deny_invites = d,
             PartyOptions { exp_share, pickup_share, item_share } => self.game_opts.party = Some((exp_share, pickup_share, item_share)),
@@ -3150,6 +3157,10 @@ impl App {
             "c" => self.toggle_cash_shop(),
             "y" => self.progress.open = !self.progress.open,
             "clan" => self.clan.open = !self.clan.open,
+            "repute" => {
+                self.reputation.load(self.vfs.as_ref());
+                self.reputation.open = !self.reputation.open;
+            }
             "opts" => self.game_opts.open = !self.game_opts.open,
             "rank" => self.send(ro_net::Command::Ranking(self.ranking.kind)),
             "battle" => {
@@ -4864,6 +4875,7 @@ impl App {
                     v
                 };
                 self.clan.show(ui.ctx());
+                self.reputation.show(ui.ctx());
                 {
                     let me = self.hud.status.name.clone();
                     let leader = self.social.party.as_ref().is_some_and(|p| p.members.iter().any(|m| m.leader && m.name == me));
@@ -5478,6 +5490,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        reputation: Default::default(),
         game_opts: Default::default(),
         ranking: Default::default(),
         store_search: Default::default(),
