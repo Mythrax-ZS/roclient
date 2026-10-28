@@ -361,6 +361,14 @@ const LONG_WALK_NODES: usize = 200_000;
 /// position can trail the client's by a cell or two when the next hop is sent.
 const WALK_HOP: usize = 12;
 
+use windows::{HOTKEYS_PER_ROW, HOTKEY_ROWS};
+
+/// F1..F9 -> slot within the visible shortcut row.
+fn hotkey_slot(k: winit::keyboard::NamedKey) -> Option<usize> {
+    use winit::keyboard::NamedKey::*;
+    [F1, F2, F3, F4, F5, F6, F7, F8, F9].iter().position(|&f| f == k)
+}
+
 /// A clicked destination being reached through one or more server walks.
 struct WalkGoal {
     cell: (u16, u16),
@@ -395,6 +403,8 @@ enum Pose {
     Hurt,
     PickUp,
     Dead,
+    /// Chanting a skill (players only; monsters stand still).
+    Cast,
 }
 
 impl Mob {
@@ -420,6 +430,8 @@ impl Mob {
             (true, Pose::Attack) => 10,
             (true, Pose::Hurt) => 6,
             (true, Pose::Dead) => 8,
+            (true, Pose::Cast) => 12,
+            (false, Pose::Cast) => 0,
             (false, Pose::Attack) => 2,
             (false, Pose::Hurt) => 3,
             (false, Pose::Dead) => 4,
@@ -597,7 +609,12 @@ struct App {
     /// Floor item to pick up once we have walked next to it.
     pending_pickup: Option<u32>,
     /// A targeted skill waiting for the player to click its target.
-    aiming: Option<u16>,
+    aiming: Option<(u16, u16)>,
+    /// Shortcut bar slots (tab 0, HOTKEY_ROWS rows) and the row on show.
+    hotkeys: Vec<ro_net::Hotkey>,
+    hotkey_row: u8,
+    /// Casts in progress: caster -> (elapsed ms, total ms).
+    casts: std::collections::HashMap<u32, (f32, f32)>,
     alt: bool,
     queued_action: Option<windows::UiAction>,
     social: social::Social,
@@ -741,6 +758,12 @@ impl App {
     fn look_change(&mut self, id: u32, kind: u8, value: u32, value2: u32) {
         let Some(mut look) = self.mob_mut(id).and_then(|m| m.look.clone()) else { return };
         match kind {
+            0 => {
+                look.job = job_sprite(value as i16).to_string();
+                if id == self.account_id {
+                    self.hud.status.job = job_title(value as i16).to_string();
+                }
+            }
             1 => look.hair = value.max(1) as u16,
             2 => (look.gear.weapon, look.gear.shield) = (value, value2),
             3 => look.gear.head_bottom = value as u16,
@@ -1173,6 +1196,58 @@ impl App {
                     (s.level, s.sp, s.range, s.upgradable) = (level, sp, range, upgradable);
                 }
             }
+            Hotkeys { row, keys } => {
+                let n = self.hotkeys.len();
+                self.hotkeys = keys;
+                self.hotkeys.resize(n.max(self.hotkeys.len()), Default::default());
+                self.hotkey_row = row % HOTKEY_ROWS;
+            }
+            Casting(c) => {
+                let cell = (c.cell.0 as i32, c.cell.1 as i32);
+                let target_cell = self.mob_mut(c.target).map(|m| m.walker.cell).or((c.target == 0).then_some(cell));
+                if let Some(m) = self.mob_mut(c.src) {
+                    if let Some(t) = target_cell {
+                        m.face(t);
+                    }
+                    if c.ms > 0 {
+                        m.set_pose(Pose::Cast, c.ms as f32);
+                    }
+                }
+                if c.ms > 0 {
+                    self.casts.insert(c.src, (0.0, c.ms as f32));
+                }
+            }
+            SkillFailed { skill, cause } => {
+                let name = self.skills.iter().find(|s| s.id == skill).map(|s| self.skill_names.display(&s.name)).unwrap_or_else(|| "Skill".into());
+                let why = match cause {
+                    1 => "not enough SP",
+                    2 => "not enough HP",
+                    3 => "missing required items",
+                    4 => "still on cooldown",
+                    5 => "not enough zeny",
+                    6 => "wrong weapon equipped",
+                    7 => "requires a Red Gemstone",
+                    8 => "requires a Blue Gemstone",
+                    9 => "carrying too much weight",
+                    11 => "invalid target",
+                    _ => "failed",
+                };
+                self.casts.remove(&self.account_id);
+                if let Some(p) = self.player.as_mut() {
+                    p.pose = None;
+                }
+                self.hud.push_chat(ro_net::ChatKind::System, format!("{name}: {why}."));
+            }
+            SkillUsed { src, target, .. } => {
+                self.casts.remove(&src);
+                let target_cell = self.mob_mut(target).map(|m| m.walker.cell);
+                if let Some(m) = self.mob_mut(src) {
+                    if let (Some(t), true) = (target_cell, src != target) {
+                        m.face(t);
+                    }
+                    m.set_pose(Pose::Attack, 400.0);
+                }
+            }
             MonsterHp { id, hp, max_hp } => {
                 if let Some(m) = self.units.get_mut(&id) {
                     m.hp = Some((hp, max_hp));
@@ -1218,25 +1293,51 @@ impl App {
             RaiseStat(i) => self.send(Command::Stat(StatRequest::Raise(13 + i as u16))),
             SkillUp(id) => self.send(Command::Stat(StatRequest::SkillUp(id))),
             UseSkill(id) => {
-                let Some(s) = self.skills.iter().find(|s| s.id == id) else { return };
-                // Self skills go off at once; targeted ones wait for a click.
-                if s.target & 4 != 0 {
-                    self.use_skill_on(id, self.account_id);
-                } else if s.target & (1 | 2 | 16 | 32) != 0 {
-                    self.aiming = Some(id);
+                let level = self.skills.iter().find(|s| s.id == id).map_or(0, |s| s.level);
+                self.start_skill(id, level);
+            }
+            UseHotkey(slot) => {
+                let Some(key) = self.hotkeys.get(slot).copied().filter(|k| k.id != 0) else { return };
+                if key.skill {
+                    self.start_skill(key.id as u16, key.count.max(1) as u16);
+                } else if let Some(it) = self.inventory.items.values().find(|it| it.id == key.id && it.equipped == 0) {
+                    let (index, equip, location) = (it.index, it.is_equipment(), it.location);
+                    self.ui_action(if equip { Equip { index, location } } else { UseItem(index) });
                 }
+            }
+            SetHotkey { index, key } => {
+                if let Some(slot) = self.hotkeys.get_mut(index as usize) {
+                    *slot = key;
+                }
+                self.send(Command::Stat(StatRequest::SetHotkey { index, key }));
+            }
+            HotkeyRow(row) => {
+                self.hotkey_row = row;
+                self.send(Command::Stat(StatRequest::HotkeyRow(row)));
             }
         }
     }
 
-    fn use_skill_on(&mut self, skill: u16, target: u32) {
-        let level = self.skills.iter().find(|s| s.id == skill).map_or(1, |s| s.level.max(1));
+    /// Uses a skill at `level`: self skills go off at once, targeted ones wait for a click.
+    fn start_skill(&mut self, id: u16, level: u16) {
+        let Some(s) = self.skills.iter().find(|s| s.id == id) else { return };
+        let level = level.clamp(1, s.level.max(1));
+        if s.target & 4 != 0 {
+            self.use_skill_on(id, level, self.account_id);
+        } else if s.target & (1 | 2 | 16 | 32) != 0 {
+            self.aiming = Some((id, level));
+        }
+    }
+
+    fn use_skill_on(&mut self, skill: u16, level: u16, target: u32) {
         self.walk_goal = None;
+        self.attack = None;
         self.send(ro_net::Command::Stat(ro_net::StatRequest::UseSkill { skill, level, target }));
     }
 
-    fn use_skill_at(&mut self, skill: u16, cell: (u16, u16)) {
-        let level = self.skills.iter().find(|s| s.id == skill).map_or(1, |s| s.level.max(1));
+    fn use_skill_at(&mut self, skill: u16, level: u16, cell: (u16, u16)) {
+        self.walk_goal = None;
+        self.attack = None;
         self.send(ro_net::Command::Stat(ro_net::StatRequest::UseSkillAt { skill, level, x: cell.0, y: cell.1 }));
     }
 
@@ -1361,6 +1462,7 @@ impl App {
             if id == me { app.player.as_ref().map(|p| p.walker.cell) } else { app.units.get(&id).map(|m| m.walker.cell) }
         };
         let (src_cell, target_cell) = (cell_of(self, act.src), cell_of(self, act.target));
+        self.casts.remove(&act.src);
         match act.kind {
             2 | 3 => {
                 if let Some(m) = self.mob_mut(act.src) {
@@ -1573,6 +1675,13 @@ impl App {
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some(("raise", n)) => n.parse().ok().map(windows::UiAction::RaiseStat),
                     Some(("skillup", id)) => id.parse().ok().map(windows::UiAction::SkillUp),
+                    // hotkey:slot=skill_id (at its learned level), key:slot presses it.
+                    Some(("hotkey", spec)) => spec.split_once('=').and_then(|(slot, id)| {
+                        let (index, id) = (slot.parse().ok()?, id.parse::<u16>().ok()?);
+                        let level = self.skills.iter().find(|s| s.id == id)?.level as i16;
+                        Some(windows::UiAction::SetHotkey { index, key: ro_net::Hotkey { skill: true, id: id as u32, count: level } })
+                    }),
+                    Some(("key", slot)) => slot.parse().ok().map(windows::UiAction::UseHotkey),
                     Some(("party", name)) => {
                         self.send(ro_net::Command::Party(ro_net::PartyRequest::Create { name: name.into() }));
                         None
@@ -1645,6 +1754,10 @@ impl App {
             }
         }
         self.units.retain(|_, m| m.dying.is_none_or(|t| t > 0.0));
+        self.casts.retain(|_, (t, total)| {
+            *t += dt;
+            *t < *total
+        });
         self.floaters.retain_mut(|f| {
             f.3 += dt;
             f.3 < 1200.0
@@ -1756,6 +1869,15 @@ impl App {
                 Some((r.project(m.actor.pos, size)?, hp as f32 / max.max(1) as f32))
             })
             .collect();
+        // Cast bars over whoever is chanting.
+        let cast_bars: Vec<_> = self
+            .casts
+            .iter()
+            .filter_map(|(id, &(t, total))| {
+                let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) }?;
+                Some((r.project(m.actor.pos, size)?, t / total))
+            })
+            .collect();
         if let Some(state) = self.egui_state.as_mut() {
             let mut input = state.take_egui_input(window);
             let ppp = window.scale_factor() as f32 * self.ui_scale;
@@ -1778,6 +1900,8 @@ impl App {
                 weight: (self.hud.status.weight, self.hud.status.max_weight),
                 zeny: self.hud.status.zeny,
                 screen_width: size.0 as f32 / (window.scale_factor() as f32 * self.ui_scale),
+                hotkeys: &self.hotkeys,
+                hotkey_row: self.hotkey_row,
             };
             let my_name = self.hud.status.name.clone();
             let social_ctx = social::Ctx {
@@ -1808,7 +1932,7 @@ impl App {
             let me = self.player.as_ref().map(|p| (p.walker.cell.0 as f32, p.walker.cell.1 as f32));
             let map_name = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
             let out = self.egui_ctx.run_ui(input, |ui| {
-                sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars);
+                sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars);
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
                     hud::show_minimap(ui.ctx(), map, &map_name, me, &dots);
                 }
@@ -1852,7 +1976,7 @@ impl App {
                         self.player_menu = None;
                     }
                 }
-                if let Some(skill) = self.aiming {
+                if let Some((skill, _)) = self.aiming {
                     let name = self.skills.iter().find(|s| s.id == skill).map(|s| self.skill_names.display(&s.name)).unwrap_or_default();
                     egui::Area::new(egui::Id::unique("aiming")).anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 16.0)).show(ui.ctx(), |ui| {
                         ui.label(egui::RichText::new(format!("{name}: choose a target (Esc to cancel)")).size(15.0).color(egui::Color32::from_rgb(255, 220, 120)));
@@ -1861,7 +1985,9 @@ impl App {
             });
             drop(view);
             // Handled next tick: the renderer is borrowed here.
-            self.queued_action = ui_action;
+            if ui_action.is_some() {
+                self.queued_action = ui_action;
+            }
             if let Some((cmd, partner)) = player_cmd {
                 self.trade_partner = partner.or(self.trade_partner.take());
                 social_cmds.push(cmd);
@@ -2032,6 +2158,12 @@ impl ApplicationHandler for App {
                 use winit::keyboard::{Key, NamedKey};
                 match logical_key {
                     Key::Named(NamedKey::Escape) => self.aiming = None,
+                    // Shortcut bar: F1-F9 use the visible row's slots, F12 shows the next row.
+                    Key::Named(NamedKey::F12) => self.queued_action = Some(windows::UiAction::HotkeyRow((self.hotkey_row + 1) % HOTKEY_ROWS)),
+                    Key::Named(k) if hotkey_slot(k).is_some() => {
+                        let slot = self.hotkey_row as usize * HOTKEYS_PER_ROW + hotkey_slot(k).unwrap_or(0);
+                        self.queued_action = Some(windows::UiAction::UseHotkey(slot));
+                    }
                     Key::Character(c) if self.alt => match c.to_ascii_lowercase().as_str() {
                         "e" => self.windows.toggle_inventory(),
                         "q" => self.windows.toggle_equipment(),
@@ -2083,15 +2215,26 @@ impl ApplicationHandler for App {
                     }
                     // Monsters: attack until it dies (or use the skill being aimed).
                     Some((id, 5)) => match self.aiming.take() {
-                        Some(skill) => self.use_skill_on(skill, id),
+                        Some((skill, level)) => self.use_skill_on(skill, level, id),
                         None => self.attack_unit(id),
                     },
+                    // Aiming at another player (heal, blessing...).
+                    Some((id, 0)) => {
+                        if let Some((skill, level)) = self.aiming.take() {
+                            self.use_skill_on(skill, level, id);
+                        }
+                    }
                     _ => {
                         self.attack = None;
                         self.chasing = false;
-                        if let Some(skill) = self.aiming.take() {
-                            if let Some(cell) = self.pick() {
-                                self.use_skill_at(skill, cell);
+                        if let Some((skill, level)) = self.aiming.take() {
+                            let ground = self.skills.iter().find(|s| s.id == skill).is_some_and(|s| s.target & 2 != 0);
+                            let me = self.player.as_ref().map(|p| p.walker.cell);
+                            match self.pick() {
+                                Some(cell) if ground => self.use_skill_at(skill, level, cell),
+                                // Clicking our own cell targets ourselves.
+                                Some(cell) if Some((cell.0 as i32, cell.1 as i32)) == me => self.use_skill_on(skill, level, self.account_id),
+                                _ => {}
                             }
                         } else if let Some(item) = self.pick_floor_item() {
                             self.pick_up(item);
@@ -2188,6 +2331,9 @@ fn main() -> anyhow::Result<()> {
         skill_icons: Default::default(),
         pending_pickup: None,
         aiming: None,
+        hotkeys: vec![Default::default(); HOTKEY_ROWS as usize * HOTKEYS_PER_ROW],
+        hotkey_row: 0,
+        casts: Default::default(),
         alt: false,
         queued_action: None,
         social: Default::default(),

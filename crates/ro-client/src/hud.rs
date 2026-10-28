@@ -66,6 +66,10 @@ pub struct Hud {
     input: String,
     /// Enter focuses the chat box; Enter again sends, Escape leaves.
     want_focus: bool,
+    /// Lines sent, oldest first; Up/Down in the chat box walk through them.
+    history: Vec<String>,
+    /// Position while browsing history (None: editing a fresh line).
+    recall: Option<usize>,
 }
 
 fn chat_color(kind: ChatKind) -> Color32 {
@@ -116,7 +120,15 @@ impl Hud {
 
     /// Draws the HUD; returns a chat line the player submitted.
     /// `floaters`: (screen pos, text, colour, age ms) damage numbers; `bars`: (feet, hp fraction).
-    pub fn show(&mut self, ctx: &egui::Context, labels: &[Label], floaters: &[(glam::Vec2, String, Color32, f32)], bars: &[(glam::Vec2, f32)]) -> Option<String> {
+    /// `casts`: (feet, progress 0..1) cast bars drawn over the caster's head.
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        labels: &[Label],
+        floaters: &[(glam::Vec2, String, Color32, f32)],
+        bars: &[(glam::Vec2, f32)],
+        casts: &[(glam::Vec2, f32)],
+    ) -> Option<String> {
         // Names under actors, outlined for readability on any background.
         let painter = ctx.layer_painter(egui::LayerId::background());
         let ppp = ctx.pixels_per_point();
@@ -137,6 +149,14 @@ impl Hud {
             let mut fill = rect;
             fill.set_width(rect.width() * frac.clamp(0.0, 1.0));
             painter.rect_filled(fill, 1.0, Color32::from_rgb(220, 60, 60));
+        }
+        for &(feet, frac) in casts {
+            let c = egui::pos2(feet.x / ppp, feet.y / ppp - 100.0);
+            let rect = egui::Rect::from_center_size(c, Vec2::new(60.0, 6.0));
+            painter.rect_filled(rect.expand(1.0), 2.0, Color32::BLACK);
+            let mut fill = rect;
+            fill.set_width(rect.width() * frac.clamp(0.0, 1.0));
+            painter.rect_filled(fill, 2.0, Color32::from_rgb(90, 200, 90));
         }
         // Damage numbers rise and fade over their lifetime.
         for (pos, text, color, age) in floaters {
@@ -209,9 +229,37 @@ impl Hud {
                     edit.request_focus();
                     self.want_focus = false;
                 }
+                if edit.has_focus() && !self.history.is_empty() {
+                    let (up, down) = ui.input(|i| (i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowDown)));
+                    let last = self.history.len() - 1;
+                    let recall = match (up, down, self.recall) {
+                        (true, _, None) => Some(Some(last)),
+                        (true, _, Some(i)) => Some(Some(i.saturating_sub(1))),
+                        (_, true, Some(i)) if i < last => Some(Some(i + 1)),
+                        (_, true, Some(_)) => Some(None),
+                        _ => None,
+                    };
+                    if let Some(r) = recall {
+                        self.recall = r;
+                        self.input = r.map(|i| self.history[i].clone()).unwrap_or_default();
+                        // Caret to the end of the recalled line.
+                        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), edit.id) {
+                            let end = egui::text::CCursor::new(self.input.chars().count());
+                            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
+                            state.store(ui.ctx(), edit.id);
+                        }
+                    }
+                }
                 if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     let text = std::mem::take(&mut self.input);
+                    self.recall = None;
                     if !text.trim().is_empty() {
+                        if self.history.last() != Some(&text) {
+                            self.history.push(text.clone());
+                            if self.history.len() > 100 {
+                                self.history.remove(0);
+                            }
+                        }
                         sent = Some(text);
                     }
                 }

@@ -287,6 +287,10 @@ pub enum StatRequest {
     SkillUp(u16),
     UseSkill { skill: u16, level: u16, target: u32 },
     UseSkillAt { skill: u16, level: u16, x: u16, y: u16 },
+    /// Store a shortcut bar slot (tab 0) on the server.
+    SetHotkey { index: u16, key: Hotkey },
+    /// Remember which bar row is showing.
+    HotkeyRow(u8),
 }
 
 impl Encode for StatRequest {
@@ -302,6 +306,20 @@ impl Encode for StatRequest {
                 "UseSkillToPos",
                 &[&level.to_le_bytes(), &skill.to_le_bytes(), &x.to_le_bytes(), &y.to_le_bytes()],
             ),
+            // CZ_SHORTCUT_KEY_CHANGE2 / CZ_SHORTCUTKEYBAR_ROTATE2 (registered without field offsets).
+            StatRequest::SetHotkey { index, key } => {
+                d.put_u16_le(0x0b21);
+                d.put_u16_le(0);
+                d.put_u16_le(index);
+                d.put_u8(key.skill as u8);
+                d.put_u32_le(key.id);
+                d.put_i16_le(key.count);
+            }
+            StatRequest::HotkeyRow(row) => {
+                d.put_u16_le(0x0b22);
+                d.put_u16_le(0);
+                d.put_u8(row);
+            }
         }
     }
 }
@@ -340,4 +358,71 @@ mod tests {
         assert_eq!(size(&StatRequest::Raise(13)), client_packet("StatusUp").len as usize);
         assert_eq!(size(&StatRequest::UseSkill { skill: 1, level: 1, target: 1 }), client_packet("UseSkillToId").len as usize);
     }
+}
+
+/// A shortcut bar slot: a skill (id, level) or an item (id, amount shown).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Hotkey {
+    pub skill: bool,
+    pub id: u32,
+    pub count: i16,
+}
+
+/// ZC_SHORTCUT_KEY_LIST (0x0b20): (tab, visible row, 38 slots).
+pub fn parse_hotkeys(data: &[u8]) -> (u16, u8, Vec<Hotkey>) {
+    let mut b = &data[2..];
+    let rotate = b.get_u8();
+    let tab = b.get_u16_le();
+    let mut keys = vec![];
+    while b.remaining() >= 7 {
+        keys.push(Hotkey { skill: b.get_u8() != 0, id: b.get_u32_le(), count: b.get_i16_le() });
+    }
+    (tab, rotate, keys)
+}
+
+/// A skill's cast started (ZC_USESKILL_ACK, 0x0b1a).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cast {
+    pub src: u32,
+    pub target: u32,
+    pub cell: (u16, u16),
+    pub skill: u16,
+    pub ms: u32,
+}
+
+pub fn parse_cast(data: &[u8]) -> Cast {
+    let mut b = &data[2..];
+    let src = b.get_u32_le();
+    let target = b.get_u32_le();
+    let cell = (b.get_u16_le(), b.get_u16_le());
+    let skill = b.get_u16_le();
+    b.advance(4); // element
+    Cast { src, target, cell, skill, ms: b.get_u32_le() }
+}
+
+/// ZC_ACK_TOUSESKILL (0x0110): the skill could not be used. (skill, cause)
+pub fn parse_skill_fail(data: &[u8]) -> (u16, u8) {
+    (u16::from_le_bytes([data[2], data[3]]), data[13])
+}
+
+/// ZC_NOTIFY_SKILL (0x01de): a damaging skill hit, as an attack. (skill, act)
+pub fn parse_skill_hit(data: &[u8]) -> (u16, crate::packets::Act) {
+    let mut b = &data[2..];
+    let skill = b.get_u16_le();
+    let src = b.get_u32_le();
+    let target = b.get_u32_le();
+    b.advance(4); // server tick
+    let src_speed = b.get_i32_le();
+    let dmg_speed = b.get_i32_le();
+    let damage = b.get_i32_le();
+    b.advance(2); // level
+    let hits = b.get_i16_le();
+    let kind = if hits > 1 { 8 } else { 0 };
+    (skill, crate::packets::Act { src, target, src_speed, dmg_speed, damage, hits, kind, left_damage: 0 })
+}
+
+/// ZC_USE_SKILL (0x09cb): a non-damaging skill went off. (skill, level, target, src)
+pub fn parse_skill_used(data: &[u8]) -> (u16, i32, u32, u32) {
+    let mut b = &data[2..];
+    (b.get_u16_le(), b.get_i32_le(), b.get_u32_le(), b.get_u32_le())
 }

@@ -12,7 +12,7 @@ use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
 pub use ro_proto::packets::{sp, Act, CharInfo, ChatKind, Look, NpcDialog, NpcReply, UnitInfo, UnitPos};
-pub use ro_proto::items::{FloorItem, ItemData, ItemRequest, Skill, StatRequest, Stats};
+pub use ro_proto::items::{Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
 pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
 use ro_proto::social::*;
@@ -221,6 +221,14 @@ pub enum Event {
     StatCost { stat: u16, cost: u8 },
     Skills(Vec<Skill>),
     SkillUpdate { id: u16, level: u16, sp: u16, range: u16, upgradable: bool },
+    /// Shortcut bar (tab 0): visible row and all slots.
+    Hotkeys { row: u8, keys: Vec<Hotkey> },
+    /// Someone started casting.
+    Casting(Cast),
+    /// Our skill was refused (see `parse_skill_fail` causes).
+    SkillFailed { skill: u16, cause: u8 },
+    /// A non-damaging skill went off (heal, buff...).
+    SkillUsed { skill: u16, src: u32, target: u32 },
     Disconnected(String),
 }
 
@@ -481,6 +489,20 @@ impl MapSession {
                             Some(Event::SkillUpdate { id, level, sp, range, upgradable })
                         }
                         id::ZC_NOTIFY_ACT => Some(Event::Act(parse_act(&data))),
+                        0x0b20 => match parse_hotkeys(&data) {
+                            (0, row, keys) => Some(Event::Hotkeys { row, keys }),
+                            _ => None,
+                        },
+                        0x0b1a => Some(Event::Casting(parse_cast(&data))),
+                        0x0110 => {
+                            let (skill, cause) = parse_skill_fail(&data);
+                            Some(Event::SkillFailed { skill, cause })
+                        }
+                        0x01de => Some(Event::Act(parse_skill_hit(&data).1)),
+                        0x09cb => {
+                            let (skill, _, target, src) = parse_skill_used(&data);
+                            Some(Event::SkillUsed { skill, src, target })
+                        }
                         id::ZC_ATTACK_FAILURE_FOR_DISTANCE => {
                             let (target, target_cell, _, range) = parse_attack_out_of_range(&data);
                             Some(Event::OutOfRange { target, target_cell, range })

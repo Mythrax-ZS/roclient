@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use egui::{Color32, RichText, Vec2};
 use ro_game::items::{InvItem, ItemDb};
-use ro_net::{Skill, Stats};
+use ro_net::{Hotkey, Skill, Stats};
 
 /// What the player asked for through a window.
 #[derive(Debug, Clone, PartialEq)]
@@ -18,7 +18,15 @@ pub enum UiAction {
     RaiseStat(usize),
     SkillUp(u16),
     UseSkill(u16),
+    /// Activate shortcut slot n (row * HOTKEYS_PER_ROW + column).
+    UseHotkey(usize),
+    SetHotkey { index: u16, key: Hotkey },
+    HotkeyRow(u8),
 }
+
+/// The shortcut bar: rows of F1..F9 slots, saved on the server (38 slots per tab).
+pub const HOTKEY_ROWS: u8 = 4;
+pub const HOTKEYS_PER_ROW: usize = 9;
 
 #[derive(Default)]
 pub struct Windows {
@@ -54,6 +62,98 @@ pub struct View<'a> {
     pub zeny: i64,
     /// Screen width in UI points, for the default window layout.
     pub screen_width: f32,
+    pub hotkeys: &'a [Hotkey],
+    pub hotkey_row: u8,
+}
+
+/// Draws a skill or item icon centred in `rect`.
+fn paint_icon(painter: &egui::Painter, rect: egui::Rect, tex: Option<&egui::TextureHandle>, tint: Color32) {
+    if let Some(tex) = tex {
+        let s = tex.size_vec2().min(rect.size() - Vec2::splat(6.0));
+        painter.image(tex.id(), egui::Rect::from_center_size(rect.center(), s), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), tint);
+    }
+}
+
+fn outlined(painter: &egui::Painter, pos: egui::Pos2, align: egui::Align2, text: &str, size: f32, color: Color32) {
+    let font = egui::FontId::proportional(size);
+    painter.text(pos + Vec2::new(1.0, 1.0), align, text, font.clone(), Color32::BLACK);
+    painter.text(pos, align, text, font, color);
+}
+
+/// The shortcut bar along the bottom: drag skills and items in, click or press F1..F9 to
+/// use, right-click to clear, scroll over a skill to change its level, F12 for the next row.
+fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
+    const SIZE: f32 = 40.0;
+    let mut action = None;
+    egui::Area::new(egui::Id::unique("hotkeys")).anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -12.0)).show(ctx, |ui| {
+        egui::Frame::new().fill(Color32::from_rgba_unmultiplied(16, 20, 28, 210)).corner_radius(8).inner_margin(6).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let base = v.hotkey_row as usize * HOTKEYS_PER_ROW;
+                for col in 0..HOTKEYS_PER_ROW {
+                    let index = base + col;
+                    let key = v.hotkeys.get(index).copied().unwrap_or_default();
+                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(SIZE), egui::Sense::click_and_drag());
+                    let painter = ui.painter_at(rect);
+                    let hovering_drop = resp.dnd_hover_payload::<Hotkey>().is_some();
+                    let bg = if hovering_drop { Color32::from_rgba_unmultiplied(255, 220, 120, 60) } else if resp.hovered() { Color32::from_white_alpha(30) } else { Color32::from_white_alpha(12) };
+                    painter.rect_filled(rect, 4.0, bg);
+                    let skill = key.skill.then(|| v.skills.iter().find(|s| s.id as u32 == key.id)).flatten();
+                    if key.id != 0 {
+                        if key.skill {
+                            paint_icon(&painter, rect, v.skill_icons.get(&(key.id as u16)), Color32::WHITE);
+                            if skill.is_some_and(|s| s.level > 1) {
+                                outlined(&painter, rect.right_bottom() - Vec2::new(3.0, 1.0), egui::Align2::RIGHT_BOTTOM, &format!("{}", key.count), 11.0, Color32::from_rgb(255, 220, 120));
+                            }
+                        } else {
+                            let count: u32 = v.items.iter().filter(|it| it.id == key.id && it.equipped == 0).map(|it| it.amount as u32).sum();
+                            let tint = if count == 0 { Color32::from_white_alpha(70) } else { Color32::WHITE };
+                            paint_icon(&painter, rect, v.icons.get(&key.id), tint);
+                            outlined(&painter, rect.right_bottom() - Vec2::new(3.0, 1.0), egui::Align2::RIGHT_BOTTOM, &count.to_string(), 11.0, Color32::WHITE);
+                        }
+                    }
+                    outlined(&painter, rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, &format!("F{}", col + 1), 10.0, Color32::from_gray(200));
+
+                    if let Some(dropped) = resp.dnd_release_payload::<Hotkey>() {
+                        action = Some(UiAction::SetHotkey { index: index as u16, key: *dropped });
+                    } else if key.id != 0 {
+                        resp.dnd_set_drag_payload(key);
+                        if resp.clicked() {
+                            action = Some(UiAction::UseHotkey(index));
+                        } else if resp.secondary_clicked() {
+                            action = Some(UiAction::SetHotkey { index: index as u16, key: Hotkey::default() });
+                        } else if let (true, Some(s)) = (resp.hovered(), skill) {
+                            let scroll: f32 = ui.input(|i| i.events.iter().map(|e| if let egui::Event::MouseWheel { delta, .. } = e { delta.y } else { 0.0 }).sum());
+                            if scroll != 0.0 {
+                                let count = (key.count + scroll.signum() as i16).clamp(1, s.level.max(1) as i16);
+                                if count != key.count {
+                                    action = Some(UiAction::SetHotkey { index: index as u16, key: Hotkey { count, ..key } });
+                                }
+                            }
+                        }
+                        let tip = match skill {
+                            Some(s) => format!("{} Lv {}", (v.skill_names)(&s.name), key.count),
+                            None if key.skill => format!("Skill {}", key.id),
+                            None => v.db.map_or_else(|| format!("Item {}", key.id), |db| db.name(key.id, true)),
+                        };
+                        resp.on_hover_text(tip);
+                    }
+                }
+                ui.separator();
+                let row = ui.add(egui::Button::new(RichText::new(format!("{}", v.hotkey_row + 1)).size(13.0)).min_size(Vec2::new(22.0, SIZE)));
+                if row.on_hover_text("Next row (F12)").clicked() {
+                    action = Some(UiAction::HotkeyRow((v.hotkey_row + 1) % HOTKEY_ROWS));
+                }
+            });
+        });
+    });
+    // Show what is being dragged under the pointer.
+    if let (Some(key), Some(pos)) = (egui::DragAndDrop::payload::<Hotkey>(ctx), ctx.pointer_interact_pos()) {
+        let tex = if key.skill { v.skill_icons.get(&(key.id as u16)) } else { v.icons.get(&key.id) };
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("drag icon")));
+        paint_icon(&painter, egui::Rect::from_center_size(pos, Vec2::splat(SIZE)), tex, Color32::from_white_alpha(200));
+    }
+    action
 }
 
 /// Equipment slots in display order: (bits, label).
@@ -106,7 +206,7 @@ fn strip_colors(s: &str) -> String {
 
 /// A square slot with the item icon (or a placeholder) and its amount.
 fn item_slot(ui: &mut egui::Ui, icons: &HashMap<u32, egui::TextureHandle>, it: &InvItem, size: f32) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     let hovered = resp.hovered();
     painter.rect_filled(rect, 4.0, if hovered { Color32::from_white_alpha(30) } else { Color32::from_white_alpha(12) });
@@ -168,8 +268,8 @@ impl Windows {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, v: &View) -> Option<UiAction> {
-        let mut action = None;
         self.menu(ctx);
+        let mut action = hotkey_bar(ctx, v);
 
         // Default layout across the top, sized to the screen (windows remember moves after).
         let w = v.screen_width;
@@ -197,6 +297,10 @@ impl Windows {
                 egui::Grid::new("inv").spacing(Vec2::splat(4.0)).show(ui, |ui| {
                     for (i, it) in shown.iter().enumerate() {
                         let resp = item_slot(ui, v.icons, it, 38.0).on_hover_ui(|ui| item_tooltip(ui, v.db, it));
+                        // Usable items and equipment can go on the shortcut bar.
+                        if it.is_usable() || it.is_equipment() {
+                            resp.dnd_set_drag_payload(Hotkey { skill: false, id: it.id, count: 0 });
+                        }
                         if resp.double_clicked() {
                             action = Some(if it.is_equipment() {
                                 UiAction::Equip { index: it.index, location: it.location }
@@ -320,7 +424,10 @@ impl Windows {
                     for s in v.skills {
                         match v.skill_icons.get(&s.id) {
                             Some(t) => {
-                                ui.image((t.id(), Vec2::splat(24.0)));
+                                let icon = ui.add(egui::Image::new((t.id(), Vec2::splat(24.0))).sense(egui::Sense::click_and_drag()));
+                                if s.level > 0 && s.target != 0 {
+                                    icon.dnd_set_drag_payload(Hotkey { skill: true, id: s.id as u32, count: s.level as i16 });
+                                }
                             }
                             None => {
                                 ui.allocate_exact_size(Vec2::splat(24.0), egui::Sense::hover());
