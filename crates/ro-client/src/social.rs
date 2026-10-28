@@ -20,6 +20,8 @@ pub struct Storage {
     pub open: bool,
     pub items: BTreeMap<u16, InvItem>,
     pub count: (u16, u16),
+    /// A stack being moved, waiting for "how many": (move, amount typed).
+    asking: Option<(StorageDrag, String)>,
 }
 
 /// A trade in progress (or being requested).
@@ -297,13 +299,42 @@ impl Social {
                         egui::DragAndDrop::clear_payload(ui.ctx());
                     }
                 }
+                // Single items move at once; stacks ask how many, as the original does.
                 for m in moved {
-                    out.push(Command::Storage(match m {
-                        StorageDrag::Take(index, amount) => StorageRequest::Take { index, amount: amount as u32 },
-                        StorageDrag::Put(index, amount) => StorageRequest::Put { index, amount: amount as u32 },
-                    }));
+                    let n = match &m { StorageDrag::Take(_, n) | StorageDrag::Put(_, n) => *n };
+                    if n > 1 {
+                        self.storage.asking = Some((m.clone(), n.to_string()));
+                    } else {
+                        out.push(storage_move(&m, n as u32));
+                    }
                 }
             });
+        if let Some((m, typed)) = self.storage.asking.as_mut() {
+            let max = match m { StorageDrag::Take(_, n) | StorageDrag::Put(_, n) => *n as u32 };
+            let mut done = None;
+            egui::Window::new("How many?").id(egui::Id::unique("storage_amount")).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let r = ui.add(egui::TextEdit::singleline(typed).desired_width(80.0));
+                    r.request_focus();
+                    ui.label(format!("/ {max}"));
+                });
+                let n = typed.trim().parse::<u32>().unwrap_or(0).min(max);
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(n > 0, egui::Button::new("OK")).clicked() || (n > 0 && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                        done = Some(Some(n));
+                    }
+                    if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        done = Some(None);
+                    }
+                });
+            });
+            if let Some(choice) = done {
+                if let Some(n) = choice {
+                    out.push(storage_move(m, n));
+                }
+                self.storage.asking = None;
+            }
+        }
         // What is being dragged, under the pointer.
         if let (Some(d), Some(p)) = (egui::DragAndDrop::payload::<StorageDrag>(ctx), ctx.pointer_interact_pos()) {
             let (index, take) = match *d { StorageDrag::Take(i, _) => (i, true), StorageDrag::Put(i, _) => (i, false) };
@@ -480,4 +511,11 @@ fn drop_column(ui: &mut egui::Ui, body: impl FnOnce(&mut egui::Ui)) -> Option<st
         ui.painter().rect_stroke(r.rect.expand(2.0), 4.0, egui::Stroke::new(1.5, Color32::from_rgb(120, 200, 255)), egui::StrokeKind::Outside);
     }
     r.dnd_release_payload::<StorageDrag>()
+}
+
+fn storage_move(m: &StorageDrag, amount: u32) -> Command {
+    Command::Storage(match m {
+        StorageDrag::Take(index, _) => StorageRequest::Take { index: *index, amount },
+        StorageDrag::Put(index, _) => StorageRequest::Put { index: *index, amount },
+    })
 }
