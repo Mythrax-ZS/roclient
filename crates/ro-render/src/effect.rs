@@ -68,6 +68,10 @@ pub enum Shape {
     Disc { radius: f32, spin: f32 },
     /// Spikes erupting in a wave along `reach` (world offset from `pos`), like Grimtooth.
     Spikes { reach: Vec3, count: u32 },
+    /// A shockwave wall expanding to `radius` cells.
+    Wave { radius: f32 },
+    /// A glowing ball flying along `reach` and bursting at its end (Soul Breaker).
+    Orb { reach: Vec3 },
 }
 
 /// A playing code-drawn effect.
@@ -123,6 +127,29 @@ impl ProcFx {
                             Vertex { pos: apex.into(), uv: [(u0 + u1) * 0.5, 0.0], color: c },
                         ]);
                     }
+                }
+            }
+            Shape::Wave { radius } => {
+                // A low wall rushing outward and thinning (Meteor Assault's shockwave).
+                let ease = 1.0 - (1.0 - t).powi(3);
+                let r = radius * CELL * ease.max(0.05);
+                let h = CELL * 1.2 * (1.0 - t * 0.6);
+                cylinder(out, self.pos, r, r * 1.15, h, t * 0.3, color);
+                cylinder(out, self.pos, r * 0.7, r * 0.85, h * 0.6, -t * 0.4, color);
+            }
+            Shape::Orb { reach } => {
+                // Flies to pos + reach over the first half, then swells and fades there.
+                let fly = (t / 0.5).min(1.0);
+                let swell = ((t - 0.5) / 0.5).max(0.0);
+                let centre = self.pos + reach * fly + Vec3::new(0.0, CELL * (1.2 - 0.6 * swell), 0.0);
+                let s = CELL * (0.7 + 2.3 * swell);
+                let c = [color[0], color[1], color[2], (1.0 - swell).min(fade * 2.0).max(0.0)];
+                let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color: c };
+                // Three crossed quads read as a ball from any camera angle.
+                for (a, b) in [(Vec3::X, Vec3::Y), (Vec3::Z, Vec3::Y), (Vec3::X, Vec3::Z)] {
+                    let (a, b) = (a * s, b * s);
+                    let (p0, p1, p2, p3) = (v(centre - a - b, 0.0, 1.0), v(centre + a - b, 1.0, 1.0), v(centre + a + b, 1.0, 0.0), v(centre - a + b, 0.0, 0.0));
+                    out.extend([p0, p1, p2, p0, p2, p3]);
                 }
             }
             Shape::Disc { radius, spin } => {

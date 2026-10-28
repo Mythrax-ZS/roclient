@@ -178,6 +178,33 @@ pub fn title(job: i16) -> &'static str {
     JOBS.iter().find(|j| j.0 == job).map_or("Adventurer", |j| j.2)
 }
 
+/// Folder holding a job's weapon sprites. Transcended and mounted variants have their own
+/// body but reuse the weapons drawn for the class they came from.
+pub fn weapon_dir(sprite: &str) -> &str {
+    match sprite {
+        "로드나이트" => "기사",
+        "로드페코" => "페코페코_기사",
+        "하이프리" => "프리스트",
+        "하이위저드" => "위저드",
+        "화이트스미스" => "제철공",
+        "스나이퍼" => "헌터",
+        "어쌔신크로스" => "어세신",
+        "팔라딘" => "크루세이더",
+        "페코팔라딘" => "신페코크루세이더",
+        "챔피온" => "몽크",
+        "프로페서" => "세이지",
+        "스토커" => "로그",
+        "크리에이터" => "연금술사",
+        "클라운" => "바드",
+        "집시" => "무희",
+        "권성융합" => "권성",
+        "가드" => "로얄가드",
+        "그리폰가드" => "신페코로얄가드",
+        "룬나이트쁘띠" => "페코페코_룬나이트",
+        s => s,
+    }
+}
+
 /// Doram jobs keep their sprites under 도람족 instead of 인간족.
 pub fn race_dir(sprite: &str) -> &'static str {
     if matches!(sprite, "summoner" | "spirit_handler" | "cart_summoner") { "도람족" } else { "인간족" }

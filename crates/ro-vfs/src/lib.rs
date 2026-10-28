@@ -1,7 +1,7 @@
 //! Virtual file system: loose data folder overlaid on a list of GRFs.
 
 mod des;
-mod grf;
+pub mod grf;
 
 pub use grf::Grf;
 

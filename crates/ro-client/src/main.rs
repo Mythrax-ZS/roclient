@@ -142,7 +142,8 @@ fn load_character(
     // (어세신_남_카타르_카타르), as both hands hold one.
     let mut weapon = vec![];
     if let Some(name) = (g.weapon != 0).then(|| tables.weapon(g.weapon)).flatten() {
-        let dir = format!("data\\sprite\\{race}\\{}\\{}_{sex}", look.job, look.job);
+        let wj = jobs::weapon_dir(&look.job);
+        let dir = format!("data\\sprite\\{race}\\{wj}\\{wj}_{sex}");
         let found = [format!("{dir}{name}"), format!("{dir}{name}{name}")].into_iter().find_map(|base| sheet(&base, None).ok().map(|id| (id, base)));
         tracing::debug!(%dir, %name, found = found.is_some(), "weapon sprite");
         match found {
@@ -769,6 +770,8 @@ struct App {
     fx: fx::FxLib,
     /// Sprite effects playing once: (actor, ms left).
     sprite_fx: Vec<(ro_render::Actor, f32)>,
+    /// When each unit last showed an area burst (one per cast, not per monster hit).
+    burst_at: std::collections::HashMap<u32, std::time::Instant>,
     pad: gamepad::Pad,
     /// The unit the controller acts on (highlighted), the walk direction being held and
     /// time until the walk is re-aimed.
@@ -1594,6 +1597,9 @@ impl App {
                     }
                     m.set_pose(Pose::Attack, 400.0);
                 }
+                if skill == 406 {
+                    self.meteor_assault(src);
+                }
                 self.skill_fx(skill, self.unit_pos(target), false);
             }
             SkillHit { skill, act } => {
@@ -1603,6 +1609,15 @@ impl App {
                     if let (Some(from), Some(to)) = (self.unit_pos(act.src), self.unit_pos(target)) {
                         self.spike_line(from, to);
                     }
+                }
+                // Soul Breaker: a ball of energy hurled at the target.
+                if skill == 379 {
+                    if let (Some(from), Some(to)) = (self.unit_pos(act.src), self.unit_pos(target)) {
+                        self.proc_fx("thunder_ball_a.bmp", ro_render::Shape::Orb { reach: to - from }, from, [0.85, 0.6, 1.0], 900.0);
+                    }
+                }
+                if skill == 406 {
+                    self.meteor_assault(act.src);
                 }
                 self.act(act);
                 self.skill_fx(skill, self.unit_pos(target), true);
@@ -2043,6 +2058,7 @@ impl App {
                     self.sprite_fx.push((actor, ms));
                 }
             }
+            Some(fx::Visual::Code) => {}
             None => {
                 let by_name = self.skill_names.internal(skill).map(|n| {
                     let short = n.split_once('_').map_or(n, |(_, rest)| rest).to_ascii_lowercase();
@@ -2069,6 +2085,33 @@ impl App {
         let count = ((reach.length() / ro_render::CELL) as u32).clamp(3, 12);
         let shape = ro_render::Shape::Spikes { reach, count };
         r.procs.push(ro_render::ProcFx { tex, shape, pos: from, color: [0.85, 0.7, 0.5], time_ms: 0.0, duration_ms: 650.0 });
+    }
+
+    fn proc_fx(&mut self, tex: &'static str, shape: ro_render::Shape, pos: glam::Vec3, color: [f32; 3], duration_ms: f32) {
+        let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
+        if let Some(tex) = self.fx.texture(r, vfs, tex) {
+            r.procs.push(ro_render::ProcFx { tex, shape, pos, color, time_ms: 0.0, duration_ms });
+        }
+    }
+
+    /// Meteor Assault: a violet shockwave and dark bursts erupting all around the caster.
+    /// The cast and every monster hit all announce it, so it plays once per cast.
+    fn meteor_assault(&mut self, src: u32) {
+        use ro_render::{Shape, CELL};
+        let now = std::time::Instant::now();
+        if self.burst_at.get(&src).is_some_and(|t| now.duration_since(*t).as_millis() < 400) {
+            return;
+        }
+        let Some(at) = self.unit_pos(src) else { return };
+        self.burst_at.insert(src, now);
+        self.proc_fx("ring_purple.tga", Shape::Wave { radius: 2.6 }, at, [0.8, 0.35, 1.0], 900.0);
+        self.proc_fx("ring_purple.tga", Shape::Column { radius: 0.9, height: 3.0 }, at, [0.6, 0.25, 0.9], 600.0);
+        for i in 0..8 {
+            let a = i as f32 / 8.0 * std::f32::consts::TAU + 0.3;
+            let d = CELL * if i % 2 == 0 { 1.6 } else { 2.3 };
+            let p = at + glam::Vec3::new(a.cos() * d, 0.0, a.sin() * d);
+            self.proc_fx("torch_violet04.bmp", Shape::Orb { reach: glam::Vec3::ZERO }, p, [1.0, 0.8, 1.0], 800.0 + i as f32 * 50.0);
+        }
     }
 
     fn play_fx(&mut self, name: &'static str, pos: glam::Vec3) {
@@ -3444,6 +3487,7 @@ fn main() -> anyhow::Result<()> {
         casts: Default::default(),
         fx: Default::default(),
         sprite_fx: vec![],
+        burst_at: Default::default(),
         pad: gamepad::Pad::new(),
         pad_target: None,
         pad_dir: None,

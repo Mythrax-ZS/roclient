@@ -12,6 +12,8 @@ pub enum Visual {
     Column(&'static str, [f32; 3]),
     /// A sprite effect (data\sprite\이팩트\<name>.spr/.act) played once.
     Sprite(&'static str),
+    /// Drawn by the client's own code where the hit is handled (Grimtooth, Soul Breaker...).
+    Code,
 }
 
 /// What plays on the target (or cell) when a skill lands, by rAthena skill id.
@@ -30,6 +32,7 @@ pub fn skill_visual(skill: u16) -> Option<Visual> {
         20 | 84 => Visual::Str("lightning"),
         21 => Visual::Str("thunderstorm"),
         83 => Visual::Str("meteor1"),
+        379 | 406 => Visual::Code,
         _ => Visual::Str(skill_str(skill)?),
     })
 }
