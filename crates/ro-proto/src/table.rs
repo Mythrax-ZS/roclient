@@ -33,7 +33,7 @@ pub struct ServerTable;
 /// Packets sent with ids from rAthena's `packet_headers` enum that packetgen does not
 /// map: guild leave (`guildLeave`, 0x0a83) and expulsion (`guildExpulsion`, 0x0a82)
 /// notices, both `<char id>.L <reason>.40B` at this PACKETVER.
-const EXTRA: &[(u16, i32)] = &[(0x0a83, 46), (0x0a82, 46)];
+const EXTRA: &[(u16, i32)] = &[(0x0a83, 46), (0x0a82, 46), (0x0ac2, -1)];
 
 fn server_map() -> &'static HashMap<u16, PacketLen> {
     static MAP: OnceLock<HashMap<u16, PacketLen>> = OnceLock::new();

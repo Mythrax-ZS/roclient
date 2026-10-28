@@ -10,6 +10,8 @@ mod guild;
 mod hud;
 mod iteminfo;
 mod jobs;
+mod mail;
+mod msgstr;
 mod merchant;
 mod preview;
 mod progress;
@@ -804,6 +806,8 @@ struct App {
     progress: progress::Progress,
     /// Pet, homunculus and mercenary.
     companions: companions::Companions,
+    /// RODEX mail.
+    mailbox: mail::Mailbox,
     /// A companion window request, handled after the UI pass.
     companion_action: Option<companions::CompanionAction>,
     /// When the companion AI next checks distances.
@@ -1405,6 +1409,60 @@ impl App {
                     self.stores.mine = None;
                 }
                 self.hud.push_chat(ro_net::ChatKind::System, msg);
+            }
+            Inbox(mut list) => {
+                for h in &mut list {
+                    h.title = msgstr::resolve(&h.title, "(no title)");
+                    h.sender = msgstr::resolve(&h.sender, "System");
+                }
+                self.mailbox.inbox = list;
+            }
+            Mail { id, text, zeny, items, .. } => {
+                let text = msgstr::resolve(&text, "");
+                if let Some(h) = self.mailbox.inbox.iter_mut().find(|h| h.id == id) {
+                    h.read = true;
+                    self.mailbox.reading = Some((h.clone(), text, zeny, items));
+                }
+                let ids = self.mailbox.item_ids();
+                self.load_icons_for(&ids);
+            }
+            MailTaken { items, id, result } => {
+                if result == 0 {
+                    if let Some(r) = self.mailbox.reading.as_mut().filter(|r| r.0.id == id) {
+                        if items {
+                            r.3.clear();
+                        } else {
+                            r.2 = 0;
+                        }
+                    }
+                    self.mailbox.status = if items { "Items taken.".into() } else { "Zeny taken.".into() };
+                } else {
+                    self.mailbox.status = "Couldn't take that (weight or inventory full?).".into();
+                }
+            }
+            MailDeleted(id) => {
+                self.mailbox.inbox.retain(|h| h.id != id);
+                if self.mailbox.reading.as_ref().is_some_and(|r| r.0.id == id) {
+                    self.mailbox.reading = None;
+                }
+            }
+            MailUnread(new) => {
+                if new && !self.mailbox.open {
+                    self.mailbox.unread = true;
+                    self.hud.push_chat(ro_net::ChatKind::System, "You have new mail (Alt+X).".into());
+                }
+            }
+            MailReceiver(id, _) => {
+                let me = self.hud.status.name.clone();
+                if let Some(req) = self.mailbox.receiver_found(id, &me) {
+                    self.send(ro_net::Command::Mail(req));
+                }
+            }
+            MailSent(result) => {
+                self.mailbox.sent(result);
+                if result == 0 {
+                    self.send(ro_net::Command::Mail(ro_net::MailRequest::Open { refresh: true }));
+                }
             }
             Pet(info) => self.companions.pet = Some(info),
             CompanionState { homun, state, id, value } => {
@@ -2605,6 +2663,13 @@ impl App {
             "b" => self.toggle_bank(),
             "c" => self.toggle_cash_shop(),
             "y" => self.progress.open = !self.progress.open,
+            "x" => {
+                self.mailbox.open = !self.mailbox.open;
+                if self.mailbox.open {
+                    self.mailbox.unread = false;
+                    self.send(ro_net::Command::Mail(ro_net::MailRequest::Open { refresh: false }));
+                }
+            }
             "r" => {
                 self.companions.open = !self.companions.open;
                 if self.companions.open {
@@ -3410,6 +3475,16 @@ impl App {
                         }
                         None
                     }
+                    // mail:to:title:zeny writes and sends a mail.
+                    Some(("mail", spec)) => {
+                        let f: Vec<&str> = spec.split(':').collect();
+                        if let [to, title, zeny] = f.as_slice() {
+                            for r in self.mailbox.compose(to, title, "Sent by the test script.", zeny) {
+                                self.send(ro_net::Command::Mail(r));
+                            }
+                        }
+                        None
+                    }
                     // altkey:x presses Alt+x.
                     Some(("altkey", k)) => {
                         self.alt_key(k);
@@ -4030,6 +4105,9 @@ impl App {
                 if let Some(a) = self.companions.show(ui.ctx(), target) {
                     self.companion_action = Some(a);
                 }
+                for req in self.mailbox.show(ui.ctx(), self.item_db.as_ref(), &self.icons, self.hud.status.zeny) {
+                    self.queued_commands.push(ro_net::Command::Mail(req));
+                }
                 if let Some(req) = self.progress.show(ui.ctx(), self.item_db.as_ref(), &self.icons) {
                     self.queued_commands.push(ro_net::Command::Progress(req));
                 }
@@ -4551,6 +4629,7 @@ fn main() -> anyhow::Result<()> {
         stores: Default::default(),
         progress: Default::default(),
         companions: Default::default(),
+        mailbox: Default::default(),
         companion_action: None,
         follow_at: std::time::Instant::now(),
         unit_jobs: Default::default(),
@@ -4640,6 +4719,7 @@ fn main() -> anyhow::Result<()> {
         app.buffs = buffs::Buffs::load(vfs);
         app.quests = quests::QuestLog::load(vfs);
         app.progress = progress::Progress::load(vfs);
+        msgstr::load(vfs);
         app.item_info = iteminfo::ItemInfo::load(vfs);
         match read(r"System\iteminfo.lub").map(|d| ro_game::items::ItemDb::from_lub(&d)) {
             Some(Ok(db)) => {

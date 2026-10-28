@@ -26,6 +26,8 @@ pub use ro_proto::progress::{AchRank, Achievement, ProgressRequest};
 use ro_proto::progress::*;
 pub use ro_proto::companions::{CompanionRequest, CompanionSkill, HomunInfo, MercInfo, PetInfo};
 use ro_proto::companions::*;
+pub use ro_proto::mail::{MailHeader, MailItem, MailRequest};
+use ro_proto::mail::*;
 use ro_proto::quests::*;
 use ro_proto::menus::*;
 pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
@@ -331,6 +333,19 @@ pub enum Event {
     SoldToStore { index: u16, amount: u16, price: u32 },
     /// A buying store message (failure or closure).
     BuyStoreNotice(String),
+    /// The mailbox list.
+    Inbox(Vec<MailHeader>),
+    /// A mail opened: (tab, id, text, zeny, items).
+    Mail { tab: u8, id: u64, text: String, zeny: i64, items: Vec<MailItem> },
+    /// Taking a mail's zeny (false) or items (true): result 0 = ok.
+    MailTaken { items: bool, id: u64, result: u8 },
+    MailDeleted(u64),
+    /// New mail waiting (ZC_NOTIFY_UNREADMAIL).
+    MailUnread(bool),
+    /// A receiver looked up: (char id, 0 = none; name).
+    MailReceiver(u32, String),
+    /// Sending a mail: 0 = sent.
+    MailSent(u8),
     /// Our pet's details.
     Pet(PetInfo),
     /// Pet (0x01a4) or homunculus (0x0230) state: (homunculus?, state, unit id, value).
@@ -439,6 +454,7 @@ pub enum Command {
     CashShop(CashShopRequest),
     Progress(ProgressRequest),
     Companion(CompanionRequest),
+    Mail(MailRequest),
     /// Look at a player's equipment.
     ViewEquip(u32),
     /// Let others look at ours.
@@ -577,6 +593,7 @@ impl MapSession {
                     Some(Command::CashShop(r)) => self.send(r).await?,
                     Some(Command::Progress(r)) => self.send(r).await?,
                     Some(Command::Companion(r)) => self.send(r).await?,
+                    Some(Command::Mail(r)) => self.send(r).await?,
                     Some(Command::ViewEquip(aid)) => self.send(CzViewEquip(aid)).await?,
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
@@ -756,6 +773,13 @@ impl MapSession {
                             7 => "The buyer can't pay for that.".into(),
                             _ => "The deal failed.".into(),
                         })),
+                        0x0ac2 => Some(Event::Inbox(parse_inbox(&data))),
+                        0x0b63 => parse_mail(&data).map(|(tab, id, text, zeny, items)| Event::Mail { tab, id, text, zeny, items }),
+                        0x09f2 | 0x09f4 => parse_take_ack(&data).map(|(id, _, result)| Event::MailTaken { items: opcode == 0x09f4, id, result }),
+                        0x09f6 => parse_delete_ack(&data).map(|(_, id)| Event::MailDeleted(id)),
+                        0x09e7 if data.len() >= 3 => Some(Event::MailUnread(data[2] != 0)),
+                        0x0a51 => parse_checkname(&data).map(|(id, name)| Event::MailReceiver(id, name)),
+                        0x09ed if data.len() >= 3 => Some(Event::MailSent(data[2])),
                         0x01a2 => parse_pet(&data).map(Event::Pet),
                         0x01a4 | 0x0230 => parse_changestate(opcode, &data).map(|(state, id, value)| Event::CompanionState { homun: opcode == 0x0230, state, id, value }),
                         0x0ba4 => parse_homun(&data).map(Event::Homun),

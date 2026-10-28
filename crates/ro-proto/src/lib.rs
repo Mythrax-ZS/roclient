@@ -8,6 +8,7 @@ pub mod companions;
 pub mod generated;
 pub mod guild;
 pub mod items;
+pub mod mail;
 pub mod menus;
 pub mod merchant;
 pub mod quests;
