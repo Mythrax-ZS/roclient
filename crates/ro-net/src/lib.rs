@@ -339,6 +339,8 @@ pub enum Event {
     /// Homunculus (false) or mercenary (true) skills.
     CompanionSkills { merc: bool, skills: Vec<CompanionSkill> },
     Merc(MercInfo),
+    /// ZC_MSG: a msgstringtable line by id (mercenary died 1267, contract over 1266, ...).
+    MsgId(u16),
     /// A mercenary stat changed: (status id, value).
     MercParam(u16, i32),
     /// Every achievement with its progress.
@@ -758,6 +760,7 @@ impl MapSession {
                         0x01a4 | 0x0230 => parse_changestate(opcode, &data).map(|(state, id, value)| Event::CompanionState { homun: opcode == 0x0230, state, id, value }),
                         0x0ba4 => parse_homun(&data).map(Event::Homun),
                         0x0235 | 0x029d => Some(Event::CompanionSkills { merc: opcode == 0x029d, skills: parse_companion_skills(opcode, &data) }),
+                        0x0291 if data.len() >= 4 => Some(Event::MsgId(u16::from_le_bytes([data[2], data[3]]))),
                         0x029b => parse_merc(&data).map(Event::Merc),
                         0x02a2 => parse_merc_param(&data).map(|(k, v)| Event::MercParam(k, v)),
                         0x0a23 => parse_achievements(&data).map(|(rank, list)| Event::Achievements { rank, list }),

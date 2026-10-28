@@ -1440,6 +1440,16 @@ impl App {
                 }
             }
             Merc(info) => self.companions.merc = Some(info),
+            MsgId(id @ (1266 | 1267)) => {
+                // The mercenary is gone: killed, or its contract ran out.
+                self.companions.merc = None;
+                self.companions.merc_skills.clear();
+                self.merc_ai = None;
+                tracing::info!(id, "mercenary gone");
+                let msg = if id == 1267 { "Your mercenary was killed." } else { "Your mercenary's contract has ended." };
+                self.hud.push_chat(ro_net::ChatKind::System, msg.into());
+            }
+            MsgId(id) => tracing::debug!(id, "server message"),
             MercParam(k, v) => {
                 if let Some(m) = self.companions.merc.as_mut() {
                     match k {
@@ -3658,6 +3668,12 @@ impl App {
                 // With a script running, commands go to it (as Alt+right-click does in the
                 // original): ATTACK_OBJECT_CMD 3, FOLLOW_CMD 9.
                 companions::CompanionAction::Send(r) => {
+                    if r == ro_net::CompanionRequest::MercMenu(2) {
+                        // The server says nothing on a dismissal.
+                        self.companions.merc = None;
+                        self.companions.merc_skills.clear();
+                        self.merc_ai = None;
+                    }
                     let msg = match r {
                         ro_net::CompanionRequest::Attack { id, target } => Some((id, vec![3, target as i64])),
                         ro_net::CompanionRequest::Return(id) => Some((id, vec![9])),
