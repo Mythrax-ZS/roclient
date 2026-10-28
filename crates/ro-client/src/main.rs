@@ -590,6 +590,14 @@ struct App {
     /// `--deal buy|sell` / `--sell item_id`: answer shops automatically (scripted tests).
     auto_deal: Option<bool>,
     auto_sell: Option<u32>,
+    auto_buy: Option<u32>,
+    /// `--accept`: accept every request; `--auto-trade item_id|0`: put one item up, lock, commit.
+    auto_accept: bool,
+    auto_trade: Option<u32>,
+    trade_stage: u8,
+    trade_offers: std::collections::HashMap<u16, i32>,
+    /// Window commands sent next tick (the renderer is borrowed while the UI runs).
+    queued_commands: Vec<ro_net::Command>,
     /// `--windows`: open all game windows (for captures).
     open_windows: bool,
     script: Vec<String>,
@@ -953,6 +961,10 @@ impl App {
                 }
             }
             ShopBuyList(items) => {
+                if let Some(id) = self.auto_buy.take() {
+                    tracing::info!(id, "buying");
+                    self.send(ro_net::Command::Shop(ro_net::ShopRequest::Buy(vec![(id, 1)])));
+                }
                 self.social.shop = Some(social::Shop::Buy { items, cart: Default::default() });
                 self.load_shop_icons();
             }
@@ -1006,7 +1018,8 @@ impl App {
             TradeAdded { index, ok } => {
                 if let (true, Some(t)) = (ok, self.social.trade.as_mut()) {
                     if let Some(it) = self.inventory.items.get(&index) {
-                        t.ours.push((it.id, it.amount as i32));
+                        let amount = self.trade_offers.remove(&index).unwrap_or(it.amount as i32);
+                        t.ours.push((it.id, amount));
                     }
                 }
             }
@@ -1020,6 +1033,8 @@ impl App {
                 }
             }
             TradeEnded { completed } => {
+                self.trade_stage = 0;
+                tracing::info!(completed, "trade ended");
                 self.social.trade = None;
                 let msg = if completed { "Trade completed." } else { "Trade cancelled." };
                 self.hud.push_chat(ro_net::ChatKind::System, msg.into());
@@ -1155,7 +1170,11 @@ impl App {
         }
     }
 
-    fn send(&self, cmd: ro_net::Command) {
+    fn send(&mut self, cmd: ro_net::Command) {
+        // Remember how much of each item we offer in a trade (the ack only names the slot).
+        if let ro_net::Command::Trade(ro_net::TradeRequest::Add { index, amount }) = &cmd {
+            self.trade_offers.insert(*index, *amount);
+        }
         if let Some((tx, _)) = self.net.as_ref() {
             let _ = tx.send(cmd);
         }
@@ -1494,7 +1513,33 @@ impl App {
         self.last_tick = now;
 
         // `--do a,b,c`: scripted actions once the inventory has arrived (tests).
-        if !self.script.is_empty() && !self.inventory.items.is_empty() && self.stats.is_some() {
+        // Scripted helpers for two-client tests: accept requests, run a trade to completion.
+        if self.auto_accept {
+            if let Some(c) = self.social.accept_first() {
+                tracing::info!(?c, "auto-accept");
+                self.send(c);
+            }
+        }
+        if let (Some(item), Some(t)) = (self.auto_trade, self.social.trade.as_ref()) {
+            match self.trade_stage {
+                0 => {
+                    if item != 0 {
+                        if let Some(index) = self.inventory.items.values().find(|i| i.id == item).map(|i| i.index) {
+                            self.send(ro_net::Command::Trade(ro_net::TradeRequest::Add { index, amount: 1 }));
+                        }
+                    }
+                    self.send(ro_net::Command::Trade(ro_net::TradeRequest::Ok));
+                    self.trade_stage = 1;
+                }
+                1 if t.we_locked && t.they_locked => {
+                    tracing::info!(theirs = ?t.theirs, ours = ?t.ours, "trade: both locked, committing");
+                    self.send(ro_net::Command::Trade(ro_net::TradeRequest::Commit));
+                    self.trade_stage = 2;
+                }
+                _ => {}
+            }
+        }
+        if !self.script.is_empty() && !self.inventory.items.is_empty() && self.stats.is_some() && self.ready_at.is_some_and(|t| t.elapsed().as_millis() > 1500) {
             for step in std::mem::take(&mut self.script) {
                 let item = |id: u32| self.inventory.items.values().find(|i| i.id == id).map(|i| (i.index, i.location));
                 let action = match step.split_once(':') {
@@ -1502,6 +1547,26 @@ impl App {
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some(("raise", n)) => n.parse().ok().map(windows::UiAction::RaiseStat),
                     Some(("skillup", id)) => id.parse().ok().map(windows::UiAction::SkillUp),
+                    Some(("party", name)) => {
+                        self.send(ro_net::Command::Party(ro_net::PartyRequest::Create { name: name.into() }));
+                        None
+                    }
+                    Some(("invite", name)) => {
+                        self.send(ro_net::Command::Party(ro_net::PartyRequest::Invite { name: name.into() }));
+                        None
+                    }
+                    Some(("friend", name)) => {
+                        self.send(ro_net::Command::Friend(ro_net::FriendRequest::Add { name: name.into() }));
+                        None
+                    }
+                    Some(("trade", name)) => {
+                        let id = self.units.iter().find(|(_, m)| m.name == name).map(|(id, _)| *id);
+                        if let Some(target) = id {
+                            self.trade_partner = Some(name.into());
+                            self.send(ro_net::Command::Trade(ro_net::TradeRequest::Ask { target }));
+                        }
+                        None
+                    }
                     Some(("drop", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::Drop { index, amount: 1 }),
                     _ if step == "pickup" => {
                         self.auto_pickup = true;
@@ -1525,7 +1590,10 @@ impl App {
             }
         }
         if std::mem::take(&mut self.open_windows) {
-            (self.windows.inventory, self.windows.equipment, self.windows.stats, self.windows.skills) = (true, true, true, true);
+            (self.windows.party, self.windows.friends) = (true, true);
+        }
+        for c in std::mem::take(&mut self.queued_commands) {
+            self.send(c);
         }
         if let Some(a) = self.queued_action.take() {
             self.ui_action(a);
@@ -1735,11 +1803,7 @@ impl App {
                 self.trade_partner = partner.or(self.trade_partner.take());
                 social_cmds.push(cmd);
             }
-            if let Some((tx, _)) = self.net.as_ref() {
-                for c in social_cmds {
-                    let _ = tx.send(c);
-                }
-            }
+            self.queued_commands.extend(social_cmds);
             if let (Some((npc, reply)), Some((tx, _))) = (answer, self.net.as_ref()) {
                 if reply == ro_net::NpcReply::Close {
                     self.cutin = None;
@@ -2055,6 +2119,12 @@ fn main() -> anyhow::Result<()> {
         player_menu: None,
         auto_deal: arg("--deal").map(|d| d == "buy"),
         auto_sell: arg("--sell").and_then(|s| s.parse().ok()),
+        auto_buy: arg("--buy").and_then(|s| s.parse().ok()),
+        auto_accept: args.iter().any(|a| a == "--accept"),
+        auto_trade: arg("--auto-trade").and_then(|s| s.parse().ok()),
+        trade_stage: 0,
+        trade_offers: Default::default(),
+        queued_commands: vec![],
         open_windows: args.iter().any(|a| a == "--windows"),
         auto_pickup: false,
         script: arg("--do").map(|s| s.split(",").map(str::to_string).collect()).unwrap_or_default(),
