@@ -23,7 +23,8 @@ Ticked items are handled and tested in game against the local server.
 - [x] Item reform (ZC_OPEN_REFORM_UI / ITEM_REFORM_ACK) from itemreformsystem.lub
 - [x] Failed item adds (full inventory, overweight) now say why
 - [x] Reputation window (ZC_REPUTE_INFO / OPEN, names from contentdataepute*.bson)
-- [ ] ZC_MERGE_ITEM_OPEN / ACK_MERGE_ITEM, ZC_RANDOM_COMBINE / RANDOM_UPGRADE_ITEM
+- [~] Item merge window (mergeitem): built; no mergeable stacks could be produced to test
+- [ ] ZC_RANDOM_COMBINE / RANDOM_UPGRADE_ITEM
 
 ## Items and skills
 - [x] ZC_ACK_ITEMIDENTIFY (Magnifier) + ZC_AUTORUN_SKILL (all itemskill items)

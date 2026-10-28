@@ -373,6 +373,9 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_MERGE_ITEM_OPEN: stacks that can be merged; ZC_ACK_MERGE_ITEM: (index, amount, reason 0 ok).
+    MergeOpen(Vec<u16>),
+    Merged { index: u16, amount: u16, reason: u8 },
     /// Guild relations: the list, an alliance request (inviter, their guild), and results.
     GuildRelations(Vec<(u32, u32, String)>),
     AllyRequest { inviter: u32, guild: String },
@@ -603,6 +606,7 @@ pub enum Command {
     Option(OptionRequest),
     Switch(SwitchRequest),
     Relation(RelationRequest),
+    Merge(Vec<u16>),
     Market(MarketRequest),
     Search(SearchRequest),
     Bank(BankRequest),
@@ -758,6 +762,7 @@ impl MapSession {
                     Some(Command::Option(r)) => self.send(r).await?,
                     Some(Command::Switch(r)) => self.send(r).await?,
                     Some(Command::Relation(r)) => self.send(r).await?,
+                    Some(Command::Merge(v)) => self.send(ro_proto::items::MergeItems(v)).await?,
                     Some(Command::Market(r)) => self.send(r).await?,
                     Some(Command::Search(r)) => self.send(r).await?,
                     Some(Command::Bank(r)) => self.send(r).await?,
@@ -866,6 +871,8 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x096d => Some(Event::MergeOpen(data.get(4..).unwrap_or_default().chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect())),
+                        0x096f if data.len() >= 7 => Some(Event::Merged { index: u16::from_le_bytes([data[2], data[3]]), amount: u16::from_le_bytes([data[4], data[5]]), reason: data[6] }),
                         0x014c => Some(Event::GuildRelations(ro_proto::guild::parse_relations(&data))),
                         0x0171 if data.len() >= 30 => Some(Event::AllyRequest { inviter: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), guild: ro_proto::packets::get_fixed_str(&mut &data[6..30], 24) }),
                         0x0173 if data.len() >= 3 => Some(Event::RelationNotice(match data[2] { 0 => "You are already allied with that guild.", 1 => "The alliance was declined.", 2 => "The alliance was accepted.", 3 => "Their guild has too many alliances.", 4 => "Your guild has too many alliances.", _ => "Alliances are disabled." }.into())),

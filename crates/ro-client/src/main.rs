@@ -22,6 +22,7 @@ mod ai;
 mod booking;
 mod battle;
 mod clan;
+mod merge;
 mod reputation;
 mod gameopts;
 mod ranking;
@@ -832,6 +833,7 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    merge: merge::Merge,
     reputation: reputation::Reputation,
     game_opts: gameopts::GameOptions,
     ranking: ranking::Ranking,
@@ -2556,6 +2558,11 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            MergeOpen(list) => self.merge.open = Some(list),
+            Merged { reason, .. } => {
+                let msg = match reason { 0 => "The items were merged.", 1 => "Those items can't be merged.", _ => "You have too many of that item to merge." };
+                self.hud.push_chat(ro_net::ChatKind::System, msg.into());
+            }
             GuildRelations(list) => self.guild.relations = list,
             AllyRequest { inviter, guild } => self.guild.ally_offer = Some((inviter, guild)),
             RelationNotice(text) => self.hud.push_chat(ro_net::ChatKind::Guild, text),
@@ -4166,6 +4173,14 @@ impl App {
                         }
                         None
                     }
+                    Some(("mergeall", _)) => {
+                        if let Some(list) = self.merge.open.take() {
+                            let first = list.first().and_then(|i| self.inventory.items.get(i)).map(|i| i.id);
+                            let same: Vec<u16> = list.into_iter().filter(|i| self.inventory.items.get(i).map(|x| x.id) == first).collect();
+                            self.queued_commands.push(ro_net::Command::Merge(same));
+                        }
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -4979,6 +4994,9 @@ impl App {
                     v
                 };
                 self.clan.show(ui.ctx());
+                if let Some(v) = self.merge.show(ui.ctx(), &self.inventory.items, self.item_db.as_ref(), &self.icons) {
+                    self.queued_commands.push(ro_net::Command::Merge(v));
+                }
                 if let Some((inviter, accept)) = self.guild.show_offer(ui.ctx()) {
                     self.queued_commands.push(ro_net::Command::Relation(ro_net::RelationRequest::Answer { inviter, accept }));
                 }
@@ -5610,6 +5628,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        merge: Default::default(),
         reputation: Default::default(),
         game_opts: Default::default(),
         ranking: Default::default(),

@@ -549,3 +549,17 @@ impl crate::codec::Encode for SwitchRequest {
         }
     }
 }
+
+/// CZ_REQ_MERGE_ITEM: merge these inventory stacks (same item) into one.
+pub struct MergeItems(pub Vec<u16>);
+
+impl crate::codec::Encode for MergeItems {
+    fn encode(&self, d: &mut bytes::BytesMut) {
+        use bytes::BufMut;
+        d.put_u16_le(0x096e);
+        d.put_u16_le((4 + 2 * self.0.len()) as u16);
+        for i in &self.0 {
+            d.put_u16_le(*i);
+        }
+    }
+}
