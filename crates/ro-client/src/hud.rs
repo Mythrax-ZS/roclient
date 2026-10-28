@@ -575,7 +575,7 @@ pub struct Minimap {
 }
 
 /// Minimap under the menu bar: `dots` are cells with a colour, `me` is drawn last and larger.
-pub fn show_minimap(ctx: &egui::Context, map: &Minimap, name: &str, me: (f32, f32), dots: &[((f32, f32), Color32)], goal: Option<(f32, f32)>) {
+pub fn show_minimap(ctx: &egui::Context, map: &Minimap, name: &str, me: (f32, f32), dots: &[((f32, f32), Color32)], marks: &[((f32, f32), Color32)]) {
     const SIZE: f32 = 160.0;
     egui::Area::new(egui::Id::unique("minimap")).anchor(Align2::RIGHT_TOP, Vec2::new(-12.0, 52.0)).interactable(false).show(ctx, |ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(SIZE), egui::Sense::hover());
@@ -587,10 +587,12 @@ pub fn show_minimap(ctx: &egui::Context, map: &Minimap, name: &str, me: (f32, f3
             painter.circle_filled(at(c), 2.0, color);
         }
         painter.circle(at(me), 3.5, Color32::WHITE, egui::Stroke::new(1.0, Color32::BLACK));
-        // The navigation stop on this map: a pulsing ring.
-        if let Some(g) = goal {
+        // Navigation stops and script marks (viewpoint): pulsing rings.
+        if !marks.is_empty() {
             let pulse = 4.0 + ((ctx.input(|i| i.time) * 4.0).sin() as f32 + 1.0) * 1.5;
-            painter.circle_stroke(at(g), pulse, egui::Stroke::new(2.0, Color32::from_rgb(255, 80, 220)));
+            for &(c, color) in marks {
+                painter.circle_stroke(at(c), pulse, egui::Stroke::new(2.0, color));
+            }
             ctx.request_repaint();
         }
         // Map name and coordinates over the image's bottom edge, outlined for contrast.

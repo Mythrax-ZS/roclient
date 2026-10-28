@@ -371,6 +371,20 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_SOUND (soundeffect): datawav file, act 0 once, 1 loop, 2 stop.
+    Sound { name: String, act: u8 },
+    /// ZC_PLAY_NPC_BGM (playBGM).
+    Bgm(String),
+    /// ZC_COMPASS (viewpoint): kind 0 blink, 1 keep, 2 remove; color 0xRRGGBB.
+    Viewpoint { npc: u32, kind: u32, x: u32, y: u32, id: u8, color: u32 },
+    /// ZC_NPCSPRITE_CHANGE (setnpcdisplay): the unit shows a new class.
+    NpcSprite { id: u32, class: u32 },
+    /// ZC_MSG_VALUE / ZC_MSG_COLOR / ZC_MSG_SKILL: a msgstringtable line.
+    MsgValue { msg: u16, value: i32 },
+    MsgColor { msg: u16, color: u32 },
+    MsgSkill { skill: u16, msg: u32 },
+    /// ZC_REMOVE_EFFECT: stop a looping effect on a unit.
+    RemoveEffect { id: u32, effect: u32 },
     /// Battleground queue and match updates.
     Bg(BgEvent),
     /// Castles our guild holds (client castle ids).
@@ -745,6 +759,21 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x01d3 if data.len() >= 35 => Some(Event::Sound { name: ro_proto::packets::get_fixed_str(&mut &data[2..26], 24), act: data[26] }),
+                        0x0b8c if data.len() >= 5 => {
+                            let raw = &data[5..];
+                            let end = raw.iter().position(|c| *c == 0).unwrap_or(raw.len());
+                            Some(Event::Bgm(String::from_utf8_lossy(&raw[..end]).into_owned()))
+                        }
+                        0x0144 if data.len() >= 23 => {
+                            let l = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                            Some(Event::Viewpoint { npc: l(2), kind: l(6), x: l(10), y: l(14), id: data[18], color: l(19) })
+                        }
+                        0x01b0 if data.len() >= 11 => Some(Event::NpcSprite { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), class: u32::from_le_bytes([data[7], data[8], data[9], data[10]]) }),
+                        0x07e2 if data.len() >= 8 => Some(Event::MsgValue { msg: u16::from_le_bytes([data[2], data[3]]), value: i32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
+                        0x09cd if data.len() >= 8 => Some(Event::MsgColor { msg: u16::from_le_bytes([data[2], data[3]]), color: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
+                        0x07e6 if data.len() >= 8 => Some(Event::MsgSkill { skill: u16::from_le_bytes([data[2], data[3]]), msg: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
+                        0x0b0d if data.len() >= 10 => Some(Event::RemoveEffect { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), effect: u32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
                         0x08d8 | 0x08d9 | 0x08db | 0x08df | 0x08e1 | 0x090e | 0x02de | 0x02df | 0x0a0e | 0x02dd | 0x02dc => ro_proto::bg::parse(opcode, &data).map(Event::Bg),
                         0x0b27 => Some(Event::Castles(ro_proto::bg::parse_castles(&data))),
                         0x0b2d => ro_proto::bg::parse_castle_info(&data).map(|(id, economy, defense)| Event::CastleInfo { id, economy, defense }),

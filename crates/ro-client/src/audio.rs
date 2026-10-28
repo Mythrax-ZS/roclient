@@ -67,6 +67,13 @@ impl Audio {
         }
     }
 
+    /// A script's playBGM: a track name like "01" or "bgm\01.mp3".
+    pub fn play_bgm(&mut self, vfs: &ro_vfs::Vfs, name: &str) {
+        let file = if name.contains('.') { name.to_string() } else { format!("{name}.mp3") };
+        let path = if file.contains('\\') || file.contains('/') { file } else { format!("bgm\\{file}") };
+        self.play_track(vfs, path);
+    }
+
     pub fn set_bgm_volume(&mut self, v: f32) {
         self.bgm_volume = v;
         self.bgm.set_volume(v);

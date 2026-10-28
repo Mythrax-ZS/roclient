@@ -57,3 +57,8 @@ pub fn resolve(text: &str, fallback: &str) -> String {
     out.push_str(rest);
     out
 }
+
+/// Message `id` with its %d / %s filled from `args` (None when the table lacks it).
+pub fn get(id: usize, args: &[&str]) -> Option<String> {
+    line(id, args).filter(|s| !s.trim().is_empty())
+}

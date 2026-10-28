@@ -894,6 +894,8 @@ struct App {
     auto_pickup: bool,
     /// `--talk name`: talk to the first NPC with this name once in view (scripted test).
     talk_to: Option<String>,
+    /// Script minimap marks (viewpoint): (npc, mark id) -> (cell, colour, blinking until).
+    viewpoints: std::collections::HashMap<(u32, u8), ((f32, f32), egui::Color32, Option<std::time::Instant>)>,
     /// Test hook (--npc-answers): replies to NPC dialog steps, in order.
     npc_answers: std::collections::VecDeque<String>,
     /// `--attack`: attack the nearest monster once one is in view (scripted test).
@@ -1002,7 +1004,9 @@ impl App {
         };
         // Homunculi are in homun\; mercenaries name a human body (e.g. 여\활용병) and carry
         // a weapon from 인간족\용병\.
-        let found = ["npc", "몬스터", "homun", "인간족\\몸통"].iter().find_map(|folder| read(&format!("data\\sprite\\{folder}\\{name}")));
+        // Monster classes look in 몬스터 first: some names (poring) are also NPC sprites.
+        let folders: &[&str] = if (1000..4000).contains(&(job as i32)) || job as i32 >= 20000 || job < 0 { &["몬스터", "npc", "homun", "인간족\\몸통"] } else { &["npc", "몬스터", "homun", "인간족\\몸통"] };
+        let found = folders.iter().find_map(|folder| read(&format!("data\\sprite\\{folder}\\{name}")));
         let merc_weapon = name.rsplit('\\').next().and_then(|n| ["활", "창", "검"].iter().find_map(|w| read(&format!("data\\sprite\\인간족\\용병\\{n}_{w}"))));
         // Mercenary bodies are headless; the original adds a player head, its style set by
         // the mercenary's grade (classes 6017.. come in tens: archers, lancers, swordsmen).
@@ -1688,7 +1692,10 @@ impl App {
                 let msg = if id == 1267 { "Your mercenary was killed." } else { "Your mercenary's contract has ended." };
                 self.hud.push_chat(ro_net::ChatKind::System, msg.into());
             }
-            MsgId(id) => tracing::debug!(id, "server message"),
+            MsgId(id) => match msgstr::get(id as usize, &[]) {
+                Some(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
+                None => tracing::debug!(id, "server message"),
+            },
             MercParam(k, v) => {
                 if let Some(m) = self.companions.merc.as_mut() {
                     match k {
@@ -2395,6 +2402,66 @@ impl App {
                     m.dying = None;
                 }
             }
+            Sound { name, act } => {
+                // 0 plays once, 1 loops (played once here), 2 stops.
+                if act != 2 {
+                    if let (Some(a), Some(v)) = (self.audio.as_ref(), self.vfs.as_ref()) {
+                        a.play(v, &name);
+                    }
+                }
+            }
+            Bgm(name) => {
+                if let (Some(a), Some(v)) = (self.audio.as_mut(), self.vfs.as_ref()) {
+                    a.play_bgm(v, &name);
+                }
+            }
+            Viewpoint { npc, kind, x, y, id, color } => {
+                if kind == 2 {
+                    self.viewpoints.remove(&(npc, id));
+                } else {
+                    let rgb = egui::Color32::from_rgb((color >> 16) as u8, (color >> 8) as u8, color as u8);
+                    // Kind 0 marks blink for a while; 1 stays until removed or the map changes.
+                    let until = (kind == 0).then(|| std::time::Instant::now() + std::time::Duration::from_secs(15));
+                    self.viewpoints.insert((npc, id), ((x as f32, y as f32), rgb, until));
+                }
+            }
+            NpcSprite { id, class } => {
+                if let Some(m) = self.units.remove(&id) {
+                    let (x, y) = (m.walker.cell.0 as u16, m.walker.cell.1 as u16);
+                    let info = ro_net::UnitInfo {
+                        object_type: m.kind,
+                        id,
+                        speed: m.walker.speed as i16,
+                        option: 0,
+                        job: class as i16,
+                        hair: 0,
+                        hair_color: 0,
+                        look: Default::default(),
+                        sex: 0,
+                        name: m.name.clone(),
+                        pos: ro_net::UnitPos::At { x, y, dir: m.walker.dir as u8 },
+                    };
+                    self.unit(info);
+                }
+            }
+            MsgValue { msg, value } => {
+                let v = value.to_string();
+                if let Some(text) = msgstr::get(msg as usize, &[&v]) {
+                    self.hud.push_chat(ro_net::ChatKind::System, text);
+                }
+            }
+            MsgColor { msg, .. } => {
+                if let Some(text) = msgstr::get(msg as usize, &[]) {
+                    self.hud.push_chat(ro_net::ChatKind::System, text);
+                }
+            }
+            MsgSkill { skill, msg } => {
+                if let Some(text) = msgstr::get(msg as usize, &[]) {
+                    let name = self.skill_names.internal(skill).map(|n| self.skill_names.display(n)).unwrap_or_else(|| format!("Skill #{skill}"));
+                    self.hud.push_chat(ro_net::ChatKind::System, format!("[{name}] {text}"));
+                }
+            }
+            RemoveEffect { .. } => {}
             UnitEffect { id, effect } => {
                 if let (Some(name), Some(pos)) = (fx::misc_effect(effect), self.unit_pos(id)) {
                     self.play_fx(name, pos);
@@ -2407,6 +2474,7 @@ impl App {
             }
             MapMove { map, x, y } => {
                 // Respawning at the save point arrives as a map move.
+                self.viewpoints.clear();
                 self.revive();
                 self.units.clear();
                 self.floor.clear();
@@ -4413,7 +4481,13 @@ impl App {
                 }
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars);
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
-                    hud::show_minimap(ui.ctx(), map, &map_name, me, &dots, self.navi.waypoint(&map_name).map(|(x, y)| (x as f32, y as f32)));
+                    {
+                        let now = std::time::Instant::now();
+                        self.viewpoints.retain(|_, v| v.2.is_none_or(|t| t > now));
+                        let mut marks: Vec<_> = self.viewpoints.values().map(|v| (v.0, v.1)).collect();
+                        marks.extend(self.navi.waypoint(&map_name).map(|(x, y)| ((x as f32, y as f32), egui::Color32::from_rgb(255, 80, 220))));
+                        hud::show_minimap(ui.ctx(), map, &map_name, me, &dots, &marks);
+                    }
                 }
                 if let Some(vfs) = self.vfs.as_ref() {
                     self.buffs.show(ui.ctx(), vfs, if self.settings.minimap && self.minimap.is_some() { 270.0 } else { 60.0 });
@@ -5104,6 +5178,7 @@ fn main() -> anyhow::Result<()> {
         auto_pickup: false,
         script: arg("--do").map(|s| s.split(",").map(str::to_string).collect()).unwrap_or_default(),
         talk_to: arg("--talk"),
+        viewpoints: Default::default(),
         npc_answers: arg("--npc-answers").map(|s| s.split(',').map(str::to_string).collect()).unwrap_or_default(),
         auto_attack: args.iter().any(|a| a == "--attack"),
         units: Default::default(),
