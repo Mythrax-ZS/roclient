@@ -66,7 +66,7 @@ impl QuestLog {
         }
         let mut toggle = None;
         let mut open = true;
-        egui::Window::new("Quests").open(&mut open).default_size(Vec2::new(520.0, 360.0)).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new("Quests").open(&mut open).default_size(Vec2::new(520.0, 360.0)), "Quests", true, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.show_inactive, false, "Active");
                 ui.selectable_value(&mut self.show_inactive, true, "Inactive");
@@ -74,7 +74,7 @@ impl QuestLog {
             ui.separator();
             let list: Vec<(u32, bool)> = self.quests.values().filter(|q| q.active != self.show_inactive).map(|q| (q.id, q.active)).collect();
             if list.is_empty() {
-                ui.label(RichText::new("No quests here.").color(Color32::GRAY));
+                ui.label(RichText::new("No quests here.").color(crate::classic::ink(Color32::GRAY)));
                 return;
             }
             ui.columns(2, |cols| {
@@ -87,7 +87,7 @@ impl QuestLog {
                 });
                 let ui = &mut cols[1];
                 let Some(q) = self.selected.and_then(|id| self.quests.get(&id)) else {
-                    ui.label(RichText::new("Select a quest.").color(Color32::GRAY));
+                    ui.label(RichText::new("Select a quest.").color(crate::classic::ink(Color32::GRAY)));
                     return;
                 };
                 ui.label(RichText::new(self.title(q.id)).strong().size(15.0));
@@ -106,13 +106,13 @@ impl QuestLog {
                     for o in &q.objectives {
                         let done = o.total > 0 && o.count >= o.total;
                         let text = if o.total > 0 { format!("{}  {} / {}", o.name, o.count, o.total) } else { format!("{}  {}", o.name, o.count) };
-                        ui.label(RichText::new(text).color(if done { Color32::LIGHT_GREEN } else { Color32::WHITE }));
+                        ui.label(RichText::new(text).color(crate::classic::ink(if done { Color32::LIGHT_GREEN } else { Color32::WHITE })));
                     }
                 }
                 if q.end > 0 {
                     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as i64;
                     let left = q.end as i64 - now;
-                    ui.label(RichText::new(if left > 0 { format!("Time left: {}h {}m", left / 3600, left % 3600 / 60) } else { "Expired".into() }).color(Color32::LIGHT_BLUE));
+                    ui.label(RichText::new(if left > 0 { format!("Time left: {}h {}m", left / 3600, left % 3600 / 60) } else { "Expired".into() }).color(crate::classic::ink(Color32::LIGHT_BLUE)));
                 }
                 ui.separator();
                 let label = if q.active { "Move to Inactive" } else { "Move to Active" };

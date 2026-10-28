@@ -33,7 +33,7 @@ impl Refine {
                 ui.painter().image(t.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
             }
         };
-        egui::Window::new("Refine").open(&mut open).collapsible(false).default_width(520.0).default_pos(egui::pos2(380.0, 120.0)).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new("Refine").open(&mut open).collapsible(false).default_width(520.0).default_pos(egui::pos2(380.0, 120.0)), "Refine", true, |ui| {
             ui.columns(2, |cols| {
                 // Equipment that can be refined (not worn, identified).
                 let ui = &mut cols[0];
@@ -53,16 +53,16 @@ impl Refine {
                 });
                 let ui = &mut cols[1];
                 let Some((index, blessing, options)) = &self.selected else {
-                    ui.label(RichText::new("Choose a piece of equipment.").color(Color32::GRAY));
+                    ui.label(RichText::new("Choose a piece of equipment.").color(crate::classic::ink(Color32::GRAY)));
                     return;
                 };
                 let Some(item) = items.iter().find(|i| i.index == *index) else {
-                    ui.label(RichText::new("That item is gone.").color(Color32::LIGHT_RED));
+                    ui.label(RichText::new("That item is gone.").color(crate::classic::ink(Color32::LIGHT_RED)));
                     return;
                 };
                 ui.label(RichText::new(format!("+{} {}", item.refine, name(item.id))).strong().size(15.0));
                 if options.is_empty() {
-                    ui.label(RichText::new("This item can't be refined further.").color(Color32::GRAY));
+                    ui.label(RichText::new("This item can't be refined further.").color(crate::classic::ink(Color32::GRAY)));
                     return;
                 }
                 if *blessing > 0 {
@@ -76,7 +76,7 @@ impl Refine {
                         icon(ui, o.material);
                         ui.vertical(|ui| {
                             ui.label(format!("{}  (have {owned})", name(o.material)));
-                            ui.label(RichText::new(format!("{}% success   {} z", o.chance, o.zeny)).color(if o.chance >= 50 { Color32::LIGHT_GREEN } else { Color32::from_rgb(255, 170, 90) }));
+                            ui.label(RichText::new(format!("{}% success   {} z", o.chance, o.zeny)).color(crate::classic::ink(if o.chance >= 50 { Color32::LIGHT_GREEN } else { Color32::from_rgb(255, 170, 90) })));
                         });
                         let ok = owned > 0 && zeny >= o.zeny as i64;
                         if ui.add_enabled(ok, egui::Button::new("Refine")).clicked() {

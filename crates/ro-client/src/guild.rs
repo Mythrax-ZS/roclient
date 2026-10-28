@@ -70,7 +70,7 @@ impl Guild {
         }
         let mut open = true;
         let title = if self.id == 0 { "Guild".to_string() } else { format!("Guild — {}", self.name) };
-        egui::Window::new(title).id(egui::Id::unique("guild window")).open(&mut open).resizable(false).default_pos(egui::pos2(520.0, 200.0)).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new(title.as_str()).id(egui::Id::unique("guild window")).open(&mut open).resizable(false).default_pos(egui::pos2(520.0, 200.0)), &title, true, |ui| {
             ui.set_min_width(380.0);
             if self.id == 0 {
                 self.create(ui, c, &mut out);
@@ -105,7 +105,7 @@ impl Guild {
     fn create(&mut self, ui: &mut egui::Ui, c: &Ctx, out: &mut Vec<Command>) {
         ui.label("You are not in a guild.");
         ui.add_space(6.0);
-        ui.label(RichText::new("Found a guild (uses one Emperium):").color(Color32::GRAY));
+        ui.label(RichText::new("Found a guild (uses one Emperium):").color(crate::classic::ink(Color32::GRAY)));
         ui.horizontal(|ui| {
             ui.add(egui::TextEdit::singleline(&mut self.create_name).hint_text("guild name").desired_width(200.0).char_limit(23));
             let ok = c.has_emperium && !self.create_name.trim().is_empty();
@@ -114,19 +114,19 @@ impl Guild {
             }
         });
         if !c.has_emperium {
-            ui.label(RichText::new("You need an Emperium in your inventory.").color(Color32::from_rgb(230, 150, 90)).size(12.0));
+            ui.label(RichText::new("You need an Emperium in your inventory.").color(crate::classic::ink(Color32::from_rgb(230, 150, 90))).size(12.0));
         }
-        ui.label(RichText::new("Or type /guild \"Name\" in chat.").color(Color32::GRAY).size(11.5));
+        ui.label(RichText::new("Or type /guild \"Name\" in chat.").color(crate::classic::ink(Color32::GRAY)).size(11.5));
     }
 
     fn info(&self, ui: &mut egui::Ui) {
         let Some(i) = &self.info else {
-            ui.label(RichText::new("Loading...").color(Color32::GRAY));
+            ui.label(RichText::new("Loading...").color(crate::classic::ink(Color32::GRAY)));
             return;
         };
         egui::Grid::new("guild info").num_columns(2).spacing(Vec2::new(16.0, 6.0)).show(ui, |ui| {
             let row = |ui: &mut egui::Ui, k: &str, v: String| {
-                ui.label(RichText::new(k).color(Color32::GRAY));
+                ui.label(RichText::new(k).color(crate::classic::ink(Color32::GRAY)));
                 ui.label(v);
                 ui.end_row();
             };
@@ -136,7 +136,7 @@ impl Guild {
             row(ui, "Members", format!("{} / {}", i.members, i.max_members));
             row(ui, "Average level", i.average_level.to_string());
             row(ui, "Castle", if i.castle.is_empty() { "None".into() } else { i.castle.clone() });
-            ui.label(RichText::new("Experience").color(Color32::GRAY));
+            ui.label(RichText::new("Experience").color(crate::classic::ink(Color32::GRAY)));
             let frac = if i.max_exp > 0 { i.exp as f32 / i.max_exp as f32 } else { 0.0 };
             ui.add(egui::ProgressBar::new(frac.clamp(0.0, 1.0)).text(format!("{} / {}", i.exp, i.max_exp)).desired_width(220.0));
             ui.end_row();
@@ -145,15 +145,15 @@ impl Guild {
 
     fn members(&mut self, ui: &mut egui::Ui, c: &Ctx, out: &mut Vec<Command>) {
         let online = self.members.iter().filter(|m| m.online).count();
-        ui.label(RichText::new(format!("{} members, {online} online", self.members.len())).color(Color32::GRAY));
+        ui.label(RichText::new(format!("{} members, {online} online", self.members.len())).color(crate::classic::ink(Color32::GRAY)));
         egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
             egui::Grid::new("guild members").num_columns(5).spacing(Vec2::new(12.0, 4.0)).striped(true).show(ui, |ui| {
                 let mut sorted: Vec<&GuildMember> = self.members.iter().collect();
                 sorted.sort_by_key(|m| (!m.online, m.position, m.name.clone()));
                 for m in sorted {
                     let color = if m.online { Color32::from_rgb(120, 220, 120) } else { Color32::GRAY };
-                    ui.label(RichText::new(if m.online { "online" } else { "offline" }).color(color).size(11.5));
-                    ui.label(RichText::new(&m.name).color(if m.online { Color32::WHITE } else { Color32::GRAY }));
+                    ui.label(RichText::new(if m.online { "online" } else { "offline" }).color(crate::classic::ink(color)).size(11.5));
+                    ui.label(RichText::new(&m.name).color(crate::classic::ink(if m.online { Color32::WHITE } else { Color32::GRAY })));
                     ui.label(format!("{} {}", (c.job_name)(m.job), m.level));
                     // Rank: the master assigns it (rank 0 is the master's own and fixed).
                     let rank = self.rank_name(m.position);
@@ -166,7 +166,7 @@ impl Guild {
                             }
                         });
                     } else {
-                        ui.label(RichText::new(rank).color(Color32::from_rgb(220, 200, 140)));
+                        ui.label(RichText::new(rank).color(crate::classic::ink(Color32::from_rgb(220, 200, 140))));
                     }
                     if self.master && m.char_id != c.char_id {
                         if ui.small_button("Expel").clicked() {
@@ -192,7 +192,7 @@ impl Guild {
                 }
             });
         });
-        ui.label(RichText::new("Guild chat: /g message").color(Color32::GRAY).size(11.5));
+        ui.label(RichText::new("Guild chat: /g message").color(crate::classic::ink(Color32::GRAY)).size(11.5));
     }
 
     fn rank_name(&self, id: i32) -> String {
@@ -202,7 +202,7 @@ impl Guild {
     /// Ranks: title, invite/expel permissions and experience tax. The master edits them.
     fn positions(&mut self, ui: &mut egui::Ui, out: &mut Vec<Command>) {
         if self.ranks.is_empty() {
-            ui.label(RichText::new("Loading...").color(Color32::GRAY));
+            ui.label(RichText::new("Loading...").color(crate::classic::ink(Color32::GRAY)));
             return;
         }
         let editing = self.edit_ranks.is_some();
@@ -210,7 +210,7 @@ impl Guild {
         egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
             egui::Grid::new("guild ranks").num_columns(5).spacing(Vec2::new(10.0, 4.0)).striped(true).show(ui, |ui| {
                 for h in ["#", "Title", "Invite", "Expel", "Tax %"] {
-                    ui.label(RichText::new(h).color(Color32::GRAY));
+                    ui.label(RichText::new(h).color(crate::classic::ink(Color32::GRAY)));
                 }
                 ui.end_row();
                 for p in list.iter_mut() {
@@ -236,7 +236,7 @@ impl Guild {
         });
         ui.separator();
         if !self.master {
-            ui.label(RichText::new("Only the guild master can change ranks.").color(Color32::GRAY).size(11.5));
+            ui.label(RichText::new("Only the guild master can change ranks.").color(crate::classic::ink(Color32::GRAY)).size(11.5));
         } else if editing {
             let (save, cancel) = ui.horizontal(|ui| (ui.button("Save").clicked(), ui.button("Cancel").clicked())).inner;
             if save {
@@ -249,7 +249,7 @@ impl Guild {
         } else if ui.button("Edit ranks").clicked() {
             self.edit_ranks = Some(self.ranks.clone());
         }
-        ui.label(RichText::new("Tax: share of members' experience given to the guild (how guilds level).").color(Color32::GRAY).size(11.5));
+        ui.label(RichText::new("Tax: share of members' experience given to the guild (how guilds level).").color(crate::classic::ink(Color32::GRAY)).size(11.5));
     }
 
     /// Guild skills, raised with guild skill points (one per guild level).
@@ -257,7 +257,7 @@ impl Guild {
         ui.label(format!("Skill points: {}", self.skill_points));
         ui.separator();
         if self.skills.is_empty() {
-            ui.label(RichText::new("Loading...").color(Color32::GRAY));
+            ui.label(RichText::new("Loading...").color(crate::classic::ink(Color32::GRAY)));
             return;
         }
         egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
@@ -274,7 +274,7 @@ impl Guild {
             });
         });
         if !self.master {
-            ui.label(RichText::new("Only the guild master can raise guild skills.").color(Color32::GRAY).size(11.5));
+            ui.label(RichText::new("Only the guild master can raise guild skills.").color(crate::classic::ink(Color32::GRAY)).size(11.5));
         }
     }
 
@@ -295,7 +295,7 @@ impl Guild {
             None => {
                 let (subject, text) = &self.notice;
                 if subject.is_empty() && text.is_empty() {
-                    ui.label(RichText::new("No notice.").color(Color32::GRAY));
+                    ui.label(RichText::new("No notice.").color(crate::classic::ink(Color32::GRAY)));
                 } else {
                     ui.label(RichText::new(subject).strong());
                     ui.label(text);

@@ -3537,6 +3537,7 @@ impl App {
                 }
             }
             self.hud.classic_bar = self.skin.as_ref().filter(|_| self.settings.classic_ui).and_then(|s| s.texture("dialog_bg")).cloned();
+            classic::install(&self.egui_ctx, self.skin.as_ref().filter(|_| self.settings.classic_ui));
             let guild_name = self.guild.name.clone();
             let items: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
             let skill_names = |n: &str| self.skill_names.display(n);

@@ -45,7 +45,7 @@ fn name(db: Option<&ItemDb>, id: u32) -> String {
 }
 
 fn gold(text: String) -> RichText {
-    RichText::new(text).color(Color32::from_rgb(255, 220, 120))
+    RichText::new(text).color(crate::classic::ink(Color32::from_rgb(255, 220, 120)))
 }
 
 impl Stores {
@@ -67,7 +67,7 @@ impl Stores {
         if let Some((slots, title, limit, chosen)) = self.setup.as_mut() {
             let mut open = true;
             let mut submit = false;
-            egui::Window::new("Open Buying Store").open(&mut open).collapsible(false).default_width(440.0).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new("Open Buying Store").open(&mut open).collapsible(false).default_width(440.0), "Open Buying Store", true, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Store name");
                     ui.text_edit_singleline(title);
@@ -75,9 +75,9 @@ impl Stores {
                 ui.horizontal(|ui| {
                     ui.label("Zeny limit");
                     ui.add(egui::TextEdit::singleline(limit).desired_width(110.0));
-                    ui.label(RichText::new(format!("(you have {zeny} z)")).color(Color32::GRAY));
+                    ui.label(RichText::new(format!("(you have {zeny} z)")).color(crate::classic::ink(Color32::GRAY)));
                 });
-                ui.label(RichText::new(format!("Up to {slots} kinds of item. You must already carry one of each.")).color(Color32::GRAY));
+                ui.label(RichText::new(format!("Up to {slots} kinds of item. You must already carry one of each.")).color(crate::classic::ink(Color32::GRAY)));
                 ui.separator();
                 let mut seen = std::collections::HashSet::new();
                 egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
@@ -118,7 +118,7 @@ impl Stores {
 
         if let Some((limit, items)) = &self.mine {
             let mut close = false;
-            egui::Window::new("My Buying Store").collapsible(false).default_width(300.0).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new("My Buying Store").collapsible(false).default_width(300.0), "My Buying Store", false, |ui| {
                 ui.label(gold(format!("Zeny limit left: {limit} z")));
                 ui.separator();
                 for it in items {
@@ -141,7 +141,7 @@ impl Stores {
             let mut sell = false;
             let have = |id: u32| inventory.iter().filter(|i| i.id == id && i.equipped == 0).map(|i| i.amount).sum::<u16>();
             let title = self.signs.get(buyer).cloned().unwrap_or_else(|| "Buying Store".into());
-            egui::Window::new(title).id(egui::Id::unique("buying_store_browse")).open(&mut open).collapsible(false).default_width(440.0).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new(title.as_str()).id(egui::Id::unique("buying_store_browse")).open(&mut open).collapsible(false).default_width(440.0), &title, true, |ui| {
                 ui.label(gold(format!("This buyer can spend up to {limit} z.")));
                 ui.separator();
                 egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
@@ -186,7 +186,7 @@ impl Stores {
         for (aid, p) in signs {
             let Some(title) = self.signs.get(aid) else { continue };
             egui::Area::new(egui::Id::unique(("buy_sign", *aid))).fixed_pos(egui::pos2(p.x / ppp, p.y / ppp)).pivot(egui::Align2::CENTER_BOTTOM).show(ctx, |ui| {
-                let b = egui::Button::new(RichText::new(format!("Buying: {title}")).color(Color32::BLACK).size(12.0)).fill(Color32::from_rgb(200, 230, 255));
+                let b = egui::Button::new(RichText::new(format!("Buying: {title}")).color(crate::classic::ink(Color32::BLACK)).size(12.0)).fill(Color32::from_rgb(200, 230, 255));
                 if ui.add(b).on_hover_text("Click to sell to this store").clicked() {
                     clicked = Some(*aid);
                 }
@@ -437,7 +437,7 @@ impl Stores {
                 self.cash_tab = *first;
             }
         }
-        egui::Window::new("Cash Shop").open(&mut open).collapsible(false).default_width(560.0).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new("Cash Shop").open(&mut open).collapsible(false).default_width(560.0), "Cash Shop", true, |ui| {
             ui.horizontal(|ui| {
                 ui.label(gold(format!("Cash points: {cash}")));
                 ui.separator();
@@ -453,7 +453,7 @@ impl Stores {
             });
             ui.separator();
             if self.cash_tabs.is_empty() {
-                ui.label(RichText::new("The shop has nothing for sale.").color(Color32::GRAY));
+                ui.label(RichText::new("The shop has nothing for sale.").color(crate::classic::ink(Color32::GRAY)));
                 return;
             }
             ui.columns(2, |cols| {

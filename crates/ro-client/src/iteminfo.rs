@@ -54,7 +54,7 @@ impl ItemInfo {
         let name = if *refine > 0 { format!("+{refine} {name}") } else { name };
         let card = self.card_art.contains_key(id);
         let mut open = true;
-        egui::Window::new(RichText::new(&name).strong()).id(egui::Id::unique("iteminfo")).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new(RichText::new(&name).strong()).id(egui::Id::unique("iteminfo")).open(&mut open).collapsible(false).resizable(false), &name, true, |ui| {
             if card {
                 // Cards: the illustration alone, large, as the original's card window.
                 if let Some(t) = pic {
@@ -77,7 +77,7 @@ impl ItemInfo {
                     if !inserted.is_empty() {
                         ui.separator();
                         for c in inserted {
-                            ui.label(RichText::new(db.map_or_else(|| format!("Card #{c}"), |d| d.name(c, true))).color(Color32::from_rgb(140, 200, 255)));
+                            ui.label(RichText::new(db.map_or_else(|| format!("Card #{c}"), |d| d.name(c, true))).color(crate::classic::ink(Color32::from_rgb(140, 200, 255))));
                         }
                     }
                 });
@@ -95,11 +95,11 @@ impl ItemInfo {
         let (name, job, items) = self.viewing.as_ref()?;
         let mut info = None;
         let mut open = true;
-        egui::Window::new(format!("{name}'s equipment")).id(egui::Id::unique("view_equip")).open(&mut open).collapsible(false).default_width(320.0).show(ctx, |ui| {
-            ui.label(RichText::new(job).color(Color32::GRAY));
+        crate::classic::show(ctx, egui::Window::new(format!("{name}'s equipment")).id(egui::Id::unique("view_equip")).open(&mut open).collapsible(false).default_width(320.0), &format!("{name}'s equipment"), true, |ui| {
+            ui.label(RichText::new(job).color(crate::classic::ink(Color32::GRAY)));
             ui.separator();
             if items.is_empty() {
-                ui.label(RichText::new("Nothing worn.").color(Color32::GRAY));
+                ui.label(RichText::new("Nothing worn.").color(crate::classic::ink(Color32::GRAY)));
             }
             for it in items {
                 let resp = ui

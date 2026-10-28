@@ -56,8 +56,8 @@ impl Merchant {
         if self.cart_open && self.has_cart() {
             let mut open = true;
             let (n, max, w, max_w) = self.cart_count;
-            egui::Window::new("Cart").open(&mut open).default_width(300.0).show(ctx, |ui| {
-                ui.label(RichText::new(format!("{n} / {max} items    Weight {} / {}", w / 10, max_w / 10)).color(Color32::GRAY));
+            crate::classic::show(ctx, egui::Window::new("Cart").open(&mut open).default_width(300.0), "Cart", true, |ui| {
+                ui.label(RichText::new(format!("{n} / {max} items    Weight {} / {}", w / 10, max_w / 10)).color(crate::classic::ink(Color32::GRAY)));
                 ui.separator();
                 egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                     for it in self.cart.values() {
@@ -90,12 +90,12 @@ impl Merchant {
         if let Some((slots, title, chosen)) = self.setup.as_mut() {
             let mut open = true;
             let mut submit = false;
-            egui::Window::new("Open Shop").open(&mut open).collapsible(false).default_width(420.0).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new("Open Shop").open(&mut open).collapsible(false).default_width(420.0), "Open Shop", true, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Shop name");
                     ui.text_edit_singleline(title);
                 });
-                ui.label(RichText::new(format!("Up to {slots} items, from your cart.")).color(Color32::GRAY));
+                ui.label(RichText::new(format!("Up to {slots} items, from your cart.")).color(crate::classic::ink(Color32::GRAY)));
                 ui.separator();
                 egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
                     for it in self.cart.values() {
@@ -131,7 +131,7 @@ impl Merchant {
 
         if let Some(stock) = &self.my_shop {
             let mut close = false;
-            egui::Window::new("My Shop").collapsible(false).default_width(300.0).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new("My Shop").collapsible(false).default_width(300.0), "My Shop", false, |ui| {
                 for it in stock {
                     ui.horizontal(|ui| {
                         icon(ui, icons, it.id);
@@ -152,13 +152,13 @@ impl Merchant {
             let mut open = true;
             let mut buy = false;
             let title = self.signs.get(seller).cloned().unwrap_or_else(|| "Shop".into());
-            egui::Window::new(title).open(&mut open).collapsible(false).default_width(420.0).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new(title.as_str()).open(&mut open).collapsible(false).default_width(420.0), &title, true, |ui| {
                 egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                     for (it, want) in items.iter().zip(amounts.iter_mut()) {
                         ui.horizontal(|ui| {
                             icon(ui, icons, it.id);
                             ui.label(format!("{}  ({} left)", name(db, it.id, it.refine), it.amount));
-                            ui.label(RichText::new(format!("{} z", it.price)).color(Color32::from_rgb(255, 220, 120)));
+                            ui.label(RichText::new(format!("{} z", it.price)).color(crate::classic::ink(Color32::from_rgb(255, 220, 120))));
                             ui.add(egui::DragValue::new(want).range(0..=it.amount).prefix("buy "));
                         });
                     }
@@ -188,7 +188,7 @@ impl Merchant {
         for (aid, p) in signs {
             let Some(title) = self.signs.get(aid) else { continue };
             egui::Area::new(egui::Id::unique(("shop_sign", *aid))).fixed_pos(egui::pos2(p.x / ppp, p.y / ppp)).pivot(egui::Align2::CENTER_BOTTOM).show(ctx, |ui| {
-                let b = egui::Button::new(RichText::new(title).color(Color32::BLACK).size(12.0)).fill(Color32::from_rgb(255, 240, 200));
+                let b = egui::Button::new(RichText::new(title).color(crate::classic::ink(Color32::BLACK)).size(12.0)).fill(Color32::from_rgb(255, 240, 200));
                 if ui.add(b).on_hover_text("Click to browse this shop").clicked() {
                     clicked = Some(*aid);
                 }
@@ -204,10 +204,10 @@ impl Merchant {
         let Some((balance, amount)) = self.bank.as_mut() else { return (None, false) };
         let mut out = None;
         let mut open = true;
-        egui::Window::new("Bank").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new("Bank").open(&mut open).collapsible(false).resizable(false), "Bank", true, |ui| {
             egui::Grid::new("bank").num_columns(2).show(ui, |ui| {
                 ui.label("In the bank");
-                ui.label(RichText::new(balance.map_or("…".into(), |b| format!("{b} z"))).color(Color32::from_rgb(255, 220, 120)));
+                ui.label(RichText::new(balance.map_or("…".into(), |b| format!("{b} z"))).color(crate::classic::ink(Color32::from_rgb(255, 220, 120))));
                 ui.end_row();
                 ui.label("On hand");
                 ui.label(format!("{zeny} z"));

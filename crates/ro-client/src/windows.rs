@@ -131,6 +131,7 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
     let mut action = None;
     egui::Area::new(egui::Id::unique("hotkeys")).anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -12.0)).show(ctx, |ui| {
         egui::Frame::new().fill(Color32::from_rgba_unmultiplied(16, 20, 28, 210)).corner_radius(8).inner_margin(6).show(ui, |ui| {
+            ui.style_mut().visuals = egui::Visuals::dark();
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let base = v.hotkey_row as usize * HOTKEYS_PER_ROW;
@@ -258,7 +259,7 @@ fn item_tooltip(ui: &mut egui::Ui, db: Option<&ItemDb>, it: &InvItem) {
                 Some(&c) => db.map_or_else(|| format!("Card #{c}"), |d| d.name(c, true)),
                 None => "(empty slot)".to_string(),
             };
-            ui.label(RichText::new(text).color(if i < cards.len() { Color32::from_rgb(140, 200, 255) } else { Color32::GRAY }));
+            ui.label(RichText::new(text).color(crate::classic::ink(if i < cards.len() { Color32::from_rgb(140, 200, 255) } else { Color32::GRAY })));
         }
         ui.separator();
     }
@@ -269,7 +270,7 @@ fn item_tooltip(ui: &mut egui::Ui, db: Option<&ItemDb>, it: &InvItem) {
     }
     if it.kind == ro_game::items::kind::CARD {
         ui.separator();
-        ui.label(RichText::new("Double-click to insert into equipment").color(Color32::GRAY).size(11.5));
+        ui.label(RichText::new("Double-click to insert into equipment").color(crate::classic::ink(Color32::GRAY)).size(11.5));
     }
 }
 
@@ -303,7 +304,7 @@ impl Windows {
         let tabs = v.skill_tree.map(|t| t.tabs(v.job)).unwrap_or_default();
         if self.skill_list || tabs.is_empty() {
             if v.skills.is_empty() {
-                ui.label(RichText::new("No skills").color(Color32::GRAY));
+                ui.label(RichText::new("No skills").color(crate::classic::ink(Color32::GRAY)));
             }
             // Long skill lists (3rd and 4th jobs) scroll instead of running off the screen.
             egui::ScrollArea::vertical().max_height(420.0).min_scrolled_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
@@ -457,7 +458,7 @@ fn compare_tooltip(ui: &mut egui::Ui, db: Option<&ItemDb>, it: &InvItem, items: 
             ui.separator();
             ui.vertical(|ui| {
                 ui.set_max_width(260.0);
-                ui.label(RichText::new("Currently worn").color(Color32::GRAY).size(11.5));
+                ui.label(RichText::new("Currently worn").color(crate::classic::ink(Color32::GRAY)).size(11.5));
                 item_tooltip(ui, db, w);
             });
         }
@@ -525,6 +526,7 @@ impl Windows {
                 .corner_radius(8)
                 .inner_margin(6)
                 .show(ui, |ui| {
+                    ui.style_mut().visuals = egui::Visuals::dark();
                     ui.horizontal(|ui| {
                         for (label, key, open) in [
                             ("Inventory", "Alt+E", &mut self.inventory),
@@ -663,7 +665,7 @@ impl Windows {
             self.inventory = open;
         } else if self.inventory {
             let mut open = true;
-            egui::Window::new("Inventory").open(&mut open).default_pos(col(2.0)).resizable(false).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new("Inventory").open(&mut open).default_pos(col(2.0)).resizable(false), "Inventory", true, |ui| {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.tab, InvTab::Items, "Items");
                     ui.selectable_value(&mut self.tab, InvTab::Equip, "Equip");
@@ -692,7 +694,7 @@ impl Windows {
                     }
                 });
                 if shown.is_empty() {
-                    ui.label(RichText::new("Empty").color(Color32::GRAY));
+                    ui.label(RichText::new("Empty").color(crate::classic::ink(Color32::GRAY)));
                 }
                 ui.separator();
                 ui.horizontal(|ui| {
@@ -776,7 +778,7 @@ impl Windows {
             self.equipment = open;
         } else if self.equipment {
             let mut open = true;
-            egui::Window::new("Equipment").open(&mut open).default_pos(col(1.0)).resizable(false).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new("Equipment").open(&mut open).default_pos(col(1.0)).resizable(false), "Equipment", true, |ui| {
                 if let Some(mut on) = v.show_equip {
                     if ui.checkbox(&mut on, "Let others view my equipment").changed() {
                         action = Some(UiAction::ShowEquip(on));
@@ -801,12 +803,12 @@ impl Windows {
                             ui.label(item_name(v.db, it));
                         } else {
                             ui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::hover());
-                            ui.label(RichText::new(label).color(Color32::GRAY));
+                            ui.label(RichText::new(label).color(crate::classic::ink(Color32::GRAY)));
                         }
                         ui.end_row();
                     }
                 });
-                ui.label(RichText::new("Double-click to take off").size(11.0).color(Color32::GRAY));
+                ui.label(RichText::new("Double-click to take off").size(11.0).color(crate::classic::ink(Color32::GRAY)));
             });
             self.equipment = open;
         }
@@ -883,7 +885,7 @@ impl Windows {
             }
         } else if self.stats {
             let mut open = true;
-            egui::Window::new("Status").open(&mut open).default_pos(col(0.0)).resizable(false).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new("Status").open(&mut open).default_pos(col(0.0)).resizable(false), "Status", true, |ui| {
                 let Some(s) = v.stats else {
                     ui.label("Waiting for the server…");
                     return;
@@ -926,7 +928,7 @@ impl Windows {
                             ("Aspd", ((2000 - (s.aspd.0 + s.aspd.1) as i32) / 10).to_string()),
                         ];
                         for (k, val) in rows {
-                            ui.label(RichText::new(k).color(Color32::GRAY));
+                            ui.label(RichText::new(k).color(crate::classic::ink(Color32::GRAY)));
                             ui.label(val);
                             ui.end_row();
                         }
@@ -958,7 +960,7 @@ impl Windows {
             let inv = |index: u16| v.items.iter().find(|it| it.index == index).copied();
             let mut chosen = None;
             let mut open = true;
-            egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO), &title, true, |ui| {
                 egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
                     // An item row: icon (when loaded) and a button with its name.
                     let item_row = |ui: &mut egui::Ui, id: u32, label: String| {
@@ -1036,14 +1038,14 @@ impl Windows {
         // Inserting a card: pick the equipment the server says can take it.
         if let Some((card, equips)) = self.card_pick.clone() {
             let mut open = true;
-            egui::Window::new("Insert Card").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new("Insert Card").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO), "Insert Card", true, |ui| {
                 let card_item = v.items.iter().find(|it| it.index == card);
                 if let Some(c) = card_item {
                     ui.label(RichText::new(item_name(v.db, c)).strong());
                 }
                 ui.separator();
                 if equips.is_empty() {
-                    ui.label(RichText::new("No equipment can take this card.").color(Color32::GRAY));
+                    ui.label(RichText::new("No equipment can take this card.").color(crate::classic::ink(Color32::GRAY)));
                 }
                 for e in &equips {
                     let Some(it) = v.items.iter().find(|it| it.index == *e) else { continue };
@@ -1087,7 +1089,7 @@ impl Windows {
             self.skills = open;
         } else if self.skills {
             let mut open = true;
-            egui::Window::new("Skills").open(&mut open).default_pos(egui::pos2(col(0.0).x, 420.0)).resizable(false).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new("Skills").open(&mut open).default_pos(egui::pos2(col(0.0).x, 420.0)).resizable(false), "Skills", true, |ui| {
                 if let Some(a) = self.skills_body(ui, v) {
                     action = Some(a);
                 }
@@ -1116,8 +1118,8 @@ fn skill_tooltip(ui: &mut egui::Ui, v: &View, internal: &str, skill: Option<&Ski
     ui.set_max_width(360.0);
     ui.label(RichText::new((v.skill_names)(internal)).strong());
     match skill {
-        Some(s) => ui.label(RichText::new(format!("Lv {}   SP {}   Range {}", s.level, s.sp, s.range)).color(Color32::GRAY)),
-        None => ui.label(RichText::new("Not yet available").color(Color32::GRAY)),
+        Some(s) => ui.label(RichText::new(format!("Lv {}   SP {}   Range {}", s.level, s.sp, s.range)).color(crate::classic::ink(Color32::GRAY))),
+        None => ui.label(RichText::new("Not yet available").color(crate::classic::ink(Color32::GRAY))),
     };
     if let Some(lines) = v.skill_info.and_then(|i| i.description(internal)) {
         ui.separator();
@@ -1127,6 +1129,6 @@ fn skill_tooltip(ui: &mut egui::Ui, v: &View, internal: &str, skill: Option<&Ski
     }
     if skill.is_some_and(|s| s.level > 0 && s.target != 0) {
         ui.separator();
-        ui.label(RichText::new("Double-click to use, or drag to the shortcut bar").color(Color32::GRAY).size(11.5));
+        ui.label(RichText::new("Double-click to use, or drag to the shortcut bar").color(crate::classic::ink(Color32::GRAY)).size(11.5));
     }
 }

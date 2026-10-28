@@ -196,6 +196,7 @@ impl Hud {
             .anchor(Align2::LEFT_TOP, Vec2::new(12.0, 12.0))
             .frame(panel())
             .show(ctx, |ui| {
+                ui.style_mut().visuals = egui::Visuals::dark();
                 ui.set_width(250.0);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(&s.name).strong().size(15.0).color(Color32::WHITE));
@@ -232,6 +233,7 @@ impl Hud {
             .anchor(Align2::LEFT_BOTTOM, Vec2::new(12.0, -12.0))
             .frame(frame)
             .show(ctx, |ui| {
+                ui.style_mut().visuals = egui::Visuals::dark();
                 let input_h = if classic.is_some() { 26.0 } else { 30.0 };
                 egui::ScrollArea::vertical()
                     .stick_to_bottom(true)
@@ -389,6 +391,7 @@ impl Hud {
             .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 60.0))
             .frame(panel())
             .show(ctx, |ui| {
+                ui.style_mut().visuals = egui::Visuals::dark();
                 ui.set_width(440.0);
                 if !d.title.is_empty() {
                     ui.label(RichText::new(&d.title).strong().size(14.0).color(Color32::from_rgb(160, 225, 255)));
@@ -529,6 +532,7 @@ pub fn death_window(ctx: &egui::Context, pad_hint: Option<&str>) -> bool {
         .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, -190.0))
         .frame(panel())
         .show(ctx, |ui| {
+                ui.style_mut().visuals = egui::Visuals::dark();
             ui.set_width(260.0);
             ui.vertical_centered(|ui| {
                 ui.label(RichText::new("You have died.").size(16.0).strong().color(Color32::from_rgb(235, 110, 100)));
@@ -618,6 +622,7 @@ pub fn esc_menu(ctx: &egui::Context) -> Option<EscChoice> {
         .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
         .frame(panel())
         .show(ctx, |ui| {
+                ui.style_mut().visuals = egui::Visuals::dark();
             ui.set_width(200.0);
             ui.vertical_centered(|ui| {
                 let button = |ui: &mut egui::Ui, text: &str| ui.add(egui::Button::new(RichText::new(text).size(15.0)).min_size(Vec2::new(190.0, 32.0))).clicked();

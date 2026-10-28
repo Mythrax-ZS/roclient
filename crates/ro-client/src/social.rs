@@ -124,7 +124,7 @@ impl Social {
                 Prompt::Friend { name, .. } => format!("{name} wants to be your friend."),
                 Prompt::Guild { name, .. } => format!("You are invited to the guild \"{name}\"."),
             };
-            egui::Window::new("Request").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 120.0)).show(ctx, |ui| {
+            crate::classic::show(ctx, egui::Window::new("Request").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 120.0)), "Request", false, |ui| {
                 ui.label(text);
                 ui.horizontal(|ui| {
                     let yes = ui.button("Accept").clicked();
@@ -157,7 +157,7 @@ impl Social {
             Shop::Buy { .. } => "Buy",
             Shop::Sell { .. } => "Sell",
         };
-        egui::Window::new(title).open(&mut open).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| match shop {
+        crate::classic::show(ctx, egui::Window::new(title).open(&mut open).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO), &title, true, |ui| match shop {
             Shop::Choose { npc } => {
                 ui.horizontal(|ui| {
                     if ui.button("Buy").clicked() {
@@ -177,7 +177,7 @@ impl Social {
                         for it in items.iter() {
                             icon(ui, c.icons, it.id);
                             ui.label(name(c.db, it.id));
-                            ui.label(RichText::new(format!("{} z", it.discount_price)).color(Color32::from_rgb(240, 210, 120)));
+                            ui.label(RichText::new(format!("{} z", it.discount_price)).color(crate::classic::ink(Color32::from_rgb(240, 210, 120))));
                             let n = cart.entry(it.id).or_insert(0);
                             ui.add(egui::DragValue::new(n).range(0..=999));
                             ui.end_row();
@@ -189,7 +189,7 @@ impl Social {
                 ui.separator();
                 ui.horizontal(|ui| {
                     let affordable = total as i64 <= c.zeny;
-                    ui.label(RichText::new(format!("Total {total} z  (you have {} z)", c.zeny)).color(if affordable { Color32::LIGHT_GRAY } else { Color32::from_rgb(255, 120, 100) }));
+                    ui.label(RichText::new(format!("Total {total} z  (you have {} z)", c.zeny)).color(crate::classic::ink(if affordable { Color32::LIGHT_GRAY } else { Color32::from_rgb(255, 120, 100) })));
                     if ui.add_enabled(!cart.is_empty() && affordable, egui::Button::new("Buy")).clicked() {
                         out.push(Command::Shop(ShopRequest::Buy(cart.iter().map(|(id, n)| (*id, *n)).collect())));
                         close = true;
@@ -206,7 +206,7 @@ impl Social {
                             }
                             icon(ui, c.icons, it.id);
                             ui.label(format!("{} x{}", name(c.db, it.id), it.amount));
-                            ui.label(RichText::new(format!("{} z", o.overcharge_price)).color(Color32::from_rgb(240, 210, 120)));
+                            ui.label(RichText::new(format!("{} z", o.overcharge_price)).color(crate::classic::ink(Color32::from_rgb(240, 210, 120))));
                             let n = cart.entry(o.index).or_insert(0);
                             ui.add(egui::DragValue::new(n).range(0..=it.amount));
                             ui.end_row();
@@ -277,14 +277,14 @@ impl Social {
     fn trade_window(&mut self, ctx: &egui::Context, c: &Ctx, out: &mut Vec<Command>) {
         let Some(t) = self.trade.as_mut() else { return };
         let mut open = true;
-        egui::Window::new(format!("Trade with {}", t.partner)).id(egui::Id::unique("trade")).open(&mut open).resizable(false).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new(format!("Trade with {}", t.partner)).id(egui::Id::unique("trade")).open(&mut open).resizable(false), &format!("Trade with {}", t.partner), true, |ui| {
             ui.columns(2, |cols| {
                 for (col, title, items, zeny, locked) in [
                     (0, t.partner.as_str(), &t.theirs, t.zeny_theirs, t.they_locked),
                     (1, c.my_name, &t.ours, t.zeny_ours, t.we_locked),
                 ] {
                     let ui = &mut cols[col];
-                    ui.label(RichText::new(title).strong().color(if locked { Color32::from_rgb(120, 220, 120) } else { Color32::WHITE }));
+                    ui.label(RichText::new(title).strong().color(crate::classic::ink(if locked { Color32::from_rgb(120, 220, 120) } else { Color32::WHITE })));
                     for (id, n) in items {
                         ui.horizontal(|ui| {
                             icon(ui, c.icons, *id);
@@ -296,7 +296,7 @@ impl Social {
             });
             ui.separator();
             if !t.we_locked {
-                ui.label(RichText::new("Add from inventory (double-click):").size(11.0).color(Color32::GRAY));
+                ui.label(RichText::new("Add from inventory (double-click):").size(11.0).color(crate::classic::ink(Color32::GRAY)));
                 egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
                     for it in c.inventory.iter().filter(|i| i.equipped == 0) {
                         let r = ui.add(egui::Label::new(format!("{} x{}", name(c.db, it.id), it.amount)).sense(egui::Sense::click()));
@@ -337,7 +337,7 @@ impl Social {
             return;
         }
         let mut open = true;
-        egui::Window::new("Party").open(&mut open).resizable(false).default_pos(egui::pos2(60.0, 260.0)).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new("Party").open(&mut open).resizable(false).default_pos(egui::pos2(60.0, 260.0)), "Party", true, |ui| {
             match &self.party {
                 None => {
                     ui.label("You are not in a party.");
@@ -354,8 +354,8 @@ impl Social {
                         ui.horizontal(|ui| {
                             let color = if m.online { Color32::WHITE } else { Color32::GRAY };
                             let crown = if m.leader { "[Leader] " } else { "" };
-                            ui.label(RichText::new(format!("{crown}{} (Lv {})", m.name, m.level)).color(color));
-                            ui.label(RichText::new(&m.map).size(11.0).color(Color32::GRAY));
+                            ui.label(RichText::new(format!("{crown}{} (Lv {})", m.name, m.level)).color(crate::classic::ink(color)));
+                            ui.label(RichText::new(&m.map).size(11.0).color(crate::classic::ink(Color32::GRAY)));
                         });
                         if let Some(&(hp, max)) = p.hp.get(&m.account_id) {
                             ui.add(egui::ProgressBar::new(hp as f32 / max.max(1) as f32).desired_height(6.0).fill(Color32::from_rgb(70, 190, 90)));
@@ -378,7 +378,7 @@ impl Social {
                 ui.separator();
                 ui.label(format!("Guild: {g}"));
             }
-            ui.label(RichText::new("Chat: /p message for party, /g message for guild").size(11.0).color(Color32::GRAY));
+            ui.label(RichText::new("Chat: /p message for party, /g message for guild").size(11.0).color(crate::classic::ink(Color32::GRAY)));
             let _ = c;
         });
         self.show_party = open;
@@ -389,15 +389,15 @@ impl Social {
             return;
         }
         let mut open = true;
-        egui::Window::new("Friends").open(&mut open).resizable(false).default_pos(egui::pos2(60.0, 460.0)).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new("Friends").open(&mut open).resizable(false).default_pos(egui::pos2(60.0, 460.0)), "Friends", true, |ui| {
             if self.friends.is_empty() {
-                ui.label(RichText::new("No friends yet").color(Color32::GRAY));
+                ui.label(RichText::new("No friends yet").color(crate::classic::ink(Color32::GRAY)));
             }
             let mut remove = None;
             for f in &self.friends {
                 ui.horizontal(|ui| {
                     let (dot, color) = if f.online { ("online", Color32::from_rgb(90, 220, 90)) } else { ("offline", Color32::GRAY) };
-                    ui.label(RichText::new(dot).color(color));
+                    ui.label(RichText::new(dot).color(crate::classic::ink(color)));
                     ui.label(&f.name);
                     if ui.small_button("Remove").clicked() {
                         remove = Some((f.account_id, f.char_id));

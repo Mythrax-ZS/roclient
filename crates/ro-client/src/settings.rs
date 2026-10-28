@@ -121,7 +121,7 @@ impl Settings {
     /// The settings window. Returns true when something changed (already saved).
     pub fn show(&mut self, ctx: &egui::Context, open: &mut bool) -> bool {
         let before = self.clone();
-        egui::Window::new("Settings").open(open).resizable(false).collapsible(false).show(ctx, |ui| {
+        crate::classic::show(ctx, egui::Window::new("Settings").open(open).resizable(false).collapsible(false), "Settings", true, |ui| {
             egui::Grid::new("settings").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
                 ui.label("Music");
                 ui.add(egui::Slider::new(&mut self.bgm_volume, 0.0..=1.0).show_value(false));
