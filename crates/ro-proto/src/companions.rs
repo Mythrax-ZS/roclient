@@ -201,6 +201,8 @@ pub enum CompanionRequest {
     Return(u32),
     /// CZ_MER_COMMAND: 1 info, 2 dismiss.
     MercMenu(u8),
+    /// CZ_REQUEST_MOVENPC: walk the homunculus or mercenary to a cell (the client runs their AI).
+    Move { id: u32, x: u16, y: u16 },
 }
 
 impl Encode for CompanionRequest {
@@ -233,6 +235,11 @@ impl Encode for CompanionRequest {
                 d.put_u16_le(0x0234);
                 d.put_u32_le(*id);
             }
+            CompanionRequest::Move { id, x, y } => {
+                d.put_u16_le(0x0232);
+                d.put_u32_le(*id);
+                d.put_slice(&crate::packets::pack_pos(*x, *y, 0));
+            }
             CompanionRequest::MercMenu(c) => {
                 d.put_u16_le(0x029f);
                 d.put_u8(*c);
@@ -254,6 +261,7 @@ mod tests {
             (CompanionRequest::Attack { id: 1, target: 2 }, 11),
             (CompanionRequest::Return(1), 6),
             (CompanionRequest::MercMenu(2), 3),
+            (CompanionRequest::Move { id: 1, x: 2, y: 3 }, 9),
         ] {
             let mut d = BytesMut::new();
             r.encode(&mut d);

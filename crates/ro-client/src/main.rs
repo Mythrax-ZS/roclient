@@ -805,6 +805,8 @@ struct App {
     companions: companions::Companions,
     /// A companion window request, handled after the UI pass.
     companion_action: Option<companions::CompanionAction>,
+    /// When the companion AI next checks distances.
+    follow_at: std::time::Instant,
     /// The Classic interface art, loaded once the GRF is open.
     skin: Option<classic::Skin>,
     /// The item information / card illustration window.
@@ -2594,6 +2596,32 @@ impl App {
         }
     }
 
+    /// The client-side companion AI (the original runs AI.lua): the homunculus and the
+    /// mercenary walk back beside us when they fall more than three cells behind.
+    fn companion_follow(&mut self, now: std::time::Instant) {
+        if now < self.follow_at {
+            return;
+        }
+        self.follow_at = now + std::time::Duration::from_millis(400);
+        let Some(me) = self.player.as_ref().map(|p| p.walker.goal_or_cell()) else { return };
+        let ids = [(self.companions.homun_id, (-1, -1)), (self.companions.merc.as_ref().map_or(0, |m| m.id), (1, -1))];
+        for (id, (dx, dy)) in ids {
+            let Some(unit) = self.units.get(&id).filter(|_| id != 0) else { continue };
+            let at = unit.walker.goal_or_cell();
+            if (at.0 - me.0).abs().max((at.1 - me.1).abs()) <= 3 {
+                continue;
+            }
+            let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
+            let spot = [(dx, dy), (dx, 0), (0, dy), (-dx, dy), (0, 0)]
+                .iter()
+                .map(|(ox, oy)| (me.0 + ox, me.1 + oy))
+                .find(|&(x, y)| gat.is_some_and(|g| g.walkable(x, y)));
+            if let Some((x, y)) = spot {
+                self.send(ro_net::Command::Companion(ro_net::CompanionRequest::Move { id, x: x as u16, y: y as u16 }));
+            }
+        }
+    }
+
     /// Opens the bank (asking for the balance) or closes it.
     fn toggle_bank(&mut self) {
         let aid = self.account_id;
@@ -3123,6 +3151,7 @@ impl App {
         }
         self.cursor_action = self.hover_cursor();
         self.steer_to_cursor(dt);
+        self.companion_follow(now);
 
         // `--do a,b,c`: scripted actions once the inventory has arrived (tests).
         // Scripted helpers for two-client tests: accept requests, run a trade to completion.
@@ -4356,6 +4385,7 @@ fn main() -> anyhow::Result<()> {
         progress: Default::default(),
         companions: Default::default(),
         companion_action: None,
+        follow_at: std::time::Instant::now(),
         skin: None,
         item_info: Default::default(),
         refine: Default::default(),

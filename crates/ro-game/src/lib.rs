@@ -41,6 +41,11 @@ impl Walker {
         !self.path.is_empty()
     }
 
+    /// Where the walk ends, or the current cell when standing.
+    pub fn goal_or_cell(&self) -> (i32, i32) {
+        self.path.last().copied().unwrap_or(self.cell)
+    }
+
     /// Starts walking along `path` (cells after the current one).
     pub fn walk(&mut self, path: Vec<(i32, i32)>) {
         self.path = path;
