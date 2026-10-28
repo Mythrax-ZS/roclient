@@ -1392,6 +1392,14 @@ impl App {
                 }
             }
             GroundEffectGone(id) => self.stop_fx(id),
+            // EFST_SKE on ourselves: the server's night (on) or day (off).
+            StatusIcon { id, kind: 160, on } if id == self.account_id => {
+                tracing::info!(night = on, "day/night");
+                if let Some(r) = self.renderer.as_mut() {
+                    r.night = on;
+                }
+            }
+            StatusIcon { id, kind, on } => tracing::debug!(id, kind, on, me = self.account_id, "status icon"),
             Resurrected(id) if id == self.account_id => self.revive(),
             Resurrected(id) => {
                 if let Some(m) = self.units.get_mut(&id) {

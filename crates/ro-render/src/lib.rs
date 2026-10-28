@@ -139,6 +139,10 @@ pub struct Renderer {
     pub post_settings: PostSettings,
     /// The map's light sources.
     pub point_lights: Vec<PointLight>,
+    /// Night mode (the server's day/night cycle); the look fades over `night_t`.
+    pub night: bool,
+    night_t: f32,
+    last_frame: std::time::Instant,
     /// Code-drawn effects playing this frame; the client advances and removes them.
     pub procs: Vec<ProcFx>,
     /// STR effects playing this frame; the client advances and removes them.
@@ -498,6 +502,9 @@ impl Renderer {
             shadow,
             post_settings: PostSettings::default(),
             point_lights: vec![],
+            night: false,
+            night_t: 0.0,
+            last_frame: std::time::Instant::now(),
             procs: vec![],
             effects: vec![],
             effect_pipeline,
@@ -739,6 +746,52 @@ impl Renderer {
 
     /// Records the whole frame into `view` using `targets` (depth / MSAA of the same size).
     fn encode(&mut self, view: &wgpu::TextureView, ui_view: &wgpu::TextureView, targets: Option<&Targets>, size: (u32, u32)) -> wgpu::CommandBuffer {
+        // Night: blend the map's light and the look toward moonlight for this frame only.
+        let now = std::time::Instant::now();
+        // Uncapped: after a long gap (a capture, a stall) the fade simply completes.
+        let dt = (now - self.last_frame).as_secs_f32();
+        self.last_frame = now;
+        let goal = if self.night { 1.0 } else { 0.0 };
+        self.night_t += (goal - self.night_t).clamp(-dt * 0.5, dt * 0.5);
+        let (day_light, day_post) = (self.lighting, self.post_settings);
+        if self.night_t > 0.0 {
+            let n = self.night_t;
+            let mix3 = |a: [f32; 3], b: [f32; 3]| [a[0] + (b[0] - a[0]) * n, a[1] + (b[1] - a[1]) * n, a[2] + (b[2] - a[2]) * n];
+            let a = self.lighting.ambient;
+            let d = self.lighting.diffuse;
+            self.lighting.ambient = mix3(a, [a[0] * 0.38, a[1] * 0.42, a[2] * 0.62]);
+            self.lighting.diffuse = mix3(d, [d[0] * 0.22, d[1] * 0.26, d[2] * 0.42]);
+            let p = &mut self.post_settings;
+            p.shadow_strength *= 1.0 - 0.6 * n;
+            p.point_lights *= 1.0 + 1.5 * n;
+            p.warmth += (-0.5 - p.warmth) * n;
+            p.saturation *= 1.0 - 0.25 * n;
+            p.god_rays *= 1.0 - n;
+            p.bloom_threshold *= 1.0 - 0.35 * n;
+            p.vignette += 0.2 * n;
+            p.exposure *= 1.0 - 0.5 * n;
+            if !p.enabled {
+                // Classic look: no effects, but night still darkens and cools the screen.
+                *p = PostSettings {
+                    enabled: true,
+                    bloom_intensity: 0.0,
+                    dof_strength: 0.0,
+                    vignette: 0.2 * n,
+                    contrast: 1.0,
+                    saturation: 1.0 - 0.25 * n,
+                    warmth: -0.5 * n,
+                    exposure: 1.0 - 0.5 * n,
+                    shadow_strength: 0.0,
+                    sprite_light: 0.0,
+                    rim_light: 0.0,
+                    fog: 0.0,
+                    god_rays: 0.0,
+                    ambient_occlusion: 0.0,
+                    pixel_snap: false,
+                    ..PostSettings::default()
+                };
+            }
+        }
         let targets = targets.unwrap_or(&self.targets);
         let aspect = size.0 as f32 / size.1 as f32;
         let cam = &self.camera;
@@ -976,7 +1029,9 @@ impl Renderer {
                 self.ui_renderer.free_texture(id);
             }
         }
-        enc.finish()
+        let cmd = enc.finish();
+        (self.lighting, self.post_settings) = (day_light, day_post);
+        cmd
     }
 
     /// Supplies the UI drawn over the next frame.

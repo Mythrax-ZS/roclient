@@ -240,6 +240,8 @@ pub enum Event {
     /// A lasting ground effect (Sanctuary, Fire Wall, traps...) appeared or ended.
     GroundEffect { id: u32, cell: (u16, u16), kind: u32 },
     GroundEffectGone(u32),
+    /// A status icon turned on or off on a unit (EFST id; 160 is night).
+    StatusIcon { id: u32, kind: u16, on: bool },
     /// A dead unit (maybe us) was brought back.
     Resurrected(u32),
     /// A misc effect on a unit (0 base level up, 1 job level up, ...).
@@ -540,6 +542,11 @@ impl MapSession {
                             Some(Event::GroundEffect { id, cell, kind })
                         }
                         0x0120 => Some(Event::GroundEffectGone(parse_skill_disappear(&data))),
+                        0x0196 | 0x0983 => Some(Event::StatusIcon {
+                            kind: u16::from_le_bytes([data[2], data[3]]),
+                            id: u32::from_le_bytes([data[4], data[5], data[6], data[7]]),
+                            on: data[8] != 0,
+                        }),
                         0x0148 => Some(Event::Resurrected(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x019b => {
                             let (id, effect) = parse_notify_effect(&data);
