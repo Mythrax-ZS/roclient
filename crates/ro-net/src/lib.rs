@@ -373,6 +373,9 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_START_CAPTURE: pick a monster to tame; ZC_TRYCAPTURE_MONSTER: did it work.
+    StartCapture,
+    Captured(bool),
     /// ZC_CHANGE_DIRECTION: a unit turned (head direction, body direction).
     Turned { id: u32, dir: u8 },
     /// ZC_SPIRITS: spirit spheres (or coins, servants...) around a unit.
@@ -856,6 +859,8 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x019e => Some(Event::StartCapture),
+                        0x01a0 if data.len() >= 3 => Some(Event::Captured(data[2] != 0)),
                         0x009c if data.len() >= 9 => Some(Event::Turned { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), dir: ro_proto::packets::server_dir(data[8]) }),
                         0x01d0 if data.len() >= 8 => Some(Event::Spirits { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), count: u16::from_le_bytes([data[6], data[7]]) }),
                         0x0111 if data.len() >= 39 => parse_skill_list(&[&[0u8; 4][..], &data[2..]].concat()).into_iter().next().map(Event::SkillAdded),

@@ -927,6 +927,8 @@ struct App {
     spirits: std::collections::HashMap<u32, u16>,
     /// Our normal attack reach (ZC_ATTACK_RANGE).
     attack_range: i32,
+    /// A taming item is waiting for a monster to be clicked.
+    capturing: bool,
     /// ZC_MAPPROPERTY_R2 flags of the current map.
     map_flags: u32,
     /// Hat effect files by id (hateffectinfo), and the ones playing: (unit, effect) -> fx tag.
@@ -2554,6 +2556,14 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            StartCapture => {
+                self.capturing = true;
+                self.hud.push_chat(ro_net::ChatKind::System, "Click the monster you want to tame.".into());
+            }
+            Captured(ok) => {
+                let msg = if ok { "You tamed it! Look for its egg in your inventory." } else { "The taming failed." };
+                self.hud.push_chat(ro_net::ChatKind::System, msg.into());
+            }
             Turned { id, dir } => {
                 if let Some(m) = self.mob_mut(id) {
                     if !m.walker.is_walking() {
@@ -3065,7 +3075,7 @@ impl App {
         if self.rotating {
             return ROTATE;
         }
-        if self.aiming.is_some() {
+        if self.aiming.is_some() || self.capturing {
             return TARGET;
         }
         if self.cursor.is_none() || self.egui_ctx.is_pointer_over_egui() {
@@ -4135,6 +4145,14 @@ impl App {
                     }
                     Some(("swadd", id)) => id.parse().ok().and_then(item).map(|(index, location)| windows::UiAction::SwitchAdd { index, location: location & 0x3ff }),
                     Some(("swap", _)) => Some(windows::UiAction::SwitchAll),
+                    Some(("tame", _)) => {
+                        let me = self.player.as_ref().map(|p| p.walker.cell).unwrap_or_default();
+                        let target = self.units.iter().filter(|(_, m)| m.kind == 5 && m.dying.is_none()).min_by_key(|(_, m)| (m.walker.cell.0 - me.0).pow(2) + (m.walker.cell.1 - me.1).pow(2)).map(|(id, _)| *id);
+                        if let (Some(id), true) = (target, std::mem::take(&mut self.capturing)) {
+                            self.send(ro_net::Command::Companion(ro_net::CompanionRequest::Capture(id)));
+                        }
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -5400,6 +5418,7 @@ impl ApplicationHandler for App {
                         self.player_menu = Some((id, name, pos));
                     }
                     // Monsters: attack until it dies (or use the skill being aimed).
+                    Some((id, 5)) if std::mem::take(&mut self.capturing) => self.send(ro_net::Command::Companion(ro_net::CompanionRequest::Capture(id))),
                     Some((id, 5)) => match self.aiming.take() {
                         Some((skill, level)) => self.use_skill_on(skill, level, id),
                         None => self.attack_unit(id),
@@ -5623,6 +5642,7 @@ fn main() -> anyhow::Result<()> {
         member_pos: Default::default(),
         spirits: Default::default(),
         attack_range: 1,
+        capturing: false,
         map_flags: 0,
         hat_files: Default::default(),
         hat_fx: Default::default(),

@@ -187,6 +187,8 @@ fn name24(d: &mut BytesMut, name: &str) {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CompanionRequest {
+    /// CZ_TRYCAPTURE_MONSTER: try to tame this monster.
+    Capture(u32),
     /// CZ_COMMAND_PET: 0 info, 1 feed, 2 performance, 3 return to egg, 4 unequip accessory.
     PetMenu(u8),
     /// CZ_RENAME_PET.
@@ -208,6 +210,10 @@ pub enum CompanionRequest {
 impl Encode for CompanionRequest {
     fn encode(&self, d: &mut BytesMut) {
         match self {
+            CompanionRequest::Capture(id) => {
+                d.put_u16_le(0x019f);
+                d.put_u32_le(*id);
+            }
             CompanionRequest::PetMenu(c) => {
                 d.put_u16_le(0x01a1);
                 d.put_u8(*c);
