@@ -3,6 +3,7 @@
 //! Target: PACKETVER 20250402 (main). Layouts taken from rathena
 //! src/common/packets.hpp, src/map/packets.hpp and src/map/clif_shuffle.hpp.
 
+pub mod chatroom;
 pub mod codec;
 pub mod companions;
 pub mod generated;

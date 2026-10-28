@@ -28,6 +28,8 @@ pub use ro_proto::companions::{CompanionRequest, CompanionSkill, HomunInfo, Merc
 use ro_proto::companions::*;
 pub use ro_proto::mail::{MailHeader, MailItem, MailRequest};
 use ro_proto::mail::*;
+pub use ro_proto::chatroom::{ChatRoomRequest, Room};
+use ro_proto::chatroom::*;
 use ro_proto::quests::*;
 use ro_proto::menus::*;
 pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
@@ -333,6 +335,17 @@ pub enum Event {
     SoldToStore { index: u16, amount: u16, price: u32 },
     /// A buying store message (failure or closure).
     BuyStoreNotice(String),
+    /// A chat room sign appeared or changed.
+    RoomSign(Room),
+    RoomGone(u32),
+    /// Creating a room: 0 ok, 1 limit, 2 exists.
+    RoomCreated(u8),
+    /// Joining failed: 0 full, 1 password, 2 kicked, 4 zeny, 5/6 level, 7 job.
+    RoomRefused(u8),
+    /// We are in a room: (id, members as (owner?, name)).
+    RoomEntered { id: u32, members: Vec<(bool, String)> },
+    RoomMember { joined: bool, name: String, kicked: bool },
+    RoomOwner(String),
     /// The mailbox list.
     Inbox(Vec<MailHeader>),
     /// A mail opened: (tab, id, text, zeny, items).
@@ -455,6 +468,7 @@ pub enum Command {
     Progress(ProgressRequest),
     Companion(CompanionRequest),
     Mail(MailRequest),
+    ChatRoom(ChatRoomRequest),
     /// Look at a player's equipment.
     ViewEquip(u32),
     /// Let others look at ours.
@@ -594,6 +608,7 @@ impl MapSession {
                     Some(Command::Progress(r)) => self.send(r).await?,
                     Some(Command::Companion(r)) => self.send(r).await?,
                     Some(Command::Mail(r)) => self.send(r).await?,
+                    Some(Command::ChatRoom(r)) => self.send(r).await?,
                     Some(Command::ViewEquip(aid)) => self.send(CzViewEquip(aid)).await?,
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
@@ -773,6 +788,13 @@ impl MapSession {
                             7 => "The buyer can't pay for that.".into(),
                             _ => "The deal failed.".into(),
                         })),
+                        0x00d7 | 0x00df => parse_room(&data).map(Event::RoomSign),
+                        0x00d8 if data.len() >= 6 => Some(Event::RoomGone(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x00d6 if data.len() >= 3 => Some(Event::RoomCreated(data[2])),
+                        0x00da if data.len() >= 3 => Some(Event::RoomRefused(data[2])),
+                        0x00db => parse_enter(&data).map(|(id, members)| Event::RoomEntered { id, members }),
+                        0x00dc | 0x00dd => parse_member(opcode, &data).map(|(_, name, kicked)| Event::RoomMember { joined: opcode == 0x00dc, name, kicked }),
+                        0x00e1 => parse_role(&data).and_then(|(owner, name)| owner.then_some(Event::RoomOwner(name))),
                         0x0ac2 => Some(Event::Inbox(parse_inbox(&data))),
                         0x0b63 => parse_mail(&data).map(|(tab, id, text, zeny, items)| Event::Mail { tab, id, text, zeny, items }),
                         0x09f2 | 0x09f4 => parse_take_ack(&data).map(|(id, _, result)| Event::MailTaken { items: opcode == 0x09f4, id, result }),

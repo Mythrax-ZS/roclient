@@ -577,7 +577,7 @@ impl Windows {
                                 *open = !*open;
                             }
                         }
-                        for (label, key, tip) in [("Mail", "x", "Alt+X"), ("Companions", "r", "Alt+R"), ("Achievements", "y", "Alt+Y"), ("Attendance", "j", "Alt+J")] {
+                        for (label, key, tip) in [("Chat Room", "k", "Alt+K"), ("Mail", "x", "Alt+X"), ("Companions", "r", "Alt+R"), ("Achievements", "y", "Alt+Y"), ("Attendance", "j", "Alt+J")] {
                             if ui.selectable_label(false, label).on_hover_text(tip).clicked() {
                                 self.menu_key = Some(key);
                             }

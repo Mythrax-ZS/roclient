@@ -20,6 +20,7 @@ mod refine;
 mod screens;
 mod ai;
 mod buffs;
+mod chatrooms;
 mod classic;
 mod companions;
 mod emotes;
@@ -808,6 +809,8 @@ struct App {
     companions: companions::Companions,
     /// RODEX mail.
     mailbox: mail::Mailbox,
+    /// Chat rooms.
+    rooms: chatrooms::ChatRooms,
     /// A companion window request, handled after the UI pass.
     companion_action: Option<companions::CompanionAction>,
     /// When the companion AI next checks distances.
@@ -1462,6 +1465,70 @@ impl App {
                 self.mailbox.sent(result);
                 if result == 0 {
                     self.send(ro_net::Command::Mail(ro_net::MailRequest::Open { refresh: true }));
+                }
+            }
+            RoomSign(room) => {
+                if room.owner == self.account_id {
+                    if let Some(inside) = self.rooms.inside.as_mut().filter(|r| r.0 == 0) {
+                        inside.0 = room.id;
+                    }
+                }
+                self.rooms.signs.insert(room.owner, room);
+            }
+            RoomGone(id) => self.rooms.signs.retain(|_, r| r.id != id),
+            RoomCreated(code) => {
+                if code == 0 {
+                    // The creator gets no member list: the room is just us, as owner.
+                    let me = self.hud.status.name.clone();
+                    self.rooms.inside = Some((0, vec![(true, me)]));
+                }
+                let msg = match code {
+                    0 => None,
+                    1 => Some("Too many chat rooms here."),
+                    _ => Some("You already have a chat room."),
+                };
+                if let Some(m) = msg {
+                    self.hud.push_chat(ro_net::ChatKind::System, m.into());
+                }
+            }
+            RoomRefused(code) => {
+                let msg = match code {
+                    0 => "The room is full.",
+                    1 => "Wrong password.",
+                    2 => "You were kicked from that room.",
+                    4 => "You don't have enough zeny to join.",
+                    5 => "Your level is too low for that room.",
+                    6 => "Your level is too high for that room.",
+                    7 => "Your job can't join that room.",
+                    _ => "",
+                };
+                if !msg.is_empty() {
+                    self.hud.push_chat(ro_net::ChatKind::System, msg.into());
+                }
+            }
+            RoomEntered { id, members } => self.rooms.inside = Some((id, members)),
+            RoomMember { joined, name, kicked } => {
+                let me = self.hud.status.name.clone();
+                if !joined && name == me {
+                    self.rooms.inside = None;
+                    if kicked {
+                        self.hud.push_chat(ro_net::ChatKind::System, "You were kicked from the chat room.".into());
+                    }
+                } else if let Some((_, members)) = self.rooms.inside.as_mut() {
+                    if joined {
+                        members.push((false, name.clone()));
+                        self.hud.push_chat(ro_net::ChatKind::System, format!("{name} joined the chat room."));
+                    } else {
+                        members.retain(|(_, n)| *n != name);
+                        self.hud.push_chat(ro_net::ChatKind::System, format!("{name} left the chat room."));
+                    }
+                }
+            }
+            RoomOwner(name) => {
+                if let Some((_, members)) = self.rooms.inside.as_mut() {
+                    for m in members.iter_mut() {
+                        m.0 = m.1 == name;
+                    }
                 }
             }
             Pet(info) => self.companions.pet = Some(info),
@@ -2663,6 +2730,10 @@ impl App {
             "b" => self.toggle_bank(),
             "c" => self.toggle_cash_shop(),
             "y" => self.progress.open = !self.progress.open,
+            "k" => {
+                let me = self.hud.status.name.clone();
+                self.rooms.open_create(&me);
+            }
             "x" => {
                 self.mailbox.open = !self.mailbox.open;
                 if self.mailbox.open {
@@ -3485,6 +3556,17 @@ impl App {
                         }
                         None
                     }
+                    // room:title creates a public chat room; joinroom joins the first one in sight.
+                    Some(("room", title)) => {
+                        self.send(ro_net::Command::ChatRoom(ro_net::ChatRoomRequest::Create { title: title.into(), limit: 10, public: true, password: String::new(), change: false }));
+                        None
+                    }
+                    Some(("joinroom", _)) => {
+                        if let Some(id) = self.rooms.signs.values().next().map(|r| r.id) {
+                            self.send(ro_net::Command::ChatRoom(ro_net::ChatRoomRequest::Join { id, password: String::new() }));
+                        }
+                        None
+                    }
                     // altkey:x presses Alt+x.
                     Some(("altkey", k)) => {
                         self.alt_key(k);
@@ -3905,6 +3987,12 @@ impl App {
             .keys()
             .filter_map(|id| { let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) }?; Some((*id, r.project(m.actor.pos + glam::Vec3::Y * ro_render::CELL * 3.2, size)?)) })
             .collect();
+        let room_signs: Vec<(u32, glam::Vec2)> = self
+            .rooms
+            .signs
+            .keys()
+            .filter_map(|id| { let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) }?; Some((*id, r.project(m.actor.pos + glam::Vec3::Y * ro_render::CELL * 3.2, size)?)) })
+            .collect();
         let buy_signs: Vec<(u32, glam::Vec2)> = self
             .stores
             .signs
@@ -4107,6 +4195,10 @@ impl App {
                 }
                 for req in self.mailbox.show(ui.ctx(), self.item_db.as_ref(), &self.icons, self.hud.status.zeny) {
                     self.queued_commands.push(ro_net::Command::Mail(req));
+                }
+                let me = self.hud.status.name.clone();
+                for req in self.rooms.show(ui.ctx(), &me).into_iter().chain(self.rooms.show_signs(ui.ctx(), &room_signs)) {
+                    self.queued_commands.push(ro_net::Command::ChatRoom(req));
                 }
                 if let Some(req) = self.progress.show(ui.ctx(), self.item_db.as_ref(), &self.icons) {
                     self.queued_commands.push(ro_net::Command::Progress(req));
@@ -4630,6 +4722,7 @@ fn main() -> anyhow::Result<()> {
         progress: Default::default(),
         companions: Default::default(),
         mailbox: Default::default(),
+        rooms: Default::default(),
         companion_action: None,
         follow_at: std::time::Instant::now(),
         unit_jobs: Default::default(),
