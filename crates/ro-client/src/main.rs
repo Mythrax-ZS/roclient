@@ -25,6 +25,7 @@ use winit::{
 
 #[derive(Deserialize)]
 struct Config {
+    #[serde(default = "default_login_addr")]
     login_addr: String,
     username: String,
     password: String,
@@ -275,6 +276,26 @@ fn default_soak() -> u64 {
 
 fn default_backend() -> String {
     "vulkan".into()
+}
+
+fn default_login_addr() -> String {
+    "127.0.0.1:6900".into()
+}
+
+/// Accepts `host`, `host:port`, `[v6]` or `[v6]:port`; appends the default login port when absent.
+fn normalize_login_addr(s: &str) -> String {
+    let s = s.trim();
+    let has_port = match s.strip_prefix('[') {
+        Some(rest) => rest.split_once(']').is_some_and(|(_, tail)| tail.starts_with(':')),
+        None => s.matches(':').count() == 1,
+    };
+    if has_port {
+        s.into()
+    } else if s.contains(':') && !s.starts_with('[') {
+        format!("[{s}]:6900") // bare IPv6
+    } else {
+        format!("{s}:6900")
+    }
 }
 
 fn load_config() -> anyhow::Result<Config> {
@@ -3017,10 +3038,14 @@ fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
-    let cfg = load_config()?;
+    let mut cfg = load_config()?;
     // `--map name` / `--at x,y` override the preview map and cell.
     let args: Vec<String> = std::env::args().collect();
     let arg = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+    // `--login <addr>` / `--login-addr <addr>` beat the config (local or LAN server).
+    cfg.login_addr = normalize_login_addr(&arg("--login").or_else(|| arg("--login-addr")).unwrap_or(cfg.login_addr));
+    println!("Login server: {}", cfg.login_addr);
+    tracing::info!(login_addr = %cfg.login_addr, "connecting to login server");
 
     if std::env::args().any(|a| a == "--headless") {
         let rt = tokio::runtime::Runtime::new()?;
@@ -3198,5 +3223,22 @@ fn attack_group(r: &ro_render::Renderer, a: &ro_render::Actor) -> usize {
     match a.weapon.first() {
         Some(&w) if !r.action_visible(w, 10) && r.action_visible(w, 11) => 11,
         _ => 10,
+    }
+}
+
+#[cfg(test)]
+mod login_addr_tests {
+    use super::normalize_login_addr as n;
+
+    #[test]
+    fn normalizes() {
+        assert_eq!(n("127.0.0.1:6900"), "127.0.0.1:6900");
+        assert_eq!(n(" 192.168.1.50 "), "192.168.1.50:6900");
+        assert_eq!(n("192.168.1.50:6901"), "192.168.1.50:6901");
+        assert_eq!(n("myhost.lan"), "myhost.lan:6900");
+        assert_eq!(n("myhost.lan:7000"), "myhost.lan:7000");
+        assert_eq!(n("[::1]"), "[::1]:6900");
+        assert_eq!(n("[::1]:7000"), "[::1]:7000");
+        assert_eq!(n("::1"), "[::1]:6900");
     }
 }

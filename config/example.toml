@@ -1,4 +1,8 @@
 # Copy to config/local.toml (gitignored).
+# Login server: "host" or "host:port" (port defaults to 6900; key optional, defaults to 127.0.0.1:6900).
+#   Local server: "127.0.0.1:6900"
+#   LAN server:   "192.168.1.50" or "192.168.1.50:6900"
+# Override per run with:  --login <addr>  (or --login-addr <addr>)
 login_addr = "127.0.0.1:6900"
 username = "test"
 password = "test"
