@@ -41,7 +41,10 @@ pub fn parse_itemlist_normal(data: &[u8]) -> Vec<ItemData> {
             let cards = cards(&mut b);
             b.advance(4); // hire expire date
             let flags = b.get_u8();
-            ItemData { index, id, kind, amount, location: 0, equipped, refine: 0, identified: flags & 1 != 0, cards, look: 0 }
+            // Cards carry the slots they fit in where other items say what they occupy;
+            // a card is never worn.
+            let (location, equipped) = if kind == 6 { (0, 0) } else { (0, equipped) };
+            ItemData { index, id, kind, amount, location, equipped, refine: 0, identified: flags & 1 != 0, cards, look: 0 }
         })
         .collect()
 }
