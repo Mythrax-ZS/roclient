@@ -13,8 +13,8 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_MSG_COLOR, ZC_MSG_VALUE, ZC_MSG_SKILL, and every ZC_MSG id (was: only two)
 - [ ] ZC_SPECIALPOPUP, ZC_SKILLMSG
 - [ ] ZC_NOTIFY_EFFECT3, ZC_REMOVE_EFFECT, ZC_EQUIPMENT_EFFECT (hat effects)
-- [ ] ZC_NPC_MARKET_OPEN / PURCHASE_RESULT (market shops)
-- [ ] ZC_NPC_BARTER_MARKET_ITEMINFO / EXPANDED_BARTER (barter shops)
+- [x] ZC_NPC_MARKET_OPEN / PURCHASE_RESULT (market shops)
+- [x] ZC_NPC_BARTER_MARKET_ITEMINFO / EXPANDED_BARTER (barter shops)
 - [ ] ZC_STYLE_CHANGE_RES (stylist), ZC_DRESSROOM_OPEN
 - [ ] ZC_ADD_SKILL, ZC_SKILLINFO_UPDATE2, ZC_SKILLINFO_DELETE (`skill` / `bonus_script` skills)
 - [ ] ZC_UI_OPEN2 / V3, ZC_OPEN_REFORM_UI / ITEM_REFORM_ACK, ZC_RESPONSE_ENCHANT

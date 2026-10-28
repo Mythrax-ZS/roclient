@@ -11,6 +11,7 @@ pub mod generated;
 pub mod guild;
 pub mod items;
 pub mod mail;
+pub mod market;
 pub mod menus;
 pub mod merchant;
 pub mod quests;

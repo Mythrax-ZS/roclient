@@ -22,6 +22,7 @@ mod ai;
 mod booking;
 mod battle;
 mod clan;
+mod market;
 mod customdata;
 mod navigation;
 mod grade;
@@ -817,6 +818,9 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    market: market::Market,
+    /// Test hook: a market purchase to make once a shop opens.
+    market_buy: Option<(usize, u32)>,
     battle: battle::Battle,
     navi: navigation::Navigation,
     /// A walk the navigation window asked for (done outside the UI pass).
@@ -1037,6 +1041,13 @@ impl App {
             mob.name = self.hud.status.name.clone();
             mob.look = Some(look.clone());
             self.player = Some(mob);
+        }
+    }
+
+    fn market_test_buy(&mut self) {
+        tracing::info!(pending = ?self.market_buy, "market test buy");
+        if let Some(r) = self.market_buy.take().and_then(|(row, n)| self.market.test_buy(row, n)) {
+            self.send(ro_net::Command::Market(r));
         }
     }
 
@@ -1531,6 +1542,24 @@ impl App {
             CastleTeleport(r) => {
                 let why = if r == 1 { "You don't have enough zeny to teleport to the castle." } else { "You can't teleport to the castle right now." };
                 self.hud.push_chat(ro_net::ChatKind::System, why.into());
+            }
+            Market(items) => {
+                self.market.open(market::Shop::Market(items));
+                self.market_test_buy();
+            }
+            MarketResult { ok, bought } => {
+                self.market.status = if ok { "Thank you for your purchase.".into() } else { "The purchase failed.".into() };
+                if let Some(market::Shop::Market(items)) = self.market.shop.as_mut() {
+                    for (item, n, _) in bought {
+                        if let Some(it) = items.iter_mut().find(|i| i.item == item) {
+                            it.stock = it.stock.saturating_sub(n as u32);
+                        }
+                    }
+                }
+            }
+            Barter { items, expanded } => {
+                self.market.open(market::Shop::Barter { items, expanded });
+                self.market_test_buy();
             }
             ClanLeft => {
                 self.clan.left();
@@ -3779,6 +3808,17 @@ impl App {
                         self.battle.auto_accept = true;
                         None
                     }
+                    // mbuy:row:n buys from an open market or barter shop.
+                    Some(("mbuy", spec)) => {
+                        let f: Vec<u32> = spec.split(':').filter_map(|v| v.parse().ok()).collect();
+                        if let (Some(row), Some(n)) = (f.first(), f.get(1)) {
+                            self.market_buy = Some((*row as usize, *n));
+                            if self.market.shop.is_some() {
+                                self.market_test_buy();
+                            }
+                        }
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -4560,6 +4600,12 @@ impl App {
                     v
                 };
                 self.clan.show(ui.ctx());
+                {
+                    let inv = &self.inventory;
+                    let have = |id: u32| inv.items.values().filter(|i| i.id == id && i.equipped == 0).map(|i| i.amount as u32).sum::<u32>();
+                    let reqs = self.market.show(ui.ctx(), self.item_db.as_ref(), &self.icons, self.hud.status.zeny, &have);
+                    self.queued_commands.extend(reqs.into_iter().map(ro_net::Command::Market));
+                }
                 let (bg_reqs, castle_reqs) = self.battle.show(ui.ctx(), self.hud.status.base_level.max(0) as u32);
                 self.queued_commands.extend(bg_reqs.into_iter().map(ro_net::Command::Bg).chain(castle_reqs.into_iter().map(ro_net::Command::Castle)));
                 if let Some(navigation::NaviAction::Walk(x, y)) = self.navi.show(ui.ctx(), &map_name) {
@@ -5131,6 +5177,8 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        market: Default::default(),
+        market_buy: None,
         battle: Default::default(),
         navi: Default::default(),
         navi_walk: None,

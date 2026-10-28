@@ -19,6 +19,7 @@ use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
 pub use ro_proto::quests::{Objective, Quest};
 pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, MerchantRequest, VendItem, WantedItem};
+pub use ro_proto::market::{BarterItem, MarketItem, MarketRequest};
 pub use ro_proto::bg::{apply_error as bg_apply_error, BgEvent, BgRequest, CastleRequest};
 pub use ro_proto::refine::{GradeOptions, GradeRequest, RefineOption, RefineRequest};
 use ro_proto::refine::*;
@@ -371,6 +372,11 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// An NPC market shop opened (limited stock).
+    Market(Vec<MarketItem>),
+    MarketResult { ok: bool, bought: Vec<(u32, u16, u32)> },
+    /// A barter shop opened (expanded: costs zeny and several items).
+    Barter { items: Vec<BarterItem>, expanded: bool },
     /// ZC_SOUND (soundeffect): datawav file, act 0 once, 1 loop, 2 stop.
     Sound { name: String, act: u8 },
     /// ZC_PLAY_NPC_BGM (playBGM).
@@ -508,6 +514,7 @@ pub enum Command {
     Grade(GradeRequest),
     Bg(BgRequest),
     Castle(CastleRequest),
+    Market(MarketRequest),
     Bank(BankRequest),
     BuyingStore(BuyingStoreRequest),
     CashShop(CashShopRequest),
@@ -653,6 +660,7 @@ impl MapSession {
                     Some(Command::Grade(r)) => self.send(r).await?,
                     Some(Command::Bg(r)) => self.send(r).await?,
                     Some(Command::Castle(r)) => self.send(r).await?,
+                    Some(Command::Market(r)) => self.send(r).await?,
                     Some(Command::Bank(r)) => self.send(r).await?,
                     Some(Command::BuyingStore(r)) => self.send(r).await?,
                     Some(Command::CashShop(r)) => self.send(r).await?,
@@ -759,6 +767,10 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0b7a => Some(Event::Market(ro_proto::market::parse_market(&data))),
+                        0x0b4e => ro_proto::market::parse_market_result(&data).map(|(ok, bought)| Event::MarketResult { ok, bought }),
+                        0x0b78 => Some(Event::Barter { items: ro_proto::market::parse_barter(&data), expanded: false }),
+                        0x0b79 => Some(Event::Barter { items: ro_proto::market::parse_barter_expanded(&data), expanded: true }),
                         0x01d3 if data.len() >= 35 => Some(Event::Sound { name: ro_proto::packets::get_fixed_str(&mut &data[2..26], 24), act: data[26] }),
                         0x0b8c if data.len() >= 5 => {
                             let raw = &data[5..];
