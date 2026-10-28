@@ -102,6 +102,7 @@ pub fn visuals() -> egui::Visuals {
 /// Shows an egui window; in Classic, dressed with the original title bar (blue gradient,
 /// title, round close button) painted over egui's own.
 pub fn show<R>(ctx: &egui::Context, window: egui::Window<'_>, title: &str, closable: bool, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<egui::InnerResponse<Option<R>>> {
+    let window = if CASCADE.contains(&title) { window.default_pos(cascade(title)) } else { window };
     let out = window.show(ctx, body)?;
     if let Some(skin) = skin(ctx) {
         let style = ctx.global_style();
@@ -213,4 +214,16 @@ impl Skin {
         ui.painter().galley(r.center() - galley.size() / 2.0, galley, TEXT);
         resp
     }
+}
+
+/// Windows with no place of their own: they open spread out instead of all on one spot.
+const CASCADE: [&str; 21] = [
+    "Battle", "Room password", "Create Chat Room", "Clan", "Enchant", "Game Options", "Merge Items", "Navigation", "Attendance", "Quests", "Ranking",
+    "Item Reform", "Reputation", "Settings", "Store Search", "Stylist", "Dressing Room", "Market", "Trade", "Bank", "Cash Shop",
+];
+
+/// A starting position from the title, on a grid over the middle of the screen.
+fn cascade(title: &str) -> egui::Pos2 {
+    let h = title.bytes().fold(7u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+    egui::pos2(380.0 + (h % 5) as f32 * 110.0, 110.0 + ((h / 5) % 4) as f32 * 70.0)
 }
