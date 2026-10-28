@@ -53,7 +53,11 @@ pub struct Front {
     summoner: bool,
     /// Preview textures by look.
     previews: HashMap<String, Option<egui::TextureHandle>>,
+    /// The original login panel art (loaded once Classic is seen).
+    login_art: Option<HashMap<&'static str, egui::TextureHandle>>,
 }
+
+const LOGIN_ART: [&str; 7] = ["win_login", "btn_connect", "btn_connect_a", "btn_exit", "btn_exit_a", "chk_saveon", "chk_saveoff"];
 
 /// What the screens need from the client.
 pub struct Ctx<'a> {
@@ -96,7 +100,74 @@ impl Front {
             hair_color: 0,
             summoner: false,
             previews: HashMap::new(),
+            login_art: None,
         }
+    }
+
+    /// The original LogOn panel: the art at its own size, the two fields over its boxes,
+    /// "save" check and Connect / Exit in the bottom strip. None without the art.
+    fn classic_login(&mut self, ctx: &egui::Context, c: &Ctx, at: egui::Pos2) -> Option<Option<Action>> {
+        if self.login_art.is_none() {
+            let vfs = c.vfs?;
+            let dir = r"data\texture\유저인터페이스\login_interface";
+            self.login_art = Some(LOGIN_ART.iter().filter_map(|n| Some((*n, crate::load_texture(ctx, vfs, &format!(r"{dir}\{n}.bmp"))?))).collect());
+        }
+        let art = self.login_art.as_ref()?;
+        let bg = art.get("win_login")?;
+        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        let mut action = None;
+        egui::Area::new(egui::Id::unique("classic_login")).fixed_pos(at - bg.size_vec2() / 2.0).show(ctx, |ui| {
+            let (area, _) = ui.allocate_exact_size(bg.size_vec2(), egui::Sense::hover());
+            let p = ui.painter().clone();
+            p.image(bg.id(), area, uv, Color32::WHITE);
+            let field = |y: f32| egui::Rect::from_min_size(area.min + Vec2::new(93.0, y), Vec2::new(122.0, 15.0));
+            fn edit(s: &mut String, pw: bool) -> egui::TextEdit<'_> {
+                egui::TextEdit::singleline(s).password(pw).frame(egui::Frame::NONE).text_color(crate::classic::TEXT).font(egui::FontId::proportional(12.0)).margin(egui::Margin::symmetric(2, 1))
+            }
+            let id = ui.put(field(30.0), edit(&mut self.user, false));
+            if self.user.is_empty() && !ui.ctx().memory(|m| m.focused().is_some()) {
+                id.request_focus();
+            }
+            let pw = ui.put(field(62.0), edit(&mut self.pass, true));
+            if !self.user.is_empty() && self.pass.is_empty() && !ui.ctx().memory(|m| m.focused().is_some()) {
+                pw.request_focus();
+            }
+            let image_button = |ui: &mut egui::Ui, name: &str, hover: &str, at: egui::Pos2, salt: &str| {
+                let t = art.get(name)?;
+                let r = egui::Rect::from_min_size(at, t.size_vec2());
+                let resp = ui.interact(r, ui.scope_id().with(salt), egui::Sense::click());
+                let t = if resp.hovered() { art.get(hover).unwrap_or(t) } else { t };
+                p.image(t.id(), r, uv, Color32::WHITE);
+                Some(resp.clicked())
+            };
+            let save = if self.remember { "chk_saveon" } else { "chk_saveoff" };
+            if image_button(ui, save, save, area.min + Vec2::new(8.0, 101.0), "save") == Some(true) {
+                self.remember = !self.remember;
+            }
+            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let ok = !self.busy && !self.user.trim().is_empty() && !self.pass.is_empty();
+            if (image_button(ui, "btn_connect", "btn_connect_a", area.min + Vec2::new(186.0, 96.0), "connect") == Some(true) || enter) && ok {
+                self.busy = true;
+                self.message = Some(("Connecting...".into(), false));
+                action = Some(Action::Send(Command::Login { user: self.user.trim().to_string(), pass: self.pass.clone() }));
+            }
+            if image_button(ui, "btn_exit", "btn_exit_a", area.min + Vec2::new(232.0, 96.0), "exit") == Some(true) {
+                action = Some(Action::Quit);
+            }
+            // No art for registering: a small link under the panel, with any message.
+            let below = egui::Rect::from_min_size(egui::pos2(area.min.x, area.max.y + 4.0), Vec2::new(area.width(), 60.0));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(below), |ui| egui::Frame::NONE.fill(Color32::from_black_alpha(170)).corner_radius(3).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+                ui.set_width(area.width() - 12.0);
+                if ui.link(RichText::new("Create account").size(11.0).color(Color32::WHITE)).clicked() {
+                    self.message = None;
+                    self.screen = Screen::Register;
+                }
+                if let Some((text, err)) = &self.message {
+                    ui.label(RichText::new(text).color(if *err { Color32::from_rgb(255, 120, 120) } else { Color32::WHITE }));
+                }
+            }));
+        });
+        Some(action)
     }
 
     /// Test hook: open character creation on the first empty slot.
@@ -230,6 +301,12 @@ impl Front {
         let below_logo = ctx.content_rect().height() * 0.2;
         let window = |title: &str| egui::Window::new(title).collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, below_logo));
         match &self.screen {
+            Screen::Login if crate::classic::skin(ctx).is_some() && c.vfs.is_some() => {
+                let at = ctx.content_rect().center() + Vec2::new(0.0, below_logo);
+                if let Some(a) = self.classic_login(ctx, c, at) {
+                    action = a;
+                }
+            }
             Screen::Login => {
                 crate::classic::show(ctx, window("Login"), "Login", false, |ui| {
                     ui.set_width(300.0);
