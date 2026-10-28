@@ -16,6 +16,7 @@ pub mod menus;
 pub mod merchant;
 pub mod quests;
 pub mod refine;
+pub mod search;
 pub mod packets;
 pub mod progress;
 pub mod social;

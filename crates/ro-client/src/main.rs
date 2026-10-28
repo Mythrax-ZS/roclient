@@ -22,6 +22,7 @@ mod ai;
 mod booking;
 mod battle;
 mod clan;
+mod storesearch;
 mod stylist;
 mod reform;
 mod enchant;
@@ -827,6 +828,7 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    store_search: storesearch::StoreSearch,
     stylist: stylist::Stylist,
     reform: reform::Reform,
     enchant: enchant::Enchant,
@@ -2539,6 +2541,13 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            SearchOpen(uses) => self.store_search.opened(uses),
+            SearchResults { first, more, uses, found } => self.store_search.results(first, more, uses, found),
+            SearchFailed(r) => self.store_search.failed(r),
+            SearchAt(x, y) => {
+                self.viewpoints.insert((0, 250), ((x as f32, y as f32), egui::Color32::from_rgb(255, 200, 60), Some(std::time::Instant::now() + std::time::Duration::from_secs(30))));
+                self.hud.push_chat(ro_net::ChatKind::System, format!("The shop is at ({x}, {y}), marked on the minimap."));
+            }
             DressRoom => {
                 let (hair, color) = self.player.as_ref().and_then(|p| p.look.as_ref()).map_or((1, 0), |l| (l.hair, l.hair_color));
                 self.stylist.open(hair, color, 0);
@@ -3981,6 +3990,17 @@ impl App {
                         self.queued_commands.push(ro_net::Command::Style(ro_net::StyleRequest::Buy { hair_color: o.hair_color, hair: o.hair, clothes_color: o.clothes_color }));
                         None
                     }
+                    Some(("ssearch", id)) => {
+                        let r = self.store_search.test_search(id.parse().unwrap_or(0));
+                        self.queued_commands.push(ro_net::Command::Search(r));
+                        None
+                    }
+                    Some(("sclick", _)) => {
+                        if let Some(f) = self.store_search.results.first() {
+                            self.queued_commands.push(ro_net::Command::Search(ro_net::SearchRequest::Click { owner: f.owner, store: f.store, item: f.item }));
+                        }
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -4793,6 +4813,9 @@ impl App {
                     v
                 };
                 self.clan.show(ui.ctx());
+                for r in self.store_search.show(ui.ctx(), self.item_db.as_ref(), &self.icons) {
+                    self.queued_commands.push(ro_net::Command::Search(r));
+                }
                 {
                     let base = self.portrait.as_ref().map(|p| p.0.clone());
                     match self.stylist.show(ui.ctx(), self.vfs.as_ref(), base) {
@@ -5392,6 +5415,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        store_search: Default::default(),
         stylist: Default::default(),
         reform: Default::default(),
         enchant: Default::default(),

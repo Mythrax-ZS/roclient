@@ -19,6 +19,7 @@ use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
 pub use ro_proto::quests::{Objective, Quest};
 pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, MerchantRequest, VendItem, WantedItem};
+pub use ro_proto::search::{Found, SearchRequest};
 pub use ro_proto::market::{BarterItem, MarketItem, MarketRequest};
 pub use ro_proto::bg::{apply_error as bg_apply_error, BgEvent, BgRequest, CastleRequest};
 pub use ro_proto::refine::{EnchantRequest, ReformRequest, GradeOptions, GradeRequest, RefineOption, RefineRequest};
@@ -372,6 +373,11 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// Store search: opened (uses left), results, a failure, a shop located.
+    SearchOpen(u8),
+    SearchResults { first: bool, more: bool, uses: u8, found: Vec<Found> },
+    SearchFailed(u8),
+    SearchAt(u16, u16),
     /// ZC_DRESSROOM_OPEN.
     DressRoom,
     /// ZC_STYLE_CHANGE_RES: true when the stylist refused.
@@ -553,6 +559,7 @@ pub enum Command {
     Castle(CastleRequest),
     Style(StyleRequest),
     Market(MarketRequest),
+    Search(SearchRequest),
     Bank(BankRequest),
     BuyingStore(BuyingStoreRequest),
     CashShop(CashShopRequest),
@@ -703,6 +710,7 @@ impl MapSession {
                     Some(Command::Castle(r)) => self.send(r).await?,
                     Some(Command::Style(r)) => self.send(r).await?,
                     Some(Command::Market(r)) => self.send(r).await?,
+                    Some(Command::Search(r)) => self.send(r).await?,
                     Some(Command::Bank(r)) => self.send(r).await?,
                     Some(Command::BuyingStore(r)) => self.send(r).await?,
                     Some(Command::CashShop(r)) => self.send(r).await?,
@@ -809,6 +817,10 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x083a if data.len() >= 5 => Some(Event::SearchOpen(data[4])),
+                        0x0b64 => ro_proto::search::parse_results(&data).map(|(first, more, uses, found)| Event::SearchResults { first, more, uses, found }),
+                        0x0837 if data.len() >= 3 => Some(Event::SearchFailed(data[2])),
+                        0x083d if data.len() >= 6 => Some(Event::SearchAt(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0a02 => Some(Event::DressRoom),
                         0x0a47 if data.len() >= 3 => Some(Event::StyleResult(data[2] != 0)),
                         0x0b8f if data.len() >= 6 => Some(Event::ReformOpen(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),

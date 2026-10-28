@@ -60,6 +60,13 @@ impl ItemDb {
         self.items.extend(items);
     }
 
+    /// Item ids whose name contains `q` (lower-case), shortest names first.
+    pub fn search(&self, q: &str) -> Vec<u32> {
+        let mut v: Vec<(usize, u32)> = self.items.iter().filter(|(_, i)| i.name.to_lowercase().contains(q)).map(|(id, i)| (i.name.len(), *id)).collect();
+        v.sort_unstable();
+        v.into_iter().map(|(_, id)| id).collect()
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }
