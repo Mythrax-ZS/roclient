@@ -1965,7 +1965,28 @@ impl App {
     /// Plays a skill's effect at `pos`, if it has one.
     /// Plays a skill's effect at `pos`: its known visual, else an STR named after the skill
     /// (AS_SONICBLOW -> sonicblow.str), else a generic hit (damage) or light (support).
+    /// Weapon sound family of a player unit (None for monsters and NPCs).
+    fn weapon_sound(&self, id: u32) -> Option<&'static str> {
+        let m = if id == self.account_id { self.player.as_ref() } else { self.units.get(&id) }?;
+        let look = m.look.as_ref()?;
+        let view = self.item_db.as_ref().and_then(|d| d.get(look.gear.weapon)).map_or(look.gear.weapon, |i| i.view);
+        Some(audio::weapon_kind(self.look_tables.weapon(view).as_deref().filter(|_| look.gear.weapon != 0)))
+    }
+
+    fn play_sound(&self, name: &str) {
+        if let (Some(a), Some(vfs)) = (self.audio.as_ref(), self.vfs.as_ref()) {
+            a.play(vfs, name);
+        }
+    }
+
     fn skill_fx(&mut self, skill: u16, pos: Option<glam::Vec3>, damaging: bool) {
+        // The skill's own sound, when the client has one.
+        if let (Some(a), Some(vfs), Some(name)) = (self.audio.as_ref(), self.vfs.as_ref(), self.skill_names.internal(skill)) {
+            match a.skill_sound(name) {
+                Some(file) => a.play(vfs, &file),
+                None => tracing::debug!(skill, name, "no sound for skill"),
+            }
+        }
         let Some(pos) = pos else { return };
         let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
         match fx::skill_visual(skill) {
@@ -2287,6 +2308,15 @@ impl App {
             m.set_pose(Pose::Attack, act.src_speed as f32);
         }
         let damage = act.damage + act.left_damage;
+        // Players swing with their weapon's sound and land its hit sound; monsters' attacks
+        // sound through their animation frames (see the unit update).
+        if let Some(kind) = self.weapon_sound(act.src) {
+            self.play_sound(&format!("_attack_{kind}.wav"));
+            if damage > 0 {
+                let hit = if kind == "fist" { format!("_hit_fist{}.wav", act.src % 4 + 1) } else { format!("_hit_{kind}.wav") };
+                self.play_sound(&hit);
+            }
+        }
         if let Some(m) = self.mob_mut(act.target) {
             if damage > 0 && act.kind != 4 && act.kind != 9 {
                 if let Some(c) = src_cell {
@@ -3455,6 +3485,27 @@ fn main() -> anyhow::Result<()> {
                 tracing::warn!("skilldescript: {e:#}");
             }
         }
+    }
+    // `--sound-check`: list which classic skills have a sound file, then exit.
+    if args.iter().any(|a| a == "--sound-check") {
+        let (Some(vfs), true) = (app.vfs.as_ref(), true) else { return Ok(()) };
+        let Some(a) = audio::Audio::new(vfs, 0.0, 0.0) else { return Ok(()) };
+        const CLASSES: [&str; 19] = ["SM_", "MG_", "AL_", "AC_", "MC_", "TF_", "KN_", "PR_", "WZ_", "BS_", "HT_", "AS_", "CR_", "MO_", "SA_", "RG_", "AM_", "BA_", "DC_"];
+        let mut skills: Vec<(u16, &str)> = app.skill_names.all_ids().filter(|(_, n)| CLASSES.iter().any(|c| n.starts_with(c))).collect();
+        skills.sort();
+        let (mut hit, mut miss) = (vec![], vec![]);
+        for (_, n) in &skills {
+            match a.skill_sound(n) {
+                Some(f) => hit.push(format!("{n} -> {f}")),
+                None => miss.push(n.to_string()),
+            }
+        }
+        println!("{} with sound, {} without", hit.len(), miss.len());
+        println!("{}", hit.join("
+"));
+        println!("--- missing:
+{}", miss.join(" "));
+        return Ok(());
     }
     event_loop.run_app(&mut app)?;
     Ok(())

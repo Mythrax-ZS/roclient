@@ -55,6 +55,11 @@ impl SkillNames {
         Ok(())
     }
 
+    /// Every (id, internal name) pair known.
+    pub fn all_ids(&self) -> impl Iterator<Item = (u16, &str)> {
+        self.ids.iter().map(|(id, n)| (*id, n.as_str()))
+    }
+
     /// Internal name (e.g. AS_GRIMTOOTH) for a skill id.
     pub fn internal(&self, id: u16) -> Option<&str> {
         self.ids.get(&id).map(String::as_str)

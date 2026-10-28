@@ -13,6 +13,8 @@ pub struct Audio {
     playing: String,
     pub bgm_volume: f32,
     pub sfx_volume: f32,
+    /// Skill sounds (data/wav/effect/*.wav): lowercase file stem -> path below data/wav.
+    effects: HashMap<String, String>,
 }
 
 impl Audio {
@@ -23,7 +25,17 @@ impl Audio {
         let bgm = rodio::Player::connect_new(sink.mixer());
         bgm.set_volume(bgm_volume);
         let table = vfs.read("data\\mp3nametable.txt").ok().flatten().map(|d| parse_table(&d)).unwrap_or_default();
-        Some(Self { sink, bgm, table, playing: String::new(), bgm_volume, sfx_volume })
+        let effects = vfs
+            .grfs
+            .iter()
+            .flat_map(|g| g.names())
+            .filter_map(|n| {
+                let rest = n.strip_prefix(r"data\wav\effect\")?;
+                let stem = rest.strip_suffix(".wav")?;
+                Some((stem.to_ascii_lowercase(), format!(r"effect\{rest}")))
+            })
+            .collect();
+        Some(Self { sink, bgm, table, playing: String::new(), bgm_volume, sfx_volume, effects })
     }
 
     /// Switches to the map's track; keeps playing if it is already the current one.
@@ -90,3 +102,171 @@ Prt_Fild08.rsw#bgm\\12.mp3#
         assert_eq!(t.len(), 2);
     }
 }
+
+/// rAthena skill prefix -> the word the client's sound files use for that class.
+fn class_word(prefix: &str) -> Option<&'static str> {
+    Some(match prefix {
+        "SM" => "swordman",
+        "MG" => "magician",
+        "AL" => "acolyte",
+        "AC" => "archer",
+        "MC" => "merchant",
+        "TF" => "thief",
+        "KN" => "knight",
+        "PR" => "priest",
+        "WZ" => "wizard",
+        "BS" => "black",
+        "HT" => "hunter",
+        "AS" => "assasin",
+        "CR" => "cru",
+        "MO" => "monk",
+        "SA" => "sage",
+        "RG" => "rogue",
+        "AM" => "alche",
+        "BA" => "bard",
+        "DC" => "dancer",
+        _ => return None,
+    })
+}
+
+impl Audio {
+    /// The sound file for a skill (by internal name, e.g. AS_SONICBLOW), if the client has
+    /// one: tries the full name, the class word + skill (assasin_sonicblow) and the bare
+    /// skill name, with and without underscores.
+    pub fn skill_sound(&self, internal: &str) -> Option<String> {
+        let lower = internal.to_ascii_lowercase();
+        let (prefix, short) = internal.split_once('_').map_or(("", lower.as_str()), |(p, _)| (p, &lower[p.len() + 1..]));
+        if let Some(file) = SKILL_SOUNDS.iter().find(|(k, _)| *k == internal).map(|(_, f)| *f) {
+            // "_name" files sit in datawav itself, the rest in datawavffect.
+            return if file.starts_with('_') { Some(format!("{file}.wav")) } else { self.effects.get(file).cloned() };
+        }
+        let flat = short.replace('_', "");
+        let mut tries = vec![lower.clone(), short.to_string(), flat.clone(), format!("ef_{short}"), format!("ef_{flat}")];
+        if let Some(w) = class_word(prefix) {
+            for s in [short.to_string(), flat.clone()] {
+                tries.push(format!("{w}_{s}"));
+                tries.push(format!("{w}_{s}_a"));
+            }
+        }
+        tries.iter().find_map(|t| self.effects.get(t)).cloned()
+    }
+}
+
+/// Weapon sound family for a weapon sprite name (as in the look tables, e.g. "_단검").
+pub fn weapon_kind(sprite: Option<&str>) -> &'static str {
+    let s = sprite.unwrap_or("");
+    for (k, v) in [("카타르", "katar"), ("단검", "dagger"), ("도끼", "axe"), ("창", "spear"), ("활", "bow"), ("책", "book"), ("지팡이", "rod"), ("롯드", "rod"), ("메이스", "mace"), ("둔기", "mace"), ("검", "sword")] {
+        if s.contains(k) {
+            return v;
+        }
+    }
+    if s.is_empty() { "fist" } else { "sword" }
+}
+
+/// Skills whose sound file does not follow a naming pattern (file stems in wav\effect).
+const SKILL_SOUNDS: &[(&str, &str)] = &[
+    ("SM_BASH", "ef_bash"),
+    ("SM_MAGNUM", "ef_magnumbreak"),
+    ("SM_ENDURE", "ef_endure"),
+    ("SM_PROVOKE", "swordman_provoke"),
+    ("MG_NAPALMBEAT", "ef_napalmbeat"),
+    ("MG_SAFETYWALL", "ef_glasswall"),
+    ("MG_SOULSTRIKE", "ef_soulstrike"),
+    ("MG_COLDBOLT", "ef_icearrow"),
+    ("MG_FROSTDIVER", "ef_frostdiver"),
+    ("MG_STONECURSE", "ef_stonecurse"),
+    ("MG_FIREBALL", "ef_fireball"),
+    ("MG_FIREWALL", "ef_firewall"),
+    ("MG_FIREBOLT", "ef_firearrow"),
+    ("MG_LIGHTNINGBOLT", "ef_lightbolt"),
+    ("MG_THUNDERSTORM", "ef_thunderstorm"),
+    ("MG_SIGHT", "ef_sight"),
+    ("AL_RUWACH", "ef_ruwach"),
+    ("AL_PNEUMA", "ef_signum"),
+    ("AL_TELEPORT", "ef_teleportation"),
+    ("AL_WARP", "ef_readyportal"),
+    ("AL_HEAL", "_heal_effect"),
+    ("AL_INCAGI", "ef_incagility"),
+    ("AL_DECAGI", "ef_decagility"),
+    ("AL_HOLYWATER", "ef_aqua"),
+    ("AL_CRUCIS", "ef_signum"),
+    ("AL_ANGELUS", "ef_angelus"),
+    ("AL_BLESSING", "ef_blessing"),
+    ("AL_CURE", "acolyte_cure"),
+    ("MC_MAMMONITE", "ef_coin"),
+    ("AC_DOUBLE", "ef_hit2"),
+    ("AC_SHOWER", "ef_hit3"),
+    ("TF_STEAL", "ef_steal"),
+    ("TF_HIDING", "ef_hiding"),
+    ("TF_POISON", "ef_poisonattack"),
+    ("TF_DETOXIFY", "ef_detoxication"),
+    ("KN_PIERCE", "ef_hit4"),
+    ("KN_BRANDISHSPEAR", "knight_brandish_spear"),
+    ("KN_SPEARSTAB", "ef_hit5"),
+    ("KN_SPEARBOOMERANG", "knight_spear_boomerang"),
+    ("KN_BOWLINGBASH", "knight_bowling_bash"),
+    ("KN_AUTOCOUNTER", "knight_autocounter"),
+    ("KN_TWOHANDQUICKEN", "knight_twohandquicken"),
+    ("PR_KYRIE", "priest_kyrie_eleison_a"),
+    ("PR_TURNUNDEAD", "priest_turn_undead"),
+    ("PR_STRECOVERY", "priest_recovery"),
+    ("PR_SLOWPOISON", "priest_slowpoison"),
+    ("WZ_FIREPILLAR", "wizard_fire_pillar_a"),
+    ("WZ_FIREIVY", "wizard_fire_ivy"),
+    ("WZ_JUPITEL", "magician_thunderstorm"),
+    ("WZ_VERMILION", "magician_thunderstorm"),
+    ("WZ_WATERBALL", "wizard_waterball_chulung"),
+    ("WZ_FROSTNOVA", "ef_frostdiver2"),
+    ("WZ_HEAVENDRIVE", "wizard_earthspike"),
+    ("WZ_EARTHSPIKE", "wizard_earthspike"),
+    ("WZ_METEOR", "wizard_meteor"),
+    ("WZ_STORMGUST", "wizard_stormgust"),
+    ("WZ_ICEWALL", "wizard_icewall"),
+    ("WZ_QUAGMIRE", "wizard_quagmire"),
+    ("WZ_SIGHTRASHER", "wizard_sightrasher"),
+    ("BS_ADRENALINE", "black_adrenalinerush"),
+    ("BS_ADRENALINE2", "black_adrenalinerush"),
+    ("BS_WEAPONPERFECT", "black_weapon_perfection"),
+    ("BS_MAXIMIZE", "black_maximize_power_sword"),
+    ("BS_OVERTHRUST", "black_overthrust"),
+    ("BS_HAMMERFALL", "black_hammerfall"),
+    ("BS_REPAIRWEAPON", "black_weapon_repair"),
+    ("HT_SHOCKWAVE", "hunter_shockwavetrap"),
+    ("HT_TALKIEBOX", "hunter_talkiebox_a"),
+    ("AS_GRIMTOOTH", "ef_hit6"),
+    ("AS_SPLASHER", "assasin_venomsplasher"),
+    ("AS_ENCHANTPOISON", "assasin_enchantpoison"),
+    ("AS_VENOMKNIFE", "thief_invenom"),
+    ("MC_CARTREVOLUTION", "ef_hit3"),
+    ("AL_HOLYLIGHT", "ef_lightbolt"),
+    ("RG_STEALCOIN", "ef_coin"),
+    ("RG_INTIMIDATE", "rog_intimidate"),
+    ("RG_RAID", "ef_hit5"),
+    ("RG_BACKSTAP", "ef_hit6"),
+    ("CR_SHIELDCHARGE", "ef_hit4"),
+    ("CR_HOLYCROSS", "ef_hit5"),
+    ("CR_REFLECTSHIELD", "ef_endure"),
+    ("CR_AUTOGUARD", "ef_endure"),
+    ("CR_DEFENDER", "ef_endure"),
+    ("CR_PROVIDENCE", "ef_angel"),
+    ("CR_DEVOTION", "ef_angel"),
+    ("MO_TRIPLEATTACK", "ef_hit4"),
+    ("MO_CHAINCOMBO", "ef_hit5"),
+    ("MO_COMBOFINISH", "ef_hit6"),
+    ("MO_FINGEROFFENSIVE", "ef_hit4"),
+    ("MO_EXTREMITYFIST", "ef_hit6"),
+    ("MO_INVESTIGATE", "ef_hit5"),
+    ("AM_ACIDTERROR", "ef_poisonattack"),
+    ("AM_DEMONSTRATION", "ef_fireball"),
+    ("AM_POTIONPITCHER", "_heal_effect"),
+    ("SA_DISPELL", "ef_devil"),
+    ("SA_LANDPROTECTOR", "ef_signum"),
+    ("SA_VOLCANO", "ef_firewall"),
+    ("SA_DELUGE", "ef_aqua"),
+    ("SA_VIOLENTGALE", "ef_thunderstorm"),
+    ("SA_FLAMELAUNCHER", "ef_firearrow"),
+    ("SA_FROSTWEAPON", "ef_icearrow"),
+    ("SA_LIGHTNINGLOADER", "ef_lightbolt"),
+    ("SA_SEISMICWEAPON", "wizard_earthspike"),
+    ("SA_MAGICROD", "sage_magic"),
+];
