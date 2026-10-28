@@ -47,6 +47,28 @@ impl Walker {
         self.elapsed = 0.0;
     }
 
+    /// Follows a new path that starts at `from` without losing the current step: if `from`
+    /// is the cell we are leaving or the one we are heading to, the step in progress is
+    /// kept and the new path continues from it (no snap back when re-aiming a walk).
+    /// Returns false when `from` is elsewhere (the caller should place us there).
+    pub fn redirect(&mut self, from: (i32, i32), path: Vec<(i32, i32)>) -> bool {
+        match self.path.first().copied() {
+            Some(next) if next == from => {
+                self.path = std::iter::once(next).chain(path).collect();
+                true
+            }
+            Some(next) if self.cell == from && path.first() == Some(&next) => {
+                self.path = path;
+                true
+            }
+            _ if self.cell == from => {
+                self.walk(path);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Stops at a cell (server correction).
     pub fn stop_at(&mut self, cell: (i32, i32)) {
         self.cell = cell;

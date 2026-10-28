@@ -512,6 +512,8 @@ struct Mob {
     hp: Option<(i32, i32)>,
     /// Player-sprite appearance (None for NPCs and monsters).
     look: Option<Look>,
+    /// Drawn position (cells), eased toward the walker's.
+    smooth: Option<(f32, f32)>,
     /// Player attack motion: 10, or 11 for weapons drawn only there (katars).
     attack_group: usize,
     /// Length of the current timed pose, and how fast its animation must play to fit.
@@ -543,6 +545,7 @@ impl Mob {
             dying: None,
             hp: None,
             look: None,
+            smooth: None,
             attack_group: 10,
             pose_len: 0.0,
             anim_rate: 1.0,
@@ -609,9 +612,14 @@ impl Mob {
     fn walk(&mut self, gat: Option<&ro_formats::gat::Gat>, from: (u16, u16), to: (u16, u16)) {
         let from = (from.0 as i32, from.1 as i32);
         let to = (to.0 as i32, to.1 as i32);
-        self.walker.stop_at(from);
         match gat.and_then(|g| ro_game::path::find(g, from, to)) {
-            Some(path) => self.walker.walk(path),
+            // Continue smoothly when the new walk starts where we are (re-aimed walks).
+            Some(path) => {
+                if !self.walker.redirect(from, path.clone()) {
+                    self.walker.stop_at(from);
+                    self.walker.walk(path);
+                }
+            }
             None => self.walker.stop_at(to),
         }
     }
@@ -620,7 +628,17 @@ impl Mob {
     /// standing; facing is drawn relative to the camera's rotation (`octant`).
     fn update(&mut self, dt: f32, world: &World, octant: i32, idle_action: usize) -> ro_render::Actor {
         let was_walking = self.walker.is_walking();
-        let (fx, fy) = self.walker.update(dt);
+        let (wx, wy) = self.walker.update(dt);
+        // Ease the drawn position toward the logical one (exponential smoothing, ~50 ms), so
+        // corrections and re-aimed walks glide; big jumps (warps, knockback) snap.
+        let (fx, fy) = match self.smooth {
+            Some((sx, sy)) if (sx - wx).abs() + (sy - wy).abs() < 3.0 => {
+                let k = 1.0 - (-dt / 50.0).exp();
+                (sx + (wx - sx) * k, sy + (wy - sy) * k)
+            }
+            _ => (wx, wy),
+        };
+        self.smooth = Some((fx, fy));
         let walking = self.walker.is_walking();
         if walking != was_walking {
             self.actor.time_ms = 0.0; // restart the animation on start/stop
