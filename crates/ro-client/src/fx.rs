@@ -351,3 +351,23 @@ fn ef_str(effect: u32) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+/// Hat effects (ZC_EQUIPMENT_EFFECT ids) -> STR under data\texture\effect, from
+/// hateffectinfo\hateffectids.lub (id per name) and hateffectinfo.lub (file per name).
+pub fn hat_effects(vfs: &ro_vfs::Vfs) -> HashMap<u16, &'static str> {
+    const DIR: &str = r"data\luafiles514\lua files\hateffectinfo";
+    let load = |f: &str| vfs.read(&format!(r"{DIR}\{f}.lub")).ok().flatten().and_then(|d| ro_formats::lub::eval(&d).ok());
+    let (Some(ids), Some(info)) = (load("hateffectids"), load("hateffectinfo")) else { return HashMap::new() };
+    let (Some(id_tbl), Some(info_tbl)) = (ids.globals.get("HatEFID"), info.globals.get("hatEffectTable")) else { return HashMap::new() };
+    let mut out = HashMap::new();
+    for (name, id) in ids.entries(id_tbl) {
+        let (Some(name), Some(id)) = (name.as_str(), id.as_number()) else { continue };
+        let file = info.entries(info_tbl).iter().find(|(k, _)| k.as_str() == Some(name)).and_then(|(_, t)| info.field(t, "resourceFileName")).and_then(|v| v.as_str());
+        if let Some(file) = file {
+            let short: &'static str = Box::leak(file.trim_end_matches(".str").trim_end_matches(".STR").to_string().into_boxed_str());
+            out.insert(id as u16, short);
+        }
+    }
+    tracing::info!(count = out.len(), "hat effects");
+    out
+}

@@ -905,6 +905,9 @@ struct App {
     viewpoints: std::collections::HashMap<(u32, u8), ((f32, f32), egui::Color32, Option<std::time::Instant>)>,
     /// Party and guild members elsewhere on the map: id -> (cell, guild?).
     member_pos: std::collections::HashMap<u32, ((f32, f32), bool)>,
+    /// Hat effect files by id (hateffectinfo), and the ones playing: (unit, effect) -> fx tag.
+    hat_files: std::collections::HashMap<u16, &'static str>,
+    hat_fx: std::collections::HashMap<(u32, u16), u32>,
     /// Test hook (--npc-answers): replies to NPC dialog steps, in order.
     npc_answers: std::collections::VecDeque<String>,
     /// `--attack`: attack the nearest monster once one is in view (scripted test).
@@ -2509,6 +2512,23 @@ impl App {
             }
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
+            HatEffect { id, on, effects } => {
+                for e in effects {
+                    let key = (id, e);
+                    if on && !self.hat_fx.contains_key(&key) {
+                        let Some(name) = self.hat_files.get(&e).copied() else { continue };
+                        let tag = 0x7000_0000 + self.hat_fx.len() as u32 + 1 + (id & 0xffff) * 64;
+                        if let Some(pos) = self.unit_pos(id) {
+                            self.play_fx_tagged(name, pos, tag);
+                            self.hat_fx.insert(key, tag);
+                        }
+                    } else if !on {
+                        if let Some(tag) = self.hat_fx.remove(&key) {
+                            self.stop_fx(tag);
+                        }
+                    }
+                }
+            }
             NameAll { id, party, guild, rank } => {
                 let titles = (party, guild, rank);
                 if id == self.account_id {
@@ -4317,6 +4337,20 @@ impl App {
             self.navi.update(&map, me);
             self.battle.map_changed(&map);
         }
+        // Hat effects follow their wearer; they end when the wearer leaves view.
+        if !self.hat_fx.is_empty() {
+            let placed: Vec<(u32, Option<glam::Vec3>)> = self.hat_fx.iter().map(|((unit, _), tag)| (*tag, self.unit_pos(*unit))).collect();
+            let gone: std::collections::HashSet<u32> = placed.iter().filter(|(_, p)| p.is_none()).map(|(t, _)| *t).collect();
+            self.hat_fx.retain(|_, tag| !gone.contains(tag));
+            if let Some(r) = self.renderer.as_mut() {
+                for (tag, pos) in placed {
+                    match pos {
+                        Some(p) => r.effects.iter_mut().filter(|e| e.tag == tag).for_each(|e| e.pos = p),
+                        None => r.effects.retain(|e| e.tag != tag),
+                    }
+                }
+            }
+        }
         if let Some(cell) = self.navi_walk.take() {
             self.request_walk(cell);
         }
@@ -5322,6 +5356,8 @@ fn main() -> anyhow::Result<()> {
         talk_to: arg("--talk"),
         viewpoints: Default::default(),
         member_pos: Default::default(),
+        hat_files: Default::default(),
+        hat_fx: Default::default(),
         npc_answers: arg("--npc-answers").map(|s| s.split(',').map(str::to_string).collect()).unwrap_or_default(),
         auto_attack: args.iter().any(|a| a == "--attack"),
         units: Default::default(),
@@ -5355,6 +5391,7 @@ fn main() -> anyhow::Result<()> {
     };
     app.class_names = app.vfs.as_ref().map(load_class_names).unwrap_or_default();
     app.guild.client_dir = app.client_dir.clone();
+    app.hat_files = app.vfs.as_ref().map(fx::hat_effects).unwrap_or_default();
     app.ui_scale = app.settings.ui_scale;
     if args.iter().any(|a| matches!(a.as_str(), "--front-login" | "--front-create" | "--front-make" | "--front-start")) {
         app.queued_commands.push(ro_net::Command::Login { user: cfg_user.clone(), pass: cfg_pass.clone() });

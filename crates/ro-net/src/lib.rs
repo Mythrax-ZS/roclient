@@ -372,6 +372,8 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_EQUIPMENT_EFFECT: hat effects on (or off) a unit.
+    HatEffect { id: u32, on: bool, effects: Vec<u16> },
     /// ZC_ACK_REQNAMEALL: a player's party, guild and rank names.
     NameAll { id: u32, party: String, guild: String, rank: String },
     /// ZC_AUTORUN_SKILL: an item (itemskill) asks us to cast a skill: (id, target flags, level).
@@ -790,6 +792,7 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0a3b if data.len() >= 9 => Some(Event::HatEffect { id: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), on: data[8] != 0, effects: data[9..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect() }),
                         0x0a30 => ro_proto::social::parse_name_all(&data).map(|(id, _, party, guild, rank)| Event::NameAll { id, party, guild, rank }),
                         0x0147 if data.len() >= 10 => Some(Event::AutorunSkill { id: u16::from_le_bytes([data[2], data[3]]), target: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), level: u16::from_le_bytes([data[8], data[9]]) }),
                         0x0179 if data.len() >= 5 => match data[4] {
