@@ -2746,6 +2746,49 @@ impl App {
                     self.member_pos.insert(id, ((x as f32, y as f32), guild));
                 }
             }
+            SpecialPopup(id) => {
+                let popup = self.vfs.as_ref().and_then(|v| v.read(r"System\spopup.lub").ok().flatten()).and_then(|d| ro_formats::lub::eval(&d).ok()).and_then(|c| {
+                    let t = c.globals.get("popuptbl")?.clone();
+                    let e = &c.entries(&t).iter().find(|(k, _)| k.as_number() == Some(id as f64))?.1;
+                    let ui = c.field(e, "uitype").and_then(|v| v.as_number()).unwrap_or(0.0) as u8;
+                    let rgb = c.field(e, "textcolor").and_then(|v| v.as_number()).unwrap_or(16763904.0) as u32;
+                    let lines: Vec<String> = c.field(e, "Description").map_or(vec![], |d| c.entries(d).iter().filter_map(|(_, v)| v.as_str().map(str::to_string)).collect());
+                    Some((ui, egui::Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8), lines))
+                });
+                match popup {
+                    Some((ui, color, lines)) => {
+                        // uitype: 0 chat, 1 floating, 2 both.
+                        if ui != 1 {
+                            for l in &lines {
+                                self.hud.push_chat(ro_net::ChatKind::System, l.clone());
+                            }
+                        }
+                        if ui != 0 {
+                            self.hud.banner = Some((lines, color, std::time::Instant::now()));
+                        }
+                    }
+                    None => tracing::debug!(id, "special popup not in spopup.lub"),
+                }
+            }
+            SkillMsg(id) => {
+                let text = match id {
+                    0x15 => "All abnormal status effects have been removed.",
+                    0x16 => "You will be immune to abnormal status effects for the next minute.",
+                    0x17 => "Your Max HP will stay increased for the next minute.",
+                    0x18 => "Your Max SP will stay increased for the next minute.",
+                    0x19 => "All of your stats will stay increased for the next minute.",
+                    0x1c => "Your weapon will remain blessed with Holy power for the next minute.",
+                    0x1d => "Your armor will remain blessed with Holy power for the next minute.",
+                    0x1e => "Your Defense will stay increased for the next 10 seconds.",
+                    0x1f => "Your Attack strength will stay increased for the next minute.",
+                    0x20 => "Your Accuracy and Flee Rate will stay increased for the next minute.",
+                    0x28 => "Full Strip failed because of coating.",
+                    _ => "",
+                };
+                if !text.is_empty() {
+                    self.hud.push_chat(ro_net::ChatKind::System, text.into());
+                }
+            }
             ScriptEffect { id, effect } => {
                 if let Some(pos) = self.unit_pos(id) {
                     match (fx::script_effect(effect), fx::ef_skill(effect)) {

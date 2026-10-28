@@ -71,6 +71,8 @@ pub struct Hud {
     pub status: Status,
     /// Script overrides for the NPC dialog's layout; cleared when the dialog ends.
     pub dialog_layout: DialogLayout,
+    /// Floating notice across the upper screen (special popups): lines, colour, when shown.
+    pub banner: Option<(Vec<String>, Color32, std::time::Instant)>,
     chat: VecDeque<(ChatKind, String)>,
     input: String,
     /// Enter focuses the chat box; Enter again sends, Escape leaves.
@@ -496,6 +498,26 @@ impl Hud {
     /// Shows the NPC dialog and cutin; returns the player's answer.
     pub fn show_dialog(&mut self, ctx: &egui::Context, dialog: &mut Option<Dialog>, cutin: Option<&Cutin>) -> Option<(u32, ro_net::NpcReply)> {
         use ro_net::NpcReply;
+
+        if let Some((lines, color, at)) = &self.banner {
+            const SHOW: f32 = 6.0;
+            let t = at.elapsed().as_secs_f32();
+            if t > SHOW {
+                self.banner = None;
+            } else {
+                let alpha = ((SHOW - t) / 1.0).min(1.0);
+                egui::Area::new(egui::Id::unique("special popup")).order(egui::Order::Foreground).anchor(Align2::CENTER_TOP, Vec2::new(0.0, 140.0)).interactable(false).show(ctx, |ui| {
+                    Frame::new().fill(Color32::from_black_alpha((150.0 * alpha) as u8)).inner_margin(Margin::symmetric(18, 10)).corner_radius(CornerRadius::same(6)).show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            for l in lines {
+                                ui.label(RichText::new(l).size(16.0).strong().color(color.gamma_multiply(alpha)));
+                            }
+                        });
+                    });
+                });
+                ctx.request_repaint();
+            }
+        }
 
         if let Some(c) = cutin {
             let size = c.texture.size_vec2();

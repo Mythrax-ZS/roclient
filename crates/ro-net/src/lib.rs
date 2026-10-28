@@ -543,6 +543,10 @@ pub enum Event {
     UnitEffect { id: u32, effect: u32 },
     /// ZC_NOTIFY_EFFECT2 (specialeffect): an rAthena EF_* id on a unit.
     ScriptEffect { id: u32, effect: u32 },
+    /// ZC_SPECIALPOPUP: show System\spopup.lub entry `id` (map entry notices).
+    SpecialPopup(u32),
+    /// ZC_SKILLMSG: a skill notice (Gospel effects, Full Strip failing).
+    SkillMsg(u32),
     /// Login screen: refused (message for the player).
     LoginFailed(String),
     /// More than one server: (name, users) to pick from.
@@ -1195,6 +1199,8 @@ impl MapSession {
                             remain_ms: (opcode == 0x0983 && data.len() >= 17).then(|| i32::from_le_bytes([data[13], data[14], data[15], data[16]])).filter(|&ms| ms > 0).map(|ms| ms as u32),
                         }),
                         0x0148 => Some(Event::Resurrected(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x0bbe => Some(Event::SpecialPopup(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x0215 => Some(Event::SkillMsg(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x01f3 if data.len() >= 10 => Some(Event::ScriptEffect { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), effect: u32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
                         0x019b => {
                             let (id, effect) = parse_notify_effect(&data);
