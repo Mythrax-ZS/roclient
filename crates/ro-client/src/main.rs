@@ -3582,6 +3582,10 @@ impl App {
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some(("card", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::CardTargets(index)),
                     // refsel:item picks equipment in the refine window; refine:material refines it.
+                    Some(("equiptab", t)) => {
+                        self.windows.equip_tab = t.parse().unwrap_or(0);
+                        None
+                    }
                     Some(("viewequip", aid)) => {
                         aid.parse().ok().map(|aid| self.queued_commands.push(ro_net::Command::ViewEquip(aid)));
                         None

@@ -51,6 +51,8 @@ pub struct Windows {
     pub menu_key: Option<&'static str>,
     pub inventory: bool,
     pub equipment: bool,
+    /// Which equipment tab is showing (see EQUIP_TABS).
+    pub equip_tab: u8,
     pub stats: bool,
     pub skills: bool,
     /// Show skills as a plain list instead of the tree.
@@ -254,6 +256,31 @@ const SLOTS: [(u32, &str); 10] = [
     (0x008, "Accessory"),
     (0x080, "Accessory"),
 ];
+
+/// The equipment window's tabs: worn gear, costumes, shadow gear.
+const EQUIP_TABS: [&str; 3] = ["Equip", "Costume", "Shadow"];
+
+/// Moves costume and shadow slot bits onto the normal slot each one stands in for, so
+/// every tab can use the same layout; bits that belong to another tab are dropped.
+fn tab_bits(equipped: u32, tab: u8) -> u32 {
+    const COSTUME: [(u32, u32); 4] = [(0x400, 0x100), (0x800, 0x200), (0x1000, 0x001), (0x2000, 0x004)];
+    const SHADOW: [(u32, u32); 6] = [(0x10000, 0x010), (0x20000, 0x002), (0x40000, 0x020), (0x80000, 0x040), (0x100000, 0x008), (0x200000, 0x080)];
+    let map: &[(u32, u32)] = match tab {
+        0 => return equipped & 0x3ff,
+        1 => &COSTUME,
+        _ => &SHADOW,
+    };
+    map.iter().filter(|(from, _)| equipped & from != 0).fold(0, |acc, (_, to)| acc | to)
+}
+
+/// The slots a tab has (costumes have no weapon, armor, shoes or accessories).
+fn tab_slots(tab: u8) -> u32 {
+    match tab {
+        0 => 0x3ff,
+        1 => 0x100 | 0x200 | 0x001 | 0x004,
+        _ => 0x002 | 0x010 | 0x020 | 0x040 | 0x008 | 0x080,
+    }
+}
 
 const STAT_NAMES: [&str; 6] = ["STR", "AGI", "VIT", "INT", "DEX", "LUK"];
 
@@ -756,6 +783,8 @@ impl Windows {
             let mut open = true;
             let mut picked = None;
             let mut show_equip = None;
+            let tab = self.equip_tab;
+            let mut new_tab = None;
             skin.window(
                 ctx,
                 "Equipment",
@@ -777,11 +806,17 @@ impl Windows {
                     const LAYOUT: [(u32, bool, usize); 10] =
                         [(0x100, true, 0), (0x200, false, 0), (0x001, true, 1), (0x010, false, 1), (0x002, true, 2), (0x020, false, 2), (0x004, true, 3), (0x040, false, 3), (0x008, true, 4), (0x080, false, 4)];
                     for (bits, left, row) in LAYOUT {
-                        let Some(it) = v.items.iter().find(|it| it.equipped & bits != 0 && !used_acc.contains(&it.index)) else { continue };
+                        let y = area.min.y + 17.0 + row as f32 * 25.6;
+                        // Slots this tab lacks: blank the faint label.
+                        if bits & tab_slots(tab) == 0 {
+                            p.rect_filled(egui::Rect::from_min_max(egui::pos2(area.min.x + if left { 3.0 } else { 176.0 }, y - 10.0), egui::pos2(area.min.x + if left { 104.0 } else { 277.0 }, y + 10.0)), 0.0, Color32::WHITE);
+                            continue;
+                        }
+                        let Some(it) = v.items.iter().find(|it| tab_bits(it.equipped, tab) & bits != 0 && !used_acc.contains(&it.index)) else { continue };
                         if bits & 0x88 != 0 {
                             used_acc.push(it.index);
                         }
-                        let y = area.min.y + 17.0 + row as f32 * 25.6;
+
                         let icon_c = egui::pos2(area.min.x + if left { 17.0 } else { 263.0 }, y);
                         let icon = egui::Rect::from_center_size(icon_c, Vec2::splat(24.0));
                         if let Some(t) = v.icons.get(&it.id) {
@@ -809,6 +844,13 @@ impl Windows {
                     }
                 },
                 |ui| {
+                    ui.horizontal(|ui| {
+                        for (i, name) in EQUIP_TABS.iter().enumerate() {
+                            if ui.selectable_label(tab == i as u8, RichText::new(*name).size(11.0)).clicked() {
+                                new_tab = Some(i as u8);
+                            }
+                        }
+                    });
                     if let Some(mut on) = v.show_equip {
                         if ui.checkbox(&mut on, RichText::new("Let others view my equipment").size(11.0)).changed() {
                             show_equip = Some(on);
@@ -816,6 +858,9 @@ impl Windows {
                     }
                 },
             );
+            if let Some(t) = new_tab {
+                self.equip_tab = t;
+            }
             if picked.is_some() {
                 action = picked;
             }
@@ -835,10 +880,21 @@ impl Windows {
                 if let Some(t) = v.portrait {
                     ui.vertical_centered(|ui| ui.image((t.id(), Vec2::splat(120.0))));
                 }
+                ui.horizontal(|ui| {
+                    for (i, name) in EQUIP_TABS.iter().enumerate() {
+                        if ui.selectable_label(self.equip_tab == i as u8, *name).clicked() {
+                            self.equip_tab = i as u8;
+                        }
+                    }
+                });
+                ui.separator();
                 let mut used_acc = vec![];
                 egui::Grid::new("equip").num_columns(2).spacing(Vec2::new(8.0, 4.0)).show(ui, |ui| {
                     for (bits, label) in SLOTS {
-                        let worn = v.items.iter().find(|it| it.equipped & bits != 0 && !used_acc.contains(&it.index));
+                        if bits & tab_slots(self.equip_tab) == 0 {
+                            continue;
+                        }
+                        let worn = v.items.iter().find(|it| tab_bits(it.equipped, self.equip_tab) & bits != 0 && !used_acc.contains(&it.index));
                         if let Some(it) = worn {
                             if bits & 0x88 != 0 {
                                 used_acc.push(it.index);
@@ -853,6 +909,7 @@ impl Windows {
                             ui.label(item_name(v.db, it));
                         } else {
                             ui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::hover());
+                            let label = match self.equip_tab { 1 => format!("Costume {label}"), 2 => format!("Shadow {label}"), _ => label.to_string() };
                             ui.label(RichText::new(label).color(crate::classic::ink(Color32::GRAY)));
                         }
                         ui.end_row();
