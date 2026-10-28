@@ -450,6 +450,8 @@ impl Windows {
                     if v.skills.is_empty() {
                         ui.label(RichText::new("No skills").color(Color32::GRAY));
                     }
+                    // Long skill lists (3rd and 4th jobs) scroll instead of running off the screen.
+                    egui::ScrollArea::vertical().max_height(420.0).auto_shrink([false, true]).show(ui, |ui| {
                     egui::Grid::new("skills").num_columns(4).spacing(Vec2::new(8.0, 4.0)).show(ui, |ui| {
                         for s in v.skills {
                             let name = (v.skill_names)(&s.name);
@@ -466,6 +468,7 @@ impl Windows {
                             }
                             ui.end_row();
                         }
+                    });
                     });
                 } else {
                     // One tab per job tier, as in the original skill tree window.

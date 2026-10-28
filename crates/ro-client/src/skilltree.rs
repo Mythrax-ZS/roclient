@@ -10,6 +10,8 @@ pub const COLUMNS: u32 = 7;
 pub struct SkillTree {
     /// Job id -> (grid slot, internal skill name).
     views: HashMap<i16, Vec<(u32, String)>>,
+    /// Transcended 3rd jobs -> the regular 3rd job whose tree they share.
+    same_as: HashMap<i16, i16>,
     /// Job id -> the job it advanced from.
     parent: HashMap<i16, i16>,
 }
@@ -19,12 +21,18 @@ impl SkillTree {
         let inherit = ro_formats::lub::eval(inherit)?;
         let mut job_ids: HashMap<String, i16> = HashMap::new();
         let mut parent = HashMap::new();
+        let mut same_as = HashMap::new();
         for (name, table) in &inherit.globals {
             for (k, v) in inherit.entries(table) {
                 match name.as_str() {
                     "JOBID" => {
                         if let (Some(k), Some(v)) = (k.as_str(), v.as_number()) {
                             job_ids.insert(k.to_string(), v as i16);
+                        }
+                    }
+                    "JOB_INHERIT_LIST2" => {
+                        if let (Some(k), Some(v)) = (k.as_number(), v.as_number()) {
+                            same_as.insert(k as i16, v as i16);
                         }
                     }
                     "JOB_INHERIT_LIST" => {
@@ -52,7 +60,7 @@ impl SkillTree {
                 views.insert(id, slots);
             }
         }
-        Ok(Self { views, parent })
+        Ok(Self { views, same_as, parent })
     }
 
     /// The tabs for a job, first tier first: (job id, its grid).
@@ -60,7 +68,8 @@ impl SkillTree {
         let mut out = vec![];
         let mut j = job;
         for _ in 0..8 {
-            if let Some(v) = self.views.get(&j) {
+            let view = self.views.get(&j).map(|v| (j, v)).or_else(|| self.same_as.get(&j).and_then(|s| Some((*s, self.views.get(s)?))));
+            if let Some((j, v)) = view {
                 out.push((j, v.as_slice()));
             }
             match self.parent.get(&j) {
