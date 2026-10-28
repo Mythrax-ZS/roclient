@@ -12,6 +12,7 @@ mod iteminfo;
 mod jobs;
 mod merchant;
 mod preview;
+mod progress;
 mod quests;
 mod refine;
 mod screens;
@@ -760,8 +761,6 @@ struct App {
     item_db: Option<ro_game::items::ItemDb>,
     skill_names: ro_game::skills::SkillNames,
     skill_tree: skilltree::SkillTree,
-    /// Achievement id -> title (Systemchievement_list.lub).
-    achievements: std::collections::HashMap<u32, String>,
     inventory: ro_game::items::Inventory,
     /// Items on the ground, with their sprite.
     floor: std::collections::HashMap<u32, (ro_net::FloorItem, Option<ro_render::Actor>)>,
@@ -799,6 +798,8 @@ struct App {
     merchant: merchant::Merchant,
     /// Buying stores and the cash shop.
     stores: stores::Stores,
+    /// Achievements, titles and attendance.
+    progress: progress::Progress,
     /// The Classic interface art, loaded once the GRF is open.
     skin: Option<classic::Skin>,
     /// The item information / card illustration window.
@@ -1377,6 +1378,43 @@ impl App {
                     self.stores.mine = None;
                 }
                 self.hud.push_chat(ro_net::ChatKind::System, msg);
+            }
+            Achievements { rank, list } => {
+                self.progress.set_all(rank, list);
+                let ids = self.progress.item_ids();
+                self.load_icons_for(&ids);
+            }
+            AchievementUpdate { rank, ach } => {
+                if let Some(name) = self.progress.update(rank, ach) {
+                    self.hud.push_chat(ro_net::ChatKind::System, format!("Achievement complete: {name}"));
+                    self.play_sound("ui_achievement_complete.wav");
+                }
+            }
+            AchievementReward { failed, id } => {
+                if failed {
+                    self.hud.push_chat(ro_net::ChatKind::System, "The achievement reward couldn't be given.".into());
+                } else {
+                    self.progress.rewarded(id);
+                    self.hud.push_chat(ro_net::ChatKind::System, format!("Reward collected: {}", self.progress.name(id)));
+                }
+            }
+            TitleChanged { failed, id } => {
+                if !failed {
+                    self.progress.title = id;
+                    let msg = if id == 0 { "Title removed.".into() } else { format!("Title: {}", self.progress.title_name(id)) };
+                    self.hud.push_chat(ro_net::ChatKind::System, msg);
+                }
+            }
+            UiOpen { kind: 7, data } => {
+                if let Some(vfs) = self.vfs.as_ref() {
+                    self.progress.load_art(&self.egui_ctx, vfs);
+                }
+                self.progress.attendance = Some(data);
+            }
+            UiOpen { .. } => {}
+            Attendance(data) => {
+                self.progress.attendance = Some(data);
+                self.hud.push_chat(ro_net::ChatKind::System, format!("Attendance checked: day {}. Your reward was sent by mail.", data / 10));
             }
             CashShop { cash, kafra } => {
                 self.stores.cash = Some((cash, kafra));
@@ -1977,13 +2015,6 @@ impl App {
                 }
                 self.skill_fx(skill, self.cell_pos(cell), true);
             }
-            Achievement { id, completed } => {
-                if completed {
-                    let title = self.achievements.get(&id).cloned().unwrap_or_else(|| format!("#{id}"));
-                    self.hud.push_chat(ro_net::ChatKind::System, format!("Achievement complete: {title}"));
-                    self.play_sound("ui_achievement_complete.wav");
-                }
-            }
             UnitOption { id, option } => {
                 let me = id == self.account_id;
                 if let Some(m) = self.mob_mut(id) {
@@ -2486,6 +2517,13 @@ impl App {
             "w" => self.merchant.cart_open = !self.merchant.cart_open,
             "b" => self.toggle_bank(),
             "c" => self.toggle_cash_shop(),
+            "y" => self.progress.open = !self.progress.open,
+            "j" => {
+                tracing::info!(open = self.progress.attendance.is_some(), "attendance");
+                if self.progress.attendance.take().is_none() {
+                    self.queued_commands.push(ro_net::Command::Progress(ro_net::ProgressRequest::OpenAttendance));
+                }
+            }
             // Alt+1..Alt+0: the emote shortcuts.
             d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => {
                 if let Some((tx, _)) = self.net.as_ref() {
@@ -3135,6 +3173,11 @@ impl App {
                         }
                         None
                     }
+                    // altkey:x presses Alt+x.
+                    Some(("altkey", k)) => {
+                        self.alt_key(k);
+                        None
+                    }
                     // hover:x:y holds the UI pointer there (UI points), for tooltips.
                     Some(("hover", at)) => {
                         let f: Vec<f32> = at.split(':').filter_map(|v| v.parse().ok()).collect();
@@ -3383,7 +3426,7 @@ impl App {
         }
 
         self.update_room();
-        if let Some(key) = self.hud.menu_click.take() {
+        if let Some(key) = self.hud.menu_click.take().or_else(|| self.windows.menu_key.take()) {
             self.alt_key(key);
         }
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
@@ -3714,6 +3757,12 @@ impl App {
                     self.queued_commands.push(ro_net::Command::CashShop(req));
                 }
                 self.windows.cash_shown = self.stores.cash.is_some();
+                if let Some(req) = self.progress.show(ui.ctx(), self.item_db.as_ref(), &self.icons) {
+                    self.queued_commands.push(ro_net::Command::Progress(req));
+                }
+                if let Some(req) = self.progress.show_attendance(ui.ctx()) {
+                    self.queued_commands.push(ro_net::Command::Progress(req));
+                }
                 if let Some((quest, active)) = self.quests.show(ui.ctx()) {
                     self.queued_commands.push(ro_net::Command::QuestActive { quest, active });
                 }
@@ -4203,7 +4252,6 @@ fn main() -> anyhow::Result<()> {
         item_db: None,
         skill_names: Default::default(),
         skill_tree: Default::default(),
-        achievements: Default::default(),
         inventory: Default::default(),
         floor: Default::default(),
         stats: None,
@@ -4227,6 +4275,7 @@ fn main() -> anyhow::Result<()> {
         quests: Default::default(),
         merchant: Default::default(),
         stores: Default::default(),
+        progress: Default::default(),
         skin: None,
         item_info: Default::default(),
         refine: Default::default(),
@@ -4308,25 +4357,8 @@ fn main() -> anyhow::Result<()> {
         app.fx.index(vfs);
         app.buffs = buffs::Buffs::load(vfs);
         app.quests = quests::QuestLog::load(vfs);
+        app.progress = progress::Progress::load(vfs);
         app.item_info = iteminfo::ItemInfo::load(vfs);
-        // Achievement titles, for the "achievement complete" notice.
-        if let Some(d) = read(r"System\achievement_list.lub") {
-            match ro_formats::lub::eval(&d) {
-                Ok(c) => {
-                    for (name, table) in &c.globals {
-                        if name != "achievement_tbl" {
-                            continue;
-                        }
-                        for (id, entry) in c.entries(table) {
-                            if let (Some(id), Some(title)) = (id.as_number(), c.field(entry, "title").and_then(|t| t.as_str())) {
-                                app.achievements.insert(id as u32, title.to_string());
-                            }
-                        }
-                    }
-                }
-                Err(e) => tracing::warn!("achievement_list: {e:#}"),
-            }
-        }
         match read(r"System\iteminfo.lub").map(|d| ro_game::items::ItemDb::from_lub(&d)) {
             Some(Ok(db)) => {
                 tracing::info!(items = db.len(), "loaded item info");

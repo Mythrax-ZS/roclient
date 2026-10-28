@@ -44,6 +44,8 @@ pub struct Windows {
     /// The cash shop is open (it lives in `stores`), and its menu button was clicked.
     pub cash_shown: bool,
     pub cash_toggle: bool,
+    /// A menu-bar button standing for an Alt+key shortcut, handled by the app.
+    pub menu_key: Option<&'static str>,
     pub inventory: bool,
     pub equipment: bool,
     pub stats: bool,
@@ -562,6 +564,11 @@ impl Windows {
                         ] {
                             if ui.selectable_label(*open, label).on_hover_text(key).clicked() {
                                 *open = !*open;
+                            }
+                        }
+                        for (label, key, tip) in [("Achievements", "y", "Alt+Y"), ("Attendance", "j", "Alt+J")] {
+                            if ui.selectable_label(false, label).on_hover_text(tip).clicked() {
+                                self.menu_key = Some(key);
                             }
                         }
                         if ui.selectable_label(self.cash_shown, "Cash Shop").on_hover_text("Alt+C").clicked() {

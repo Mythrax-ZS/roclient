@@ -22,6 +22,8 @@ pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, M
 pub use ro_proto::refine::{RefineOption, RefineRequest};
 use ro_proto::refine::*;
 use ro_proto::merchant::*;
+pub use ro_proto::progress::{AchRank, Achievement, ProgressRequest};
+use ro_proto::progress::*;
 use ro_proto::quests::*;
 use ro_proto::menus::*;
 pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
@@ -327,6 +329,18 @@ pub enum Event {
     SoldToStore { index: u16, amount: u16, price: u32 },
     /// A buying store message (failure or closure).
     BuyStoreNotice(String),
+    /// Every achievement with its progress.
+    Achievements { rank: AchRank, list: Vec<Achievement> },
+    /// One achievement changed.
+    AchievementUpdate { rank: AchRank, ach: Achievement },
+    /// An achievement reward was (or was not) collected.
+    AchievementReward { failed: bool, id: u32 },
+    /// Changing title: (failed, title id).
+    TitleChanged { failed: bool, id: u32 },
+    /// The server opened a UI: (type, data); type 7 is attendance.
+    UiOpen { kind: u8, data: i32 },
+    /// Attendance after claiming: days * 10 + claimed today.
+    Attendance(i32),
     /// The cash shop opened: (cash points, kafra points).
     CashShop { cash: u32, kafra: u32 },
     /// One tab of the cash shop: (item id, price).
@@ -345,8 +359,6 @@ pub enum Event {
     Menu(Menu),
     /// ZC_ACK_REQMAKINGITEM: making an item (ok, item id).
     MakeResult { ok: bool, item: u32 },
-    /// ZC_ACH_UPDATE: an achievement's progress changed (id, now complete).
-    Achievement { id: u32, completed: bool },
     /// A lasting ground effect (Sanctuary, Fire Wall, traps...) appeared or ended.
     GroundEffect { id: u32, cell: (u16, u16), kind: u32 },
     GroundEffectGone(u32),
@@ -411,6 +423,7 @@ pub enum Command {
     Bank(BankRequest),
     BuyingStore(BuyingStoreRequest),
     CashShop(CashShopRequest),
+    Progress(ProgressRequest),
     /// Look at a player's equipment.
     ViewEquip(u32),
     /// Let others look at ours.
@@ -547,6 +560,7 @@ impl MapSession {
                     Some(Command::Bank(r)) => self.send(r).await?,
                     Some(Command::BuyingStore(r)) => self.send(r).await?,
                     Some(Command::CashShop(r)) => self.send(r).await?,
+                    Some(Command::Progress(r)) => self.send(r).await?,
                     Some(Command::ViewEquip(aid)) => self.send(CzViewEquip(aid)).await?,
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
@@ -726,6 +740,12 @@ impl MapSession {
                             7 => "The buyer can't pay for that.".into(),
                             _ => "The deal failed.".into(),
                         })),
+                        0x0a23 => parse_achievements(&data).map(|(rank, list)| Event::Achievements { rank, list }),
+                        0x0a24 => parse_achievement_update(&data).map(|(rank, ach)| Event::AchievementUpdate { rank, ach }),
+                        0x0a26 => parse_reward_ack(&data).map(|(failed, id)| Event::AchievementReward { failed, id }),
+                        0x0a2f => parse_title_ack(&data).map(|(failed, id)| Event::TitleChanged { failed, id }),
+                        0x0ae2 => parse_ui_open(&data).map(|(kind, data)| Event::UiOpen { kind, data }),
+                        0x0af0 => parse_attendance(&data).map(Event::Attendance),
                         0x0b6e => parse_cash_open(&data).map(|(cash, kafra)| Event::CashShop { cash, kafra }),
                         0x08ca => parse_cash_tab(&data).map(|(tab, items)| Event::CashTab { tab, items }),
                         0x0849 => parse_cash_result(&data).map(|(result, cash, kafra)| Event::CashResult { result, cash, kafra }),
@@ -811,10 +831,6 @@ impl MapSession {
                         0x043d if data.len() >= 8 => Some(Event::SkillCooldown { skill: u16::from_le_bytes([data[2], data[3]]), ms: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
                         0x01ad | 0x018d | 0x025a | 0x0abe | 0x0afb | 0x0177 | 0x0442 | 0x01a6 => parse_menu(opcode, &data).map(Event::Menu),
                         0x018f => parse_make_result(&data).map(|(ok, item)| Event::MakeResult { ok, item }),
-                        0x0a24 if data.len() >= 21 => Some(Event::Achievement {
-                            id: u32::from_le_bytes([data[16], data[17], data[18], data[19]]),
-                            completed: data[20] != 0,
-                        }),
                         0x0229 => {
                             let (id, option) = parse_state_change(&data);
                             Some(Event::UnitOption { id, option })
