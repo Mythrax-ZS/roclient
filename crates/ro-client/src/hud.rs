@@ -70,6 +70,20 @@ pub struct Hud {
     history: Vec<String>,
     /// Position while browsing history (None: editing a fresh line).
     recall: Option<usize>,
+    /// Controller input for the NPC dialog this frame, and the highlighted menu option.
+    pub pad_nav: Option<PadNav>,
+    menu_cursor: usize,
+    /// A controller is in use: keep the menu highlight visible.
+    pub pad_used: bool,
+}
+
+/// Dialog navigation from a controller.
+#[derive(Clone, Copy, PartialEq)]
+pub enum PadNav {
+    Up,
+    Down,
+    Confirm,
+    Cancel,
 }
 
 fn chat_color(kind: ChatKind) -> Color32 {
@@ -356,7 +370,8 @@ impl Hud {
                     }
                 });
                 ui.add_space(8.0);
-                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let nav = self.pad_nav.take();
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter)) || nav == Some(PadNav::Confirm);
                 match &mut d.mode {
                     DialogMode::Reading => {}
                     DialogMode::Next => {
@@ -368,23 +383,30 @@ impl Hud {
                     }
                     DialogMode::Close => {
                         ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 28.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Close").clicked() || enter {
+                            if ui.button("Close").clicked() || enter || nav == Some(PadNav::Cancel) {
                                 reply = Some(NpcReply::Close);
                             }
                         });
                     }
                     DialogMode::Menu(options) => {
                         // Empty options are hidden but keep their index.
-                        for (i, opt) in options.iter().enumerate() {
-                            if opt.is_empty() {
-                                continue;
-                            }
-                            let button = egui::Button::new(npc_text(opt, 13.5)).min_size(Vec2::new(ui.available_width(), 24.0));
-                            if ui.add(button).clicked() {
+                        let shown: Vec<usize> = (0..options.len()).filter(|&i| !options[i].is_empty()).collect();
+                        let mut at = shown.iter().position(|&i| i == self.menu_cursor).unwrap_or(0);
+                        match nav {
+                            Some(PadNav::Up) => at = at.saturating_sub(1),
+                            Some(PadNav::Down) => at = (at + 1).min(shown.len().saturating_sub(1)),
+                            _ => {}
+                        }
+                        self.menu_cursor = shown.get(at).copied().unwrap_or(0);
+                        for &i in &shown {
+                            let button = egui::Button::new(npc_text(&options[i], 13.5))
+                                .min_size(Vec2::new(ui.available_width(), 24.0))
+                                .selected(self.pad_used && i == self.menu_cursor);
+                            if ui.add(button).clicked() || (i == self.menu_cursor && nav == Some(PadNav::Confirm)) {
                                 reply = Some(NpcReply::Menu((i + 1).min(254) as u8));
                             }
                         }
-                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) || nav == Some(PadNav::Cancel) {
                             reply = Some(NpcReply::Menu(255));
                         }
                     }
@@ -410,6 +432,7 @@ impl Hud {
             });
 
         let reply = reply?;
+        self.menu_cursor = 0;
         let npc = d.npc;
         match reply {
             // Close ends the conversation; other answers wait for the script's next step.
@@ -453,4 +476,15 @@ pub fn show_minimap(ctx: &egui::Context, map: &Minimap, name: &str, me: (f32, f3
         }
         painter.text(pos, Align2::CENTER_BOTTOM, &text, font, Color32::WHITE);
     });
+}
+
+/// A bobbing arrow over the controller's target (orange while aiming a skill).
+pub fn target_marker(ctx: &egui::Context, feet: glam::Vec2, ppp: f32, aiming: bool) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let bob = (ctx.input(|i| i.time) * 5.0).sin() as f32 * 3.0;
+    let tip = egui::pos2(feet.x / ppp, feet.y / ppp - 112.0 + bob);
+    let color = if aiming { Color32::from_rgb(255, 150, 60) } else { Color32::from_rgb(255, 225, 90) };
+    let pts = vec![tip, tip + Vec2::new(-9.0, -12.0), tip + Vec2::new(9.0, -12.0)];
+    painter.add(egui::Shape::convex_polygon(pts, color, Stroke::new(1.5, Color32::BLACK)));
+    ctx.request_repaint();
 }

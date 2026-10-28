@@ -5,6 +5,7 @@
 
 mod audio;
 mod fx;
+mod gamepad;
 mod hud;
 mod settings;
 mod social;
@@ -363,6 +364,10 @@ const LONG_WALK_NODES: usize = 200_000;
 /// position can trail the client's by a cell or two when the next hop is sent.
 const WALK_HOP: usize = 12;
 
+/// Controller: how far (cells) targets are picked up, and how far ahead the stick walks.
+const PAD_REACH: i32 = 14;
+const PAD_STEP: i32 = 4;
+
 use windows::{HOTKEYS_PER_ROW, HOTKEY_ROWS};
 
 /// F1..F9 -> slot within the visible shortcut row.
@@ -622,6 +627,12 @@ struct App {
     fx: fx::FxLib,
     /// Sprite effects playing once: (actor, ms left).
     sprite_fx: Vec<(ro_render::Actor, f32)>,
+    pad: gamepad::Pad,
+    /// The unit the controller acts on (highlighted), the walk direction being held and
+    /// time until the walk is re-aimed.
+    pad_target: Option<u32>,
+    pad_dir: Option<glam::Vec2>,
+    pad_walk_ms: f32,
     /// `--fx name`: loop one STR effect on the player (effect previews).
     fx_test: Option<&'static str>,
     alt: bool,
@@ -1591,6 +1602,198 @@ impl App {
         }
     }
 
+    /// Units the controller can target, nearest first: monsters and named NPCs in reach.
+    fn pad_candidates(&self) -> Vec<u32> {
+        let Some(me) = self.player.as_ref().map(|p| p.walker.cell) else { return vec![] };
+        let mut v: Vec<(i32, u32)> = self
+            .units
+            .iter()
+            .filter(|(_, m)| m.dying.is_none() && (m.kind == 5 || (matches!(m.kind, 1 | 6) && !m.name.is_empty())))
+            .map(|(id, m)| ((m.walker.cell.0 - me.0).pow(2) + (m.walker.cell.1 - me.1).pow(2), *id))
+            .filter(|(d, _)| *d <= PAD_REACH * PAD_REACH)
+            .collect();
+        v.sort();
+        v.into_iter().map(|(_, id)| id).collect()
+    }
+
+    /// Controller play: left stick walks (camera-relative), right stick turns and zooms the
+    /// camera, A acts on the highlighted target, LB/RB change target, X picks up, Y sits,
+    /// B cancels, RT/LT + face buttons or D-pad fire the shortcut bar.
+    fn pad_tick(&mut self, dt: f32) {
+        use gilrs::Button::*;
+        let f = self.pad.poll();
+        if !self.pad.in_use() {
+            return;
+        }
+        self.hud.pad_used = true;
+        let secs = dt / 1000.0;
+
+        // Camera: right stick turns and zooms; D-pad left/right snap a quarter turn.
+        if let (Some(r), false) = (self.renderer.as_mut(), self.still) {
+            if f.right.x != 0.0 {
+                r.camera.rotate(-f.right.x * secs * 2.2, 0.0);
+            }
+            if f.right.y != 0.0 {
+                r.camera.zoom(f.right.y * secs * 5.0);
+            }
+            if f.just(RightThumb) {
+                r.camera.yaw = 0.0;
+            }
+        }
+
+        // NPC dialogs take the D-pad and face buttons while open.
+        if self.dialog.is_some() {
+            self.hud.pad_nav = if f.just(DPadUp) {
+                Some(hud::PadNav::Up)
+            } else if f.just(DPadDown) {
+                Some(hud::PadNav::Down)
+            } else if f.just(South) {
+                Some(hud::PadNav::Confirm)
+            } else if f.just(East) {
+                Some(hud::PadNav::Cancel)
+            } else {
+                None
+            };
+            return;
+        }
+
+        // Shortcut bar: hold RT (this row) or LT (next row), then a face button or D-pad.
+        if f.rt || f.lt {
+            const KEYS: [gilrs::Button; 8] = [South, East, West, North, DPadUp, DPadRight, DPadDown, DPadLeft];
+            if let Some(col) = KEYS.iter().position(|k| f.just(*k)) {
+                let row = (self.hotkey_row + if f.lt && !f.rt { 1 } else { 0 }) % HOTKEY_ROWS;
+                self.queued_action = Some(windows::UiAction::UseHotkey(row as usize * HOTKEYS_PER_ROW + col));
+            }
+        } else {
+            // Target: keep the current one while it is in reach, else the nearest.
+            let list = self.pad_candidates();
+            if self.pad_target.is_none_or(|t| !list.contains(&t)) {
+                self.pad_target = list.first().copied();
+            }
+            if f.just(RightTrigger) || f.just(LeftTrigger) {
+                let at = self.pad_target.and_then(|t| list.iter().position(|&x| x == t)).unwrap_or(0);
+                let n = list.len().max(1);
+                let next = if f.just(RightTrigger) { (at + 1) % n } else { (at + n - 1) % n };
+                self.pad_target = list.get(next).copied();
+            }
+            let target = self.pad_target.and_then(|t| self.units.get(&t).map(|m| (t, m.kind, m.walker.cell)));
+            if let Some((skill, level)) = self.aiming {
+                // Aiming a skill: A on the target (or its cell), Y on yourself, B cancels.
+                let ground = self.skills.iter().find(|s| s.id == skill).is_some_and(|s| s.target & 2 != 0);
+                if f.just(South) {
+                    self.aiming = None;
+                    match target {
+                        Some((_, _, c)) if ground => self.use_skill_at(skill, level, (c.0 as u16, c.1 as u16)),
+                        Some((id, _, _)) => self.use_skill_on(skill, level, id),
+                        None if ground => {
+                            if let Some(c) = self.player.as_ref().map(|p| p.walker.cell) {
+                                self.use_skill_at(skill, level, (c.0 as u16, c.1 as u16));
+                            }
+                        }
+                        None => {}
+                    }
+                } else if f.just(North) {
+                    self.aiming = None;
+                    self.use_skill_on(skill, level, self.account_id);
+                } else if f.just(East) {
+                    self.aiming = None;
+                }
+            } else {
+                if f.just(South) {
+                    match target {
+                        Some((id, 5, _)) => self.attack_unit(id),
+                        Some((id, _, _)) => {
+                            self.walk_goal = None;
+                            self.talk(id);
+                        }
+                        None => {}
+                    }
+                }
+                if f.just(East) {
+                    self.attack = None;
+                    self.chasing = false;
+                    self.pending_skill = None;
+                    self.pending_pickup = None;
+                }
+                if f.just(West) {
+                    // Nearest item on the ground.
+                    let me = self.player.as_ref().map(|p| p.walker.cell);
+                    let item = me.and_then(|me| {
+                        self.floor
+                            .iter()
+                            .map(|(id, (fi, _))| ((fi.x as i32 - me.0).pow(2) + (fi.y as i32 - me.1).pow(2), *id))
+                            .filter(|(d, _)| *d <= 100)
+                            .min()
+                            .map(|(_, id)| id)
+                    });
+                    if let Some(id) = item {
+                        self.pick_up(id);
+                    }
+                }
+                if f.just(North) {
+                    let sitting = self.player.as_ref().is_some_and(|p| p.sitting);
+                    self.send(ro_net::Command::Sit(!sitting));
+                }
+            }
+            if let (Some(r), false) = (self.renderer.as_mut(), self.still) {
+                if f.just(DPadLeft) {
+                    r.camera.rotate(std::f32::consts::FRAC_PI_4, 0.0);
+                }
+                if f.just(DPadRight) {
+                    r.camera.rotate(-std::f32::consts::FRAC_PI_4, 0.0);
+                }
+                if f.just(DPadUp) {
+                    r.camera.zoom(1.0);
+                }
+                if f.just(DPadDown) {
+                    r.camera.zoom(-1.0);
+                }
+            }
+        }
+        if f.just(Start) {
+            self.windows.settings = !self.windows.settings;
+        }
+        if f.just(Select) {
+            self.windows.toggle_inventory();
+        }
+
+        // Left stick walks toward a point a few cells ahead, re-aimed as the stick turns.
+        let Some(yaw) = self.renderer.as_ref().map(|r| r.camera.yaw) else { return };
+        self.pad_walk_ms -= dt;
+        if f.left != glam::Vec2::ZERO {
+            let (sy, cy) = yaw.sin_cos();
+            let (fwd, right) = (glam::Vec2::new(-sy, cy), glam::Vec2::new(cy, sy));
+            let dir = (right * f.left.x + fwd * f.left.y).normalize_or_zero();
+            let turned = self.pad_dir.is_none_or(|d| d.dot(dir) < 0.85);
+            if self.pad_walk_ms <= 0.0 || turned {
+                self.attack = None;
+                self.chasing = false;
+                self.pending_npc = None;
+                self.pending_skill = None;
+                self.pending_pickup = None;
+                if self.player.as_ref().is_some_and(|p| p.sitting) {
+                    self.send(ro_net::Command::Sit(false));
+                }
+                let me = self.player.as_ref().map(|p| p.walker.cell);
+                let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
+                let goal = me.and_then(|me| {
+                    (1..=PAD_STEP).rev().map(|k| (me.0 + (dir.x * k as f32).round() as i32, me.1 + (dir.y * k as f32).round() as i32)).find(|&(x, y)| (x, y) != me && gat.is_some_and(|g| g.walkable(x, y)))
+                });
+                if let Some((x, y)) = goal {
+                    self.request_walk((x as u16, y as u16));
+                }
+                self.pad_dir = Some(dir);
+                self.pad_walk_ms = 200.0;
+            }
+        } else if self.pad_dir.take().is_some() {
+            // Let go: stop on the next cell instead of running on to the old goal.
+            if let Some(p) = self.player.as_ref() {
+                let c = p.walker.cell;
+                self.request_walk((c.0 as u16, c.1 as u16));
+            }
+        }
+    }
+
     fn stop_fx(&mut self, tag: u32) {
         if let Some(r) = self.renderer.as_mut() {
             r.effects.retain(|e| e.tag != tag);
@@ -1785,6 +1988,7 @@ impl App {
         let now = std::time::Instant::now();
         let dt = (now - self.last_tick).as_secs_f32() * 1000.0;
         self.last_tick = now;
+        self.pad_tick(dt);
 
         // `--do a,b,c`: scripted actions once the inventory has arrived (tests).
         // Scripted helpers for two-client tests: accept requests, run a trade to completion.
@@ -2085,6 +2289,8 @@ impl App {
                 Some((r.project(m.actor.pos, size)?, hp as f32 / max.max(1) as f32))
             })
             .collect();
+        // The controller's target, marked over its head.
+        let pad_marker = self.pad_target.filter(|_| self.pad.in_use()).and_then(|t| self.units.get(&t)).and_then(|m| r.project(m.actor.pos, size));
         // Cast bars over whoever is chanting.
         let cast_bars: Vec<_> = self
             .casts
@@ -2118,6 +2324,8 @@ impl App {
                 screen_width: size.0 as f32 / (window.scale_factor() as f32 * self.ui_scale),
                 hotkeys: &self.hotkeys,
                 hotkey_row: self.hotkey_row,
+                pad_hints: self.pad.in_use(),
+                playstation: self.pad.playstation,
             };
             let my_name = self.hud.status.name.clone();
             let social_ctx = social::Ctx {
@@ -2151,6 +2359,9 @@ impl App {
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars);
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
                     hud::show_minimap(ui.ctx(), map, &map_name, me, &dots);
+                }
+                if let Some(feet) = pad_marker {
+                    hud::target_marker(ui.ctx(), feet, ppp, self.aiming.is_some());
                 }
                 if self.windows.settings && self.settings.show(ui.ctx(), &mut self.windows.settings) {
                     self.ui_scale = self.settings.ui_scale;
@@ -2554,6 +2765,10 @@ fn main() -> anyhow::Result<()> {
         casts: Default::default(),
         fx: Default::default(),
         sprite_fx: vec![],
+        pad: gamepad::Pad::new(),
+        pad_target: None,
+        pad_dir: None,
+        pad_walk_ms: 0.0,
         fx_test: arg("--fx").map(|s| &*s.leak()),
         alt: false,
         queued_action: None,

@@ -256,6 +256,8 @@ pub enum Command {
     Move { x: u16, y: u16 },
     /// Attack a unit (continuously when `keep`).
     Attack { target: u32, keep: bool },
+    /// Sit down (true) or stand up.
+    Sit(bool),
     /// Talk to an NPC or answer its dialog.
     Npc { npc: u32, reply: NpcReply },
     /// Say something in public chat.
@@ -355,6 +357,7 @@ impl MapSession {
                     Some(Command::Move { x, y }) => self.send(CzRequestMove { x, y, dir: 0 }).await?,
                     Some(Command::Chat(text)) => self.send(CzChat { name, text: &text }).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
+                    Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Npc { npc, reply }) => self.send(CzNpc { npc, reply: &reply }).await?,
                     Some(Command::Item(r)) => self.send(r).await?,
                     Some(Command::Shop(r)) => self.send(r).await?,

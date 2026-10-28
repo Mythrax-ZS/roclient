@@ -17,7 +17,7 @@ jobs:
       - name: Install dev packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev libxrandr-dev libxi-dev libxcursor-dev libxkbcommon-x11-dev libasound2-dev
+          sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev libxrandr-dev libxi-dev libxcursor-dev libxkbcommon-x11-dev libasound2-dev libudev-dev
       - run: cargo test --workspace
 
   build-windows:
@@ -52,7 +52,7 @@ jobs:
       - name: Install dev packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev libxrandr-dev libxi-dev libxcursor-dev libxkbcommon-x11-dev libasound2-dev libfuse2
+          sudo apt-get install -y pkg-config libx11-dev libxkbcommon-dev libwayland-dev libxrandr-dev libxi-dev libxcursor-dev libxkbcommon-x11-dev libasound2-dev libudev-dev libfuse2
       - run: cargo build --release -p ro-client -p grfdump
       - name: Build AppImage
         run: |
@@ -72,7 +72,7 @@ jobs:
             --exclude-library 'libvulkan*' --exclude-library 'libGL*' --exclude-library 'libEGL*' \
             --exclude-library 'libGLX*' --exclude-library 'libdrm*' --exclude-library 'libgbm*' \
             --exclude-library 'libwayland*' --exclude-library 'libxcb*' --exclude-library 'libX11*' \
-            --exclude-library 'libxkbcommon*' --exclude-library 'libasound*' \
+            --exclude-library 'libxkbcommon*' --exclude-library 'libasound*' --exclude-library 'libudev*' \
             --output appimage
           # linuxdeploy overwrites AppRun with a symlink only if absent; ensure ours is used
           ls -la *.AppImage

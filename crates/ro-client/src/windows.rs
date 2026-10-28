@@ -64,6 +64,9 @@ pub struct View<'a> {
     pub screen_width: f32,
     pub hotkeys: &'a [Hotkey],
     pub hotkey_row: u8,
+    /// A controller is in use: label slots with its buttons.
+    pub pad_hints: bool,
+    pub playstation: bool,
 }
 
 /// Draws a skill or item icon centred in `rect`.
@@ -112,7 +115,11 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                             outlined(&painter, rect.right_bottom() - Vec2::new(3.0, 1.0), egui::Align2::RIGHT_BOTTOM, &count.to_string(), 11.0, Color32::WHITE);
                         }
                     }
-                    outlined(&painter, rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, &format!("F{}", col + 1), 10.0, Color32::from_gray(200));
+                    // Controller: hold RT for this row (LT for the next), then the button shown.
+                    const XBOX: [&str; HOTKEYS_PER_ROW] = ["A", "B", "X", "Y", "Up", "Rt", "Dn", "Lt", ""];
+                    const PS: [&str; HOTKEYS_PER_ROW] = ["Cr", "Ci", "Sq", "Tr", "Up", "Rt", "Dn", "Lt", ""];
+                    let key_label = if v.pad_hints { (if v.playstation { PS } else { XBOX })[col].to_string() } else { format!("F{}", col + 1) };
+                    outlined(&painter, rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, &key_label, 10.0, Color32::from_gray(200));
 
                     if let Some(dropped) = resp.dnd_release_payload::<Hotkey>() {
                         action = Some(UiAction::SetHotkey { index: index as u16, key: *dropped });
@@ -141,6 +148,10 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                 }
                 ui.separator();
                 let row = ui.add(egui::Button::new(RichText::new(format!("{}", v.hotkey_row + 1)).size(13.0)).min_size(Vec2::new(22.0, SIZE)));
+                if v.pad_hints {
+                    ui.label(RichText::new("hold RT
+LT: next").size(10.0).color(Color32::from_gray(170)));
+                }
                 if row.on_hover_text("Next row (F12)").clicked() {
                     action = Some(UiAction::HotkeyRow((v.hotkey_row + 1) % HOTKEY_ROWS));
                 }
