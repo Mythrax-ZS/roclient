@@ -8,6 +8,7 @@ mod fx;
 mod gamepad;
 mod guild;
 mod hud;
+mod jobs;
 mod preview;
 mod screens;
 mod settings;
@@ -112,10 +113,13 @@ fn load_character(
         let pal = palette.and_then(|p| vfs.read(&p).ok().flatten()).and_then(|d| ro_formats::spr::parse_palette(&d).ok());
         Ok(r.add_sheet(&spr, act, pal.as_ref()))
     };
-    let body = sheet(&format!("data\\sprite\\인간족\\몸통\\{sex}\\{}_{sex}", look.job), None)?;
+    // Doram jobs have their own sprite and hair palette folders.
+    let race = jobs::race_dir(&look.job);
+    let pal_dir = if race == "도람족" { "palette\\도람족\\머리" } else { "palette\\머리" };
+    let body = sheet(&format!("data\\sprite\\{race}\\몸통\\{sex}\\{}_{sex}", look.job), None)?;
     let head = sheet(
-        &format!("data\\sprite\\인간족\\머리통\\{sex}\\{}_{sex}", look.hair),
-        (look.hair_color > 0).then(|| format!("data\\palette\\머리\\머리{}_{sex}_{}.pal", look.hair, look.hair_color)),
+        &format!("data\\sprite\\{race}\\머리통\\{sex}\\{}_{sex}", look.hair),
+        (look.hair_color > 0).then(|| format!("data\\{pal_dir}\\머리{}_{sex}_{}.pal", look.hair, look.hair_color)),
     )?;
     let shadow = sheet("data\\sprite\\shadow", None).inspect_err(|e| tracing::warn!("shadow sprite: {e:#}")).ok();
     // Equipment is optional: a missing sprite just isn't drawn.
@@ -138,7 +142,7 @@ fn load_character(
     // (어세신_남_카타르_카타르), as both hands hold one.
     let mut weapon = vec![];
     if let Some(name) = (g.weapon != 0).then(|| tables.weapon(g.weapon)).flatten() {
-        let dir = format!("data\\sprite\\인간족\\{}\\{}_{sex}", look.job, look.job);
+        let dir = format!("data\\sprite\\{race}\\{}\\{}_{sex}", look.job, look.job);
         let found = [format!("{dir}{name}"), format!("{dir}{name}{name}")].into_iter().find_map(|base| sheet(&base, None).ok().map(|id| (id, base)));
         tracing::debug!(%dir, %name, found = found.is_some(), "weapon sprite");
         match found {
@@ -338,36 +342,11 @@ async fn headless(cfg: &Config) -> anyhow::Result<()> {
 /// Sprite name (as in the GRF) for a job id. Covers Novice through the 2-1/2-2 classes.
 /// Display name for a job id (Novice through the 2-1/2-2 classes).
 fn job_title(job: i16) -> &'static str {
-    const NAMES: [&str; 21] = [
-        "Novice", "Swordman", "Mage", "Archer", "Acolyte", "Merchant", "Thief", "Knight", "Priest", "Wizard", "Blacksmith",
-        "Hunter", "Assassin", "Knight", "Crusader", "Monk", "Sage", "Rogue", "Alchemist", "Bard", "Dancer",
-    ];
-    NAMES.get(job as usize).copied().unwrap_or("Adventurer")
+    jobs::title(job)
 }
 
 fn job_sprite(job: i16) -> &'static str {
-    match job {
-        1 => "검사",
-        2 => "마법사",
-        3 => "궁수",
-        4 => "성직자",
-        5 => "상인",
-        6 => "도둑",
-        7 => "기사",
-        8 => "프리스트",
-        9 => "위저드",
-        10 => "제철공",
-        11 => "헌터",
-        12 => "어세신",
-        14 => "크루세이더",
-        15 => "몽크",
-        16 => "세이지",
-        17 => "로그",
-        18 => "연금술사",
-        19 => "바드",
-        20 => "무희",
-        _ => "초보자",
-    }
+    jobs::sprite(job)
 }
 
 const DIRS: [ro_render::Dir; 8] = {
