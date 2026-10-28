@@ -582,7 +582,73 @@ impl Windows {
             self.inventory = open;
         }
 
-        if self.equipment {
+        if let (true, Some(skin)) = (self.equipment, v.skin) {
+            let mut open = true;
+            let mut picked = None;
+            let mut show_equip = None;
+            skin.window(
+                ctx,
+                "Equipment",
+                col(1.0),
+                280.0,
+                &mut open,
+                |ui| {
+                    let (area, _) = ui.allocate_exact_size(Vec2::new(280.0, 130.0), egui::Sense::hover());
+                    let p = ui.painter().clone();
+                    skin.draw(&p, "equipwin_bg", area.min);
+                    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                    let mut used_acc = vec![];
+                    // (slot bits, left column?, row) as the art lays them out.
+                    const LAYOUT: [(u32, bool, usize); 10] =
+                        [(0x100, true, 0), (0x200, false, 0), (0x001, true, 1), (0x010, false, 1), (0x002, true, 2), (0x020, false, 2), (0x004, true, 3), (0x040, false, 3), (0x008, true, 4), (0x080, false, 4)];
+                    for (bits, left, row) in LAYOUT {
+                        let Some(it) = v.items.iter().find(|it| it.equipped & bits != 0 && !used_acc.contains(&it.index)) else { continue };
+                        if bits & 0x88 != 0 {
+                            used_acc.push(it.index);
+                        }
+                        let y = area.min.y + 17.0 + row as f32 * 25.6;
+                        let icon_c = egui::pos2(area.min.x + if left { 17.0 } else { 263.0 }, y);
+                        let icon = egui::Rect::from_center_size(icon_c, Vec2::splat(24.0));
+                        if let Some(t) = v.icons.get(&it.id) {
+                            p.image(t.id(), icon, uv, Color32::WHITE);
+                        }
+                        // The name over the faint slot label, cut to the column.
+                        let mut name = item_name(v.db, it);
+                        if name.chars().count() > 13 {
+                            name = name.chars().take(12).collect::<String>() + "…";
+                        }
+                        let (at, align) = if left { (egui::pos2(area.min.x + 32.0, y), egui::Align2::LEFT_CENTER) } else { (egui::pos2(area.min.x + 248.0, y), egui::Align2::RIGHT_CENTER) };
+                        p.rect_filled(egui::Rect::from_min_max(egui::pos2(area.min.x + if left { 30.0 } else { 176.0 }, y - 8.0), egui::pos2(area.min.x + if left { 104.0 } else { 250.0 }, y + 7.0)), 0.0, Color32::WHITE);
+                        p.text(at, align, name, egui::FontId::proportional(11.0), crate::classic::TEXT);
+                        let hit = egui::Rect::from_min_max(egui::pos2(area.min.x + if left { 2.0 } else { 176.0 }, y - 11.0), egui::pos2(area.min.x + if left { 104.0 } else { 278.0 }, y + 11.0));
+                        let resp = ui.interact(hit, ui.scope_id().with(("equip_slot", bits)), egui::Sense::click()).on_hover_ui(|ui| item_tooltip(ui, v.db, it));
+                        if resp.hovered() {
+                            p.rect_filled(hit, 3.0, Color32::from_rgba_unmultiplied(120, 150, 230, 40));
+                        }
+                        if resp.secondary_clicked() {
+                            picked = Some(UiAction::ItemInfo { id: it.id, refine: it.refine, cards: it.cards });
+                        }
+                        if resp.double_clicked() {
+                            picked = Some(UiAction::Unequip(it.index));
+                        }
+                    }
+                },
+                |ui| {
+                    if let Some(mut on) = v.show_equip {
+                        if ui.checkbox(&mut on, RichText::new("Let others view my equipment").size(11.0)).changed() {
+                            show_equip = Some(on);
+                        }
+                    }
+                },
+            );
+            if picked.is_some() {
+                action = picked;
+            }
+            if let Some(on) = show_equip {
+                action = Some(UiAction::ShowEquip(on));
+            }
+            self.equipment = open;
+        } else if self.equipment {
             let mut open = true;
             egui::Window::new("Equipment").open(&mut open).default_pos(col(1.0)).resizable(false).show(ctx, |ui| {
                 if let Some(mut on) = v.show_equip {
