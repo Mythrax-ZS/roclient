@@ -1377,6 +1377,9 @@ impl App {
             }
             CashShop { cash, kafra } => {
                 self.stores.cash = Some((cash, kafra));
+                if let Some(vfs) = self.vfs.as_ref() {
+                    self.stores.load_cash_art(&self.egui_ctx, vfs);
+                }
                 // The server sends the item list once per login.
                 if self.stores.cash_tabs.is_empty() {
                     self.send(ro_net::Command::CashShop(ro_net::CashShopRequest::List));
@@ -3660,6 +3663,11 @@ impl App {
                 if let Some(req) = self.stores.show_cash(ui.ctx(), self.item_db.as_ref(), &self.icons) {
                     self.queued_commands.push(ro_net::Command::CashShop(req));
                 }
+                if std::mem::take(&mut self.windows.cash_toggle) {
+                    let req = if self.stores.cash.take().is_some() { ro_net::CashShopRequest::Close } else { ro_net::CashShopRequest::Open };
+                    self.queued_commands.push(ro_net::Command::CashShop(req));
+                }
+                self.windows.cash_shown = self.stores.cash.is_some();
                 if let Some((quest, active)) = self.quests.show(ui.ctx()) {
                     self.queued_commands.push(ro_net::Command::QuestActive { quest, active });
                 }

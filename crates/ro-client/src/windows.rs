@@ -41,6 +41,9 @@ pub const HOTKEYS_PER_ROW: usize = 9;
 
 #[derive(Default)]
 pub struct Windows {
+    /// The cash shop is open (it lives in `stores`), and its menu button was clicked.
+    pub cash_shown: bool,
+    pub cash_toggle: bool,
     pub inventory: bool,
     pub equipment: bool,
     pub stats: bool,
@@ -362,6 +365,9 @@ impl Windows {
                             if ui.selectable_label(*open, label).on_hover_text(key).clicked() {
                                 *open = !*open;
                             }
+                        }
+                        if ui.selectable_label(self.cash_shown, "Cash Shop").on_hover_text("Alt+C").clicked() {
+                            self.cash_toggle = true;
                         }
                     });
                 });
