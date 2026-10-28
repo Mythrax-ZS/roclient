@@ -21,7 +21,7 @@ pub use ro_proto::quests::{Objective, Quest};
 pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, MerchantRequest, VendItem, WantedItem};
 pub use ro_proto::market::{BarterItem, MarketItem, MarketRequest};
 pub use ro_proto::bg::{apply_error as bg_apply_error, BgEvent, BgRequest, CastleRequest};
-pub use ro_proto::refine::{EnchantRequest, GradeOptions, GradeRequest, RefineOption, RefineRequest};
+pub use ro_proto::refine::{EnchantRequest, ReformRequest, GradeOptions, GradeRequest, RefineOption, RefineRequest};
 use ro_proto::refine::*;
 use ro_proto::merchant::*;
 pub use ro_proto::progress::{AchRank, Achievement, ProgressRequest};
@@ -372,6 +372,9 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_OPEN_REFORM_UI (the tool item) / ZC_ITEM_REFORM_ACK (index, result: 0 ok).
+    ReformOpen(u32),
+    ReformResult { index: u16, result: u8 },
     /// ZC_UI_OPEN_V3: a UI with a 64-bit argument (type 10: the enchant window, its set).
     UiOpenV3 { kind: u8, data: u64 },
     /// ZC_RESPONSE_ENCHANT: (message id, the enchant added).
@@ -541,6 +544,7 @@ pub enum Command {
     Refine(RefineRequest),
     Grade(GradeRequest),
     Enchant(EnchantRequest),
+    Reform(ReformRequest),
     Bg(BgRequest),
     Castle(CastleRequest),
     Market(MarketRequest),
@@ -689,6 +693,7 @@ impl MapSession {
                     Some(Command::Refine(r)) => self.send(r).await?,
                     Some(Command::Grade(r)) => self.send(r).await?,
                     Some(Command::Enchant(r)) => self.send(r).await?,
+                    Some(Command::Reform(r)) => self.send(r).await?,
                     Some(Command::Bg(r)) => self.send(r).await?,
                     Some(Command::Castle(r)) => self.send(r).await?,
                     Some(Command::Market(r)) => self.send(r).await?,
@@ -798,6 +803,8 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0b8f if data.len() >= 6 => Some(Event::ReformOpen(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x0b92 if data.len() >= 5 => Some(Event::ReformResult { index: u16::from_le_bytes([data[2], data[3]]), result: data[4] }),
                         0x0b9a if data.len() >= 11 => Some(Event::UiOpenV3 { kind: data[2], data: u64::from_le_bytes(data[3..11].try_into().unwrap()) }),
                         0x0b9f if data.len() >= 10 => Some(Event::EnchantResult { msg: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), item: u32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
                         0x0a3b if data.len() >= 9 => Some(Event::HatEffect { id: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), on: data[8] != 0, effects: data[9..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect() }),
@@ -980,7 +987,16 @@ impl MapSession {
                         0x0b09 | 0x0b39 if data.get(4) == Some(&0) => {
                             Some(Event::Items(if opcode == 0x0b09 { parse_itemlist_normal(&data) } else { parse_itemlist_equip(&data) }))
                         }
-                        0x0b41 => parse_pickup(&data).map(Event::ItemAdded),
+                        0x0b41 => parse_pickup(&data).map(Event::ItemAdded).or_else(|| {
+                            // The add failed: the result byte says why.
+                            let why = match data.get(33).copied().unwrap_or(0) {
+                                2 => "You are carrying too much weight.",
+                                4 => "Your inventory is full.",
+                                5 | 7 => "You can't carry any more of that item.",
+                                _ => "You could not pick that up.",
+                            };
+                            Some(Event::Notice(why.into()))
+                        }),
                         0x07fa | 0x00af => parse_item_removed(opcode, &data).map(|(index, amount)| Event::ItemRemoved { index, amount }),
                         0x01c8 => {
                             let (index, amount, user, ok) = parse_use_item_ack(&data);

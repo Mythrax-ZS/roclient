@@ -18,7 +18,8 @@ Ticked items are handled and tested in game against the local server.
 - [ ] ZC_STYLE_CHANGE_RES (stylist), ZC_DRESSROOM_OPEN
 - [ ] ZC_ADD_SKILL, ZC_SKILLINFO_UPDATE2, ZC_SKILLINFO_DELETE (`skill` / `bonus_script` skills)
 - [x] Random enchant (ZC_UI_OPEN_V3 + ZC_RESPONSE_ENCHANT) from the official enchantlist.lub (32-bit bytecode widened and run)
-- [ ] ZC_OPEN_REFORM_UI / ITEM_REFORM_ACK
+- [x] Item reform (ZC_OPEN_REFORM_UI / ITEM_REFORM_ACK) from itemreformsystem.lub
+- [x] Failed item adds (full inventory, overweight) now say why
 - [ ] ZC_REPUTE_INFO / OPEN
 - [ ] ZC_MERGE_ITEM_OPEN / ACK_MERGE_ITEM, ZC_RANDOM_COMBINE / RANDOM_UPGRADE_ITEM
 

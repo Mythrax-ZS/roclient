@@ -22,6 +22,7 @@ mod ai;
 mod booking;
 mod battle;
 mod clan;
+mod reform;
 mod enchant;
 mod market;
 mod customdata;
@@ -825,6 +826,7 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    reform: reform::Reform,
     enchant: enchant::Enchant,
     market: market::Market,
     /// Test hook: a market purchase to make once a shop opens.
@@ -2530,6 +2532,8 @@ impl App {
             }
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
+            ReformOpen(tool) => self.reform.open(self.vfs.as_ref(), tool),
+            ReformResult { result, .. } => self.reform.result(result == 0),
             UiOpenV3 { kind: 10, data } => self.enchant.open(self.vfs.as_ref(), data),
             UiOpenV3 { .. } => {}
             EnchantResult { msg, item } => {
@@ -3953,6 +3957,13 @@ impl App {
                         }
                         None
                     }
+                    Some(("reform", _)) => {
+                        let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
+                        if let Some(reform::ReformAction::Reform { tool, index }) = self.reform.test_reform(&inv) {
+                            self.queued_commands.push(ro_net::Command::Reform(ro_net::ReformRequest::Reform { tool, index }));
+                        }
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -4767,6 +4778,15 @@ impl App {
                 self.clan.show(ui.ctx());
                 {
                     let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
+                    if let Some(a) = self.reform.show(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons) {
+                        self.queued_commands.push(ro_net::Command::Reform(match a {
+                            reform::ReformAction::Reform { tool, index } => ro_net::ReformRequest::Reform { tool, index },
+                            reform::ReformAction::Close => ro_net::ReformRequest::Close,
+                        }));
+                    }
+                }
+                {
+                    let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
                     let reqs = self.enchant.show(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons, self.hud.status.zeny);
                     self.queued_commands.extend(reqs.into_iter().map(ro_net::Command::Enchant));
                 }
@@ -5347,6 +5367,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        reform: Default::default(),
         enchant: Default::default(),
         market: Default::default(),
         market_buy: None,

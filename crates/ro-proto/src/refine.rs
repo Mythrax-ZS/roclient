@@ -195,3 +195,23 @@ impl Encode for EnchantRequest {
         }
     }
 }
+
+/// CZ_ITEM_REFORM (tool item, inventory index) / CZ_CLOSE_REFORM_UI.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReformRequest {
+    Reform { tool: u32, index: u16 },
+    Close,
+}
+
+impl Encode for ReformRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            ReformRequest::Reform { tool, index } => {
+                d.put_u16_le(0x0b91);
+                d.put_u32_le(*tool);
+                d.put_u16_le(*index);
+            }
+            ReformRequest::Close => d.put_u16_le(0x0b90),
+        }
+    }
+}
