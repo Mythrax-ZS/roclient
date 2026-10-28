@@ -402,7 +402,8 @@ impl Windows {
                         for (i, name) in STAT_NAMES.iter().enumerate() {
                             ui.label(RichText::new(*name).strong());
                             ui.label(if s.plus[i] != 0 { format!("{} + {}", s.base[i], s.plus[i]) } else { s.base[i].to_string() });
-                            let can = s.points >= s.cost[i] as u16 && s.base[i] < 130;
+                            // The cost arrives as one byte (capped at 255), so past that the server decides.
+                            let can = s.points >= s.cost[i] as u32;
                             if ui.add_enabled(can, egui::Button::new("+")).on_hover_text(format!("Costs {}", s.cost[i])).clicked() {
                                 action = Some(UiAction::RaiseStat(i));
                             }

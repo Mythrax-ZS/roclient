@@ -1174,7 +1174,7 @@ impl App {
                 if let Some(s) = self.stats.as_mut() {
                     let v = value.clamp(i16::MIN as i64, i16::MAX as i64) as i16;
                     match id {
-                        9 => s.points = value as u16,
+                        9 => s.points = value.max(0) as u32,
                         41 => s.atk.0 = v,
                         42 => s.atk.1 = v,
                         43 => s.matk.1 = v,
@@ -1527,12 +1527,15 @@ impl App {
             Stats(s) => self.stats = Some(s),
             StatRaised { stat, ok, value } => {
                 if let (true, Some(s), 13..=18) = (ok, self.stats.as_mut(), stat) {
-                    s.base[(stat - 13) as usize] = value;
+                    // The ack carries one byte; past 255 the full value follows in 0x0141.
+                    if value < 255 {
+                        s.base[(stat - 13) as usize] = value as u16;
+                    }
                 }
             }
             StatBonus { stat, base, plus } => {
                 if let (Some(s), 13..=18) = (self.stats.as_mut(), stat) {
-                    s.base[(stat - 13) as usize] = base.clamp(0, 255) as u8;
+                    s.base[(stat - 13) as usize] = base.clamp(0, u16::MAX as i32) as u16;
                     s.plus[(stat - 13) as usize] = plus as i16;
                 }
             }

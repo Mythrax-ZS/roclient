@@ -197,9 +197,9 @@ impl Encode for ItemRequest {
 /// ZC_STATUS (0x00bd): base stats, their raise costs, and derived values.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Stats {
-    pub points: u16,
+    pub points: u32,
     /// str, agi, vit, int, dex, luk
-    pub base: [u8; 6],
+    pub base: [u16; 6],
     /// Status points needed to raise each by one.
     pub cost: [u8; 6],
     /// Bonuses on str..luk from equipment and buffs.
@@ -217,10 +217,10 @@ pub struct Stats {
 
 pub fn parse_status(data: &[u8]) -> Stats {
     let mut b = &data[2..];
-    let points = b.get_u16_le();
+    let points = b.get_u16_le() as u32;
     let (mut base, mut cost) = ([0; 6], [0; 6]);
     for i in 0..6 {
-        base[i] = b.get_u8();
+        base[i] = b.get_u8() as u16;
         cost[i] = b.get_u8();
     }
     let atk = (b.get_i16_le(), b.get_i16_le());
