@@ -1,0 +1,127 @@
+//! Full-screen art from the client data, as the original shows it: the age-rating splash
+//! at start-up, the title illustration behind the login and character screens, and a
+//! random loading screen (texture\유저인터페이스\loadingNN.jpg) with a progress bar while
+//! a map loads.
+
+use egui::{Color32, Pos2, Rect, Vec2};
+
+const UI: &str = "data\\texture\\유저인터페이스\\";
+/// How long the age-rating splash stays, and the fades around screens (seconds).
+const SPLASH_SECS: f64 = 2.0;
+const FADE_SECS: f64 = 0.4;
+
+pub struct Splash {
+    title: Option<egui::TextureHandle>,
+    grade: Option<egui::TextureHandle>,
+    loading_names: Vec<String>,
+    loading: Option<(egui::TextureHandle, f64)>,
+    started: Option<f64>,
+}
+
+fn load(ctx: &egui::Context, vfs: &ro_vfs::Vfs, path: &str) -> Option<egui::TextureHandle> {
+    let data = vfs.read(path).ok()??;
+    let img = ro_formats::image::decode(&data, path).ok()?;
+    let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
+    Some(ctx.load_texture(path, color, egui::TextureOptions::LINEAR))
+}
+
+/// Draws `tex` covering the whole screen (cropped to keep its aspect), faded by `alpha`.
+fn cover(ctx: &egui::Context, tex: &egui::TextureHandle, alpha: f32) {
+    let screen = ctx.content_rect();
+    let size = tex.size_vec2();
+    let scale = (screen.width() / size.x).max(screen.height() / size.y);
+    let rect = Rect::from_center_size(screen.center(), size * scale);
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    painter.rect_filled(screen, 0.0, Color32::BLACK);
+    let tint = Color32::from_white_alpha((alpha.clamp(0.0, 1.0) * 255.0) as u8);
+    painter.image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), tint);
+}
+
+impl Splash {
+    pub fn new(ctx: &egui::Context, vfs: Option<&ro_vfs::Vfs>) -> Self {
+        let Some(vfs) = vfs else {
+            return Self { title: None, grade: None, loading_names: vec![], loading: None, started: None };
+        };
+        // The original ships up to 36 loading screens; use whichever exist.
+        let loading_names = (0..40).map(|i| format!("{UI}loading{i:02}.jpg")).filter(|p| vfs.read(p).ok().flatten().is_some()).collect();
+        Self {
+            title: load(ctx, vfs, &format!("{UI}bgi_temp.bmp")),
+            grade: load(ctx, vfs, &format!("{UI}t_gamegrade.tga")),
+            loading_names,
+            loading: None,
+            started: None,
+        }
+    }
+
+    /// True while the start-up splash is still showing (input waits).
+    pub fn intro(&mut self, ctx: &egui::Context) -> bool {
+        let now = ctx.input(|i| i.time);
+        let t = now - *self.started.get_or_insert(now);
+        if t >= SPLASH_SECS || self.grade.is_none() {
+            return false;
+        }
+        let screen = ctx.content_rect();
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("intro")));
+        painter.rect_filled(screen, 0.0, Color32::BLACK);
+        if let Some(g) = &self.grade {
+            // Fade in, hold, fade out.
+            let a = (t / FADE_SECS).min(1.0).min((SPLASH_SECS - t) / FADE_SECS) as f32;
+            let size = g.size_vec2() * (screen.height() / 540.0).max(1.0);
+            let rect = Rect::from_center_size(screen.center(), size);
+            painter.image(g.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::from_white_alpha((a * 255.0) as u8));
+        }
+        ctx.request_repaint();
+        true
+    }
+
+    /// The title illustration behind the login and character screens.
+    pub fn title(&self, ctx: &egui::Context) {
+        if let Some(t) = &self.title {
+            cover(ctx, t, 1.0);
+        }
+    }
+
+    /// Picks a random loading screen (call when a map starts loading).
+    pub fn begin_loading(&mut self, ctx: &egui::Context, vfs: Option<&ro_vfs::Vfs>) {
+        let Some(vfs) = vfs else { return };
+        if self.loading_names.is_empty() {
+            return;
+        }
+        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos() as usize);
+        let path = &self.loading_names[seed % self.loading_names.len()];
+        if let Some(tex) = load(ctx, vfs, path) {
+            self.loading = Some((tex, ctx.input(|i| i.time)));
+        }
+    }
+
+    /// Draws the loading screen (`done` once the map is in). Returns false once it has faded away.
+    pub fn loading(&mut self, ctx: &egui::Context, done: bool) -> bool {
+        let Some((tex, since)) = &self.loading else { return false };
+        let now = ctx.input(|i| i.time);
+        // The map loads in one go; the bar fills over the screen's minimum showing time.
+        let progress = if done { ((now - since) / 0.6) as f32 } else { 0.1 };
+        // Stay at least a moment so it doesn't just flash, then fade out once loaded.
+        let shown = now - since;
+        let alpha = if done && shown > 0.6 { 1.0 - ((shown - 0.6) / FADE_SECS) as f32 } else { 1.0 };
+        if alpha <= 0.0 {
+            self.loading = None;
+            return false;
+        }
+        let screen = ctx.content_rect();
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("loading screen")));
+        let size = tex.size_vec2();
+        let scale = (screen.width() / size.x).min(screen.height() / size.y);
+        let rect = Rect::from_center_size(screen.center(), size * scale);
+        let a = (alpha * 255.0) as u8;
+        painter.rect_filled(screen, 0.0, Color32::from_black_alpha(a));
+        painter.image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::from_white_alpha(a));
+        // Progress bar along the bottom of the art, like the original.
+        let bar = Rect::from_min_size(Pos2::new(rect.left() + rect.width() * 0.1, rect.bottom() - rect.height() * 0.06), Vec2::new(rect.width() * 0.8, 10.0));
+        painter.rect_filled(bar.expand(2.0), 3.0, Color32::from_black_alpha((a as f32 * 0.7) as u8));
+        let mut fill = bar;
+        fill.set_width(bar.width() * progress.clamp(0.0, 1.0));
+        painter.rect_filled(fill, 2.0, Color32::from_rgba_unmultiplied(120, 190, 255, a));
+        ctx.request_repaint();
+        true
+    }
+}

@@ -11,6 +11,7 @@ mod hud;
 mod preview;
 mod screens;
 mod settings;
+mod splash;
 mod social;
 mod windows;
 
@@ -697,6 +698,8 @@ struct App {
     front: Option<screens::Front>,
     /// Exit requested from the login screen.
     quit: bool,
+    /// Start-up splash, title art and loading screens (made once the window exists).
+    splash: Option<splash::Splash>,
     vfs: Option<ro_vfs::Vfs>,
     /// Offline preview map and cell (ignored once the server places us).
     map: String,
@@ -837,6 +840,12 @@ struct App {
 impl App {
     /// Loads a map into the renderer and remembers its ground for picking.
     fn enter_map(&mut self, name: &str) {
+        // A loading screen covers the map load (not behind the login screens or in captures).
+        if self.front.is_none() && (self.capture.is_none() || std::env::args().any(|a| a == "--front-start")) {
+            if let Some(s) = self.splash.as_mut() {
+                s.begin_loading(&self.egui_ctx, self.vfs.as_ref());
+            }
+        }
         let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
         match load_map(vfs, name) {
             Ok(map) => {
@@ -2829,6 +2838,19 @@ impl App {
             let me = self.player.as_ref().map(|p| (p.walker.cell.0 as f32, p.walker.cell.1 as f32));
             let map_name = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
             let out = self.egui_ctx.run_ui(input, |ui| {
+                // Start-up splash (age rating), then the title art behind the login screens.
+                if let (Some(s), true) = (self.splash.as_mut(), self.front.is_some()) {
+                    if s.intro(ui.ctx()) {
+                        return;
+                    }
+                    s.title(ui.ctx());
+                }
+                // Loading screen over a map being entered (fades once it is in).
+                if let (Some(s), None) = (self.splash.as_mut(), self.front.as_ref()) {
+                    if s.loading(ui.ctx(), self.world.is_some() && self.player.is_some()) {
+                        return;
+                    }
+                }
                 // Login and character screens replace the game UI until a character is picked.
                 if let Some(front) = self.front.as_mut() {
                     let tables = &self.look_tables;
@@ -3079,7 +3101,12 @@ impl ApplicationHandler for App {
 
         // Offline: show the preview map and character right away. Online waits for the server,
         // with the map as the login screen's backdrop.
-        if self.net.is_none() || self.front.is_some() {
+        self.splash = Some(splash::Splash::new(&self.egui_ctx, self.vfs.as_ref()));
+        // Captures of the login screens time from start-up (no map loads behind them).
+        if self.front.is_some() {
+            self.ready_at = Some(std::time::Instant::now());
+        }
+        if self.net.is_none() {
             let map = self.map.clone();
             self.enter_map(&map);
         }
@@ -3287,6 +3314,7 @@ fn main() -> anyhow::Result<()> {
         net,
         session: session.clone(),
         quit: false,
+        splash: None,
         front: (online && !auto).then(|| screens::Front::new(settings::Settings::load(Default::default()).last_id.clone(), true)),
         world: None,
         player: None,
