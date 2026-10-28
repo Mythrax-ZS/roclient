@@ -965,12 +965,16 @@ impl App {
         // a weapon from 인간족\용병\.
         let found = ["npc", "몬스터", "homun", "인간족\\몸통"].iter().find_map(|folder| read(&format!("data\\sprite\\{folder}\\{name}")));
         let merc_weapon = name.rsplit('\\').next().and_then(|n| ["활", "창", "검"].iter().find_map(|w| read(&format!("data\\sprite\\인간족\\용병\\{n}_{w}"))));
+        // Mercenary bodies are headless; the original adds a player head, its style set by
+        // the mercenary's grade (classes 6017.. come in tens: archers, lancers, swordsmen).
+        let merc_head = merc_weapon.as_ref().and(name.split_once('\\')).and_then(|(sex, _)| read(&format!("data\\sprite\\인간족\\머리통\\{sex}\\{}_{sex}", (job - 6017).rem_euclid(10) + 1)));
         let actor = match found {
             Some((spr, act)) => {
                 let body = r.add_sheet(&spr, act, None);
                 let weapon = merc_weapon.map(|(s, a)| vec![r.add_sheet(&s, a, None)]).unwrap_or_default();
+                let head = merc_head.map(|(s, a)| r.add_sheet(&s, a, None));
                 let shadow = self.sprites.get("shadow").cloned().flatten().and_then(|a| a.shadow);
-                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
+                Some(ro_render::Actor { pos: Default::default(), body, head, headgear: vec![], weapon, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
             }
             None => {
                 tracing::debug!(job, %name, "no sprite for class");
@@ -2603,8 +2607,14 @@ impl App {
             return;
         }
         self.follow_at = now + std::time::Duration::from_millis(400);
-        let Some(me) = self.player.as_ref().map(|p| p.walker.goal_or_cell()) else { return };
-        let ids = [(self.companions.homun_id, (-1, -1)), (self.companions.merc.as_ref().map_or(0, |m| m.id), (1, -1))];
+        let Some((me, facing)) = self.player.as_ref().map(|p| (p.walker.goal_or_cell(), p.walker.dir)) else { return };
+        // Behind us relative to our facing (dir 0 = south ... clockwise), one on each side.
+        const STEP: [(i32, i32); 8] = [(0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1)];
+        let behind = |turn: usize| {
+            let (x, y) = STEP[(facing + 4 + turn) % 8];
+            (x * 2, y * 2)
+        };
+        let ids = [(self.companions.homun_id, behind(1)), (self.companions.merc.as_ref().map_or(0, |m| m.id), behind(7))];
         for (id, (dx, dy)) in ids {
             let Some(unit) = self.units.get(&id).filter(|_| id != 0) else { continue };
             let at = unit.walker.goal_or_cell();
