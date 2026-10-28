@@ -557,6 +557,8 @@ struct App {
     /// The NPC conversation in progress, and its illustration.
     dialog: Option<hud::Dialog>,
     cutin: Option<hud::Cutin>,
+    minimap: Option<hud::Minimap>,
+    show_minimap: bool,
     /// NPC to talk to once we have walked into range.
     pending_npc: Option<u32>,
     /// The monster we keep attacking, and our reach (cells) once the server tells us.
@@ -646,6 +648,11 @@ impl App {
                     .ok()
                     .flatten()
                     .and_then(|d| ro_formats::gat::Gat::parse(&d).inspect_err(|e| tracing::warn!("{name}.gat: {e:#}")).ok());
+                let path = format!("data\\texture\\유저인터페이스\\map\\{name}.bmp");
+                self.minimap = match (load_texture(&self.egui_ctx, vfs, &path), gat.as_ref()) {
+                    (Some(texture), Some(g)) => Some(hud::Minimap { texture, cells: (g.width as f32, g.height as f32) }),
+                    _ => None,
+                };
                 self.world = Some(World { name: name.to_string(), ground: map.mesh, gat });
                 self.ready_at = Some(std::time::Instant::now());
             }
@@ -1754,8 +1761,29 @@ impl App {
             };
             let mut social_cmds = vec![];
             let mut player_cmd = None;
+            let party: std::collections::HashSet<&str> = self.social.party.iter().flat_map(|p| p.members.iter().map(|m| m.name.as_str())).collect();
+            let dots: Vec<_> = self
+                .units
+                .values()
+                .filter(|m| m.dying.is_none())
+                .filter_map(|m| {
+                    let color = match m.kind {
+                        0 if party.contains(m.name.as_str()) => egui::Color32::from_rgb(255, 130, 200),
+                        0 => egui::Color32::from_rgb(120, 180, 255),
+                        5 => egui::Color32::from_rgb(230, 60, 50),
+                        1 | 6 => egui::Color32::from_rgb(90, 220, 90),
+                        _ => return None,
+                    };
+                    Some(((m.walker.cell.0 as f32, m.walker.cell.1 as f32), color))
+                })
+                .collect();
+            let me = self.player.as_ref().map(|p| (p.walker.cell.0 as f32, p.walker.cell.1 as f32));
+            let map_name = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
             let out = self.egui_ctx.run_ui(input, |ui| {
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars);
+                if let (true, Some(map), Some(me)) = (self.show_minimap, self.minimap.as_ref(), me) {
+                    hud::show_minimap(ui.ctx(), map, &map_name, me, &dots);
+                }
                 answer = self.hud.show_dialog(ui.ctx(), &mut self.dialog, self.cutin.as_ref());
                 ui_action = self.windows.show(ui.ctx(), &view);
                 self.social.show_party = self.windows.party;
@@ -1976,6 +2004,7 @@ impl ApplicationHandler for App {
                         "s" => self.windows.toggle_skills(),
                         "z" => self.windows.party = !self.windows.party,
                         "h" => self.windows.friends = !self.windows.friends,
+                        "m" => self.show_minimap = !self.show_minimap,
                         _ => {}
                     },
                     _ => {}
@@ -2096,6 +2125,8 @@ fn main() -> anyhow::Result<()> {
         walk_goal: None,
         dialog: None,
         cutin: None,
+        minimap: None,
+        show_minimap: true,
         pending_npc: None,
         attack: None,
         chasing: false,

@@ -376,3 +376,28 @@ impl Hud {
         Some((npc, reply))
     }
 }
+
+/// The map's thumbnail and the cell extents it covers.
+pub struct Minimap {
+    pub texture: egui::TextureHandle,
+    pub cells: (f32, f32),
+}
+
+/// Minimap under the menu bar: `dots` are cells with a colour, `me` is drawn last and larger.
+pub fn show_minimap(ctx: &egui::Context, map: &Minimap, name: &str, me: (f32, f32), dots: &[((f32, f32), Color32)]) {
+    const SIZE: f32 = 160.0;
+    egui::Area::new(egui::Id::unique("minimap")).anchor(Align2::RIGHT_TOP, Vec2::new(-12.0, 52.0)).interactable(false).show(ctx, |ui| {
+        panel().show(ui, |ui| {
+            ui.vertical_centered(|ui| ui.label(RichText::new(format!("{name}  {}, {}", me.0 as i32, me.1 as i32)).size(12.0)));
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(SIZE), egui::Sense::hover());
+            let painter = ui.painter_at(rect);
+            painter.image(map.texture.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+            // Cell y grows north; the image's y grows down.
+            let at = |c: (f32, f32)| rect.min + Vec2::new(c.0 / map.cells.0 * SIZE, (1.0 - c.1 / map.cells.1) * SIZE);
+            for &(c, color) in dots {
+                painter.circle_filled(at(c), 2.0, color);
+            }
+            painter.circle(at(me), 3.5, Color32::WHITE, egui::Stroke::new(1.0, Color32::BLACK));
+        });
+    });
+}
