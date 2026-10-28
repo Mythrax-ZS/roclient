@@ -6,6 +6,7 @@
 mod audio;
 mod fx;
 mod gamepad;
+mod guild;
 mod hud;
 mod settings;
 mod social;
@@ -634,6 +635,8 @@ struct App {
     world: Option<World>,
     player: Option<Mob>,
     account_id: u32,
+    char_id: u32,
+    guild: guild::Guild,
     /// Connection problem shown in the title bar.
     status: Option<String>,
     walk_goal: Option<WalkGoal>,
@@ -966,6 +969,7 @@ impl App {
             Entered { map, x, y, dir, character, account_id } => {
                 tracing::info!(%map, x, y, name = %character.name, job = character.job, "entered");
                 self.account_id = account_id;
+                self.char_id = character.char_id;
                 self.units.clear();
                 self.floor.clear();
                 self.warps.clear();
@@ -1218,6 +1222,62 @@ impl App {
                 self.hud.push_chat(ro_net::ChatKind::System, msg.into());
             }
             Guild { id, name } => self.social.guild = (id != 0 && !name.is_empty()).then_some(name),
+            GuildBelong { id, master, name } => {
+                (self.guild.id, self.guild.master) = (id, master);
+                if id == 0 {
+                    (self.guild.info, self.guild.members) = (None, vec![]);
+                } else {
+                    self.guild.name = name.clone();
+                    self.guild.needs_refresh = true;
+                }
+                self.social.guild = (id != 0 && !name.is_empty()).then_some(name);
+            }
+            GuildCreated(result) => {
+                let text = match result {
+                    0 => "Guild created.",
+                    1 => "You are already in a guild.",
+                    2 => "That guild name is already taken.",
+                    3 => "You need an Emperium to found a guild.",
+                    _ => "Could not create the guild.",
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, text.into());
+                if result == 0 {
+                    self.guild.open = true;
+                    self.guild.needs_refresh = true;
+                }
+            }
+            GuildInfo(info) => {
+                self.guild.name = info.name.clone();
+                self.guild.info = Some(info);
+            }
+            GuildMembers(m) => self.guild.members = m,
+            GuildNotice { subject, text } => self.guild.notice = (subject, text),
+            GuildInvited { guild, name } => self.social.prompts.push(social::Prompt::Guild { guild, name }),
+            GuildInviteResult(r) => {
+                let text = match r {
+                    0 => "That player is already in a guild.",
+                    1 => "Your guild invitation was declined.",
+                    2 => "A new member joined the guild.",
+                    3 => "The guild is full.",
+                    _ => "Guild invitation failed.",
+                };
+                self.hud.push_chat(ro_net::ChatKind::Guild, text.into());
+                if r == 2 {
+                    self.guild.needs_refresh = true;
+                }
+            }
+            GuildMemberState { char_id, online, .. } => {
+                if let Some(m) = self.guild.members.iter_mut().find(|m| m.char_id == char_id) {
+                    m.online = online;
+                }
+            }
+            GuildMemberGone { char_id, reason, expelled } => {
+                let who = self.guild.members.iter().find(|m| m.char_id == char_id).map_or_else(|| "A member".to_string(), |m| m.name.clone());
+                let verb = if expelled { "was expelled from" } else { "left" };
+                let why = if reason.trim().is_empty() { String::new() } else { format!(" ({})", reason.trim()) };
+                self.hud.push_chat(ro_net::ChatKind::Guild, format!("{who} {verb} the guild{why}."));
+                self.guild.members.retain(|m| m.char_id != char_id);
+            }
             Friends(list) => self.social.friends = list,
             FriendOnline { account_id, online, .. } => {
                 if let Some(f) = self.social.friends.iter_mut().find(|f| f.account_id == account_id) {
@@ -2272,6 +2332,10 @@ impl App {
                         self.send(ro_net::Command::Party(ro_net::PartyRequest::Invite { name: name.into() }));
                         None
                     }
+                    Some(("guild", name)) => {
+                        self.send(ro_net::Command::Guild(ro_net::GuildRequest::Create { char_id: self.char_id, name: name.into() }));
+                        None
+                    }
                     Some(("friend", name)) => {
                         self.send(ro_net::Command::Friend(ro_net::FriendRequest::Add { name: name.into() }));
                         None
@@ -2311,7 +2375,7 @@ impl App {
             }
         }
         if std::mem::take(&mut self.open_windows) {
-            (self.windows.party, self.windows.friends, self.windows.settings, self.windows.stats) = (true, true, true, true);
+            (self.windows.guild, self.guild.tab_members) = (true, std::env::args().any(|a| a == "--guild-members"));
         }
         for c in std::mem::take(&mut self.queued_commands) {
             self.send(c);
@@ -2606,6 +2670,18 @@ impl App {
                 self.social.show_party = self.windows.party;
                 self.social.show_friends = self.windows.friends;
                 social_cmds = self.social.show(ui.ctx(), &social_ctx);
+                // Guild window (menu button / Alt+G).
+                if self.windows.guild != self.guild.open {
+                    self.guild.toggle();
+                }
+                let guild_ctx = guild::Ctx {
+                    account_id: self.account_id,
+                    char_id: self.char_id,
+                    has_emperium: items.iter().any(|i| i.id == guild::EMPERIUM),
+                    job_name: &job_title,
+                };
+                social_cmds.extend(self.guild.show(ui.ctx(), &guild_ctx));
+                self.windows.guild = self.guild.open;
                 (self.windows.party, self.windows.friends) = (self.social.show_party, self.social.show_friends);
                 // Menu for a clicked player.
                 if let Some((id, name, pos)) = self.player_menu.clone() {
@@ -2623,6 +2699,10 @@ impl App {
                             }
                             if ui.button("Add friend").clicked() {
                                 player_cmd = Some((ro_net::Command::Friend(ro_net::FriendRequest::Add { name: name.clone() }), None));
+                                keep = false;
+                            }
+                            if self.guild.id != 0 && ui.button("Invite to guild").clicked() {
+                                player_cmd = Some((ro_net::Command::Guild(ro_net::GuildRequest::Invite { name: name.clone() }), None));
                                 keep = false;
                             }
                             if ui.button("Close").clicked() {
@@ -2671,6 +2751,8 @@ impl App {
                 let cmd = match text.split_once(' ') {
                     Some(("/p", rest)) => ro_net::Command::Party(ro_net::PartyRequest::Chat { speaker, text: rest.to_string() }),
                     Some(("/g", rest)) => ro_net::Command::Party(ro_net::PartyRequest::GuildChat { speaker, text: rest.to_string() }),
+                    // /guild "Name": found a guild, as in the original client.
+                    Some(("/guild", rest)) => ro_net::Command::Guild(ro_net::GuildRequest::Create { char_id: self.char_id, name: rest.trim().trim_matches('"').to_string() }),
                     _ => ro_net::Command::Chat(text),
                 };
                 let _ = tx.send(cmd);
@@ -2838,6 +2920,7 @@ impl ApplicationHandler for App {
                         "s" => self.windows.toggle_skills(),
                         "z" => self.windows.party = !self.windows.party,
                         "h" => self.windows.friends = !self.windows.friends,
+                        "g" => self.windows.guild = !self.windows.guild,
                         "m" => {
                             self.settings.minimap = !self.settings.minimap;
                             self.settings.save();
@@ -2974,6 +3057,8 @@ fn main() -> anyhow::Result<()> {
         world: None,
         player: None,
         account_id: 0,
+        char_id: 0,
+        guild: Default::default(),
         status: None,
         walk_goal: None,
         dialog: None,

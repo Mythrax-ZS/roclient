@@ -1,0 +1,187 @@
+//! Guilds at PACKETVER 20250402: creating, inviting, leaving, and the guild window's info,
+//! member list and notice (layouts from rAthena's packets_struct.hpp).
+
+use bytes::{Buf, BufMut, BytesMut};
+
+use crate::{
+    codec::Encode,
+    packets::{get_fixed_str, put_db_packet, put_fixed_str},
+};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GuildRequest {
+    /// Found a guild (consumes an Emperium). `char_id` is ours.
+    Create { char_id: u32, name: String },
+    /// Ask the server for the guild window's data: 0 info, 1 member list.
+    Info(u32),
+    Invite { name: String },
+    Answer { guild: u32, accept: bool },
+    Leave { guild: u32, account_id: u32, char_id: u32, reason: String },
+    Expel { guild: u32, account_id: u32, char_id: u32, reason: String },
+    Notice { guild: u32, subject: String, text: String },
+}
+
+impl Encode for GuildRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            GuildRequest::Create { char_id, name } => {
+                let mut n = BytesMut::new();
+                put_fixed_str(&mut n, name, 24);
+                put_db_packet(d, "CreateGuild", &[&char_id.to_le_bytes(), &n]);
+            }
+            GuildRequest::Info(kind) => put_db_packet(d, "GuildRequestInfo", &[&kind.to_le_bytes()]),
+            // CZ_REQ_JOIN_GUILD2 (0x0916): invite by character name.
+            GuildRequest::Invite { name } => {
+                d.put_u16_le(0x0916);
+                put_fixed_str(d, name, 24);
+            }
+            // CZ_JOIN_GUILD (0x016b): answer 1 accepts, 0 declines.
+            GuildRequest::Answer { guild, accept } => {
+                d.put_u16_le(0x016b);
+                d.put_u32_le(*guild);
+                d.put_u32_le(*accept as u32);
+            }
+            // CZ_REQ_LEAVE_GUILD (0x0159) / CZ_REQ_BAN_GUILD (0x015b).
+            GuildRequest::Leave { guild, account_id, char_id, reason } | GuildRequest::Expel { guild, account_id, char_id, reason } => {
+                d.put_u16_le(if matches!(self, GuildRequest::Leave { .. }) { 0x0159 } else { 0x015b });
+                d.put_u32_le(*guild);
+                d.put_u32_le(*account_id);
+                d.put_u32_le(*char_id);
+                put_fixed_str(d, reason, 40);
+            }
+            GuildRequest::Notice { guild, subject, text } => {
+                let (mut s, mut t) = (BytesMut::new(), BytesMut::new());
+                put_fixed_str(&mut s, subject, 60);
+                put_fixed_str(&mut t, text, 120);
+                put_db_packet(d, "GuildChangeNotice", &[&guild.to_le_bytes(), &s, &t]);
+            }
+        }
+    }
+}
+
+/// ZC_UPDATE_GDID (0x016c): we belong to `id` (0: no guild); `master` if we lead it.
+pub fn parse_belong(data: &[u8]) -> (u32, bool, String) {
+    let mut b = &data[2..];
+    let id = b.get_u32_le();
+    b.advance(4 + 4); // emblem, mode
+    let master = b.get_u8() != 0;
+    b.advance(4);
+    (id, master, get_fixed_str(&mut b, 24))
+}
+
+/// The guild window's summary (ZC_GUILD_INFO, 0x0b7b).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GuildInfo {
+    pub id: u32,
+    pub level: i32,
+    pub members: i32,
+    pub max_members: i32,
+    pub average_level: i32,
+    pub exp: i32,
+    pub max_exp: i32,
+    pub name: String,
+    pub castle: String,
+    pub master: String,
+}
+
+pub fn parse_guild_info(data: &[u8]) -> GuildInfo {
+    let mut b = &data[2..];
+    let id = b.get_i32_le() as u32;
+    let level = b.get_i32_le();
+    let members = b.get_i32_le();
+    let max_members = b.get_i32_le();
+    let average_level = b.get_i32_le();
+    let exp = b.get_i32_le();
+    let max_exp = b.get_i32_le();
+    b.advance(4 * 4); // points, honor, virtue, emblem version
+    let name = get_fixed_str(&mut b, 24);
+    let castle = get_fixed_str(&mut b, 16);
+    b.advance(4 + 4); // zeny, master char id
+    let master = get_fixed_str(&mut b, 24);
+    GuildInfo { id, level, members, max_members, average_level, exp, max_exp, name, castle, master }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GuildMember {
+    pub account_id: u32,
+    pub char_id: u32,
+    pub job: i16,
+    pub level: i16,
+    pub online: bool,
+    pub position: i32,
+    pub name: String,
+}
+
+/// ZC_MEMBERMGR_INFO (0x0b7d): the member list, 58 bytes each.
+pub fn parse_members(data: &[u8]) -> Vec<GuildMember> {
+    data.get(4..)
+        .unwrap_or_default()
+        .chunks_exact(58)
+        .map(|mut b| {
+            let account_id = b.get_u32_le();
+            let char_id = b.get_u32_le();
+            b.advance(2 * 3); // head, palette, sex
+            let job = b.get_i16_le();
+            let level = b.get_i16_le();
+            b.advance(4); // contribution
+            let online = b.get_i32_le() != 0;
+            let position = b.get_i32_le();
+            b.advance(4); // last login
+            GuildMember { account_id, char_id, job, level, online, position, name: get_fixed_str(&mut b, 24) }
+        })
+        .collect()
+}
+
+/// ZC_GUILD_NOTICE (0x016f): (subject, text).
+pub fn parse_notice(data: &[u8]) -> (String, String) {
+    let mut b = &data[2..];
+    let subject = get_fixed_str(&mut b, 60);
+    (subject, get_fixed_str(&mut b, 120))
+}
+
+/// ZC_REQ_JOIN_GUILD (0x016a): (guild id, guild name) inviting us.
+pub fn parse_invite(data: &[u8]) -> (u32, String) {
+    let mut b = &data[2..];
+    let id = b.get_u32_le();
+    (id, get_fixed_str(&mut b, 24))
+}
+
+/// ZC_UPDATE_CHARSTAT (0x01f2): a member logged in or out. (account, char, online)
+pub fn parse_member_state(data: &[u8]) -> (u32, u32, bool) {
+    let mut b = &data[2..];
+    (b.get_u32_le(), b.get_u32_le(), b.get_u32_le() != 0)
+}
+
+/// ZC_ACK_LEAVE_GUILD2 / ZC_ACK_BAN_GUILD3 (0x0a83 / 0x0a82): (char id, reason).
+pub fn parse_member_gone(opcode: u16, data: &[u8]) -> (u32, String) {
+    let mut b = &data[2..];
+    if opcode == 0x0a82 {
+        let reason = get_fixed_str(&mut b, 40);
+        (b.get_u32_le(), reason)
+    } else {
+        let id = b.get_u32_le();
+        (id, get_fixed_str(&mut b, 40))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client_packet;
+
+    #[test]
+    fn requests_have_server_sizes() {
+        let mut b = BytesMut::new();
+        GuildRequest::Create { char_id: 7, name: "Heroes".into() }.encode(&mut b);
+        assert_eq!(b.len(), client_packet("CreateGuild").len as usize);
+        let mut b = BytesMut::new();
+        GuildRequest::Leave { guild: 1, account_id: 2, char_id: 3, reason: String::new() }.encode(&mut b);
+        assert_eq!(b.len(), 54);
+        let mut b = BytesMut::new();
+        GuildRequest::Answer { guild: 1, accept: true }.encode(&mut b);
+        assert_eq!(b.len(), 10);
+        let mut b = BytesMut::new();
+        GuildRequest::Invite { name: "Buddy".into() }.encode(&mut b);
+        assert_eq!(b.len(), 26);
+    }
+}

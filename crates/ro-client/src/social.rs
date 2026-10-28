@@ -47,6 +47,7 @@ pub enum Prompt {
     Trade { name: String },
     Party { party: u32, name: String },
     Friend { account_id: u32, char_id: u32, name: String },
+    Guild { guild: u32, name: String },
 }
 
 #[derive(Default)]
@@ -99,6 +100,7 @@ impl Social {
             Prompt::Trade { .. } => Command::Trade(TradeRequest::Answer { accept: true }),
             Prompt::Party { party, .. } => Command::Party(PartyRequest::Answer { party, accept: true }),
             Prompt::Friend { account_id, char_id, .. } => Command::Friend(FriendRequest::Answer { account_id, char_id, accept: true }),
+            Prompt::Guild { guild, .. } => Command::Guild(ro_net::GuildRequest::Answer { guild, accept: true }),
         })
     }
 
@@ -120,6 +122,7 @@ impl Social {
                 Prompt::Trade { name } => format!("{name} wants to trade with you."),
                 Prompt::Party { name, .. } => format!("You are invited to the party \"{name}\"."),
                 Prompt::Friend { name, .. } => format!("{name} wants to be your friend."),
+                Prompt::Guild { name, .. } => format!("You are invited to the guild \"{name}\"."),
             };
             egui::Window::new("Request").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 120.0)).show(ctx, |ui| {
                 ui.label(text);
@@ -134,6 +137,7 @@ impl Social {
                             Prompt::Friend { account_id, char_id, .. } => {
                                 Command::Friend(FriendRequest::Answer { account_id: *account_id, char_id: *char_id, accept: yes })
                             }
+                            Prompt::Guild { guild, .. } => Command::Guild(ro_net::GuildRequest::Answer { guild: *guild, accept: yes }),
                         });
                     }
                 });

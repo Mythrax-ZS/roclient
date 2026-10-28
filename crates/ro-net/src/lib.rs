@@ -14,6 +14,8 @@ use tokio_util::codec::Framed;
 pub use ro_proto::packets::{sp, Act, CharInfo, ChatKind, Look, NpcDialog, NpcReply, UnitInfo, UnitPos};
 pub use ro_proto::items::{Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
+pub use ro_proto::guild::{GuildInfo, GuildMember, GuildRequest};
+use ro_proto::guild::*;
 pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
 use ro_proto::social::*;
 
@@ -200,6 +202,19 @@ pub enum Event {
     PartyInvite { party: u32, name: String },
     PartyCreated { ok: bool },
     Guild { id: u32, name: String },
+    /// Which guild we belong to (0: none) and whether we lead it.
+    GuildBelong { id: u32, master: bool, name: String },
+    /// Founding result: 0 ok, 1 already in a guild, 2 name taken, 3 no Emperium.
+    GuildCreated(u8),
+    GuildInfo(GuildInfo),
+    GuildMembers(Vec<GuildMember>),
+    GuildNotice { subject: String, text: String },
+    /// A guild invites us.
+    GuildInvited { guild: u32, name: String },
+    /// Our invite was answered (0 already in a guild, 1 refused, 2 joined, 3 guild full).
+    GuildInviteResult(u8),
+    GuildMemberState { account_id: u32, char_id: u32, online: bool },
+    GuildMemberGone { char_id: u32, reason: String, expelled: bool },
     Friends(Vec<Friend>),
     FriendOnline { account_id: u32, char_id: u32, online: bool },
     FriendRequested { account_id: u32, char_id: u32, name: String },
@@ -258,6 +273,7 @@ pub enum Command {
     Trade(TradeRequest),
     Party(PartyRequest),
     Friend(FriendRequest),
+    Guild(GuildRequest),
     Stat(StatRequest),
     Move { x: u16, y: u16 },
     /// Attack a unit (continuously when `keep`).
@@ -374,6 +390,7 @@ impl MapSession {
                     Some(Command::Trade(r)) => self.send(r).await?,
                     Some(Command::Party(r)) => self.send(r).await?,
                     Some(Command::Friend(r)) => self.send(r).await?,
+                    Some(Command::Guild(r)) => self.send(r).await?,
                     Some(Command::Stat(r)) => self.send(r).await?,
                 },
                 f = self.conn.next() => {
@@ -452,9 +469,30 @@ impl MapSession {
                         0x00fa => Some(Event::PartyCreated { ok: data[2] == 0 }),
                         0x0109 => Some(Event::Chat { kind: ChatKind::Party, from: None, text: parse_party_chat(&data) }),
                         0x017f => Some(Event::Chat { kind: ChatKind::Guild, from: None, text: parse_guild_chat(&data) }),
-                        0x02f7 => {
-                            let (id, name) = parse_guild_name(&data);
-                            Some(Event::Guild { id, name })
+                        // ZC_UPDATE_GDID: 0x02f7 at this PACKETVER (0x016c is the older form).
+                        0x016c | 0x02f7 => {
+                            let (id, master, name) = parse_belong(&data);
+                            Some(Event::GuildBelong { id, master, name })
+                        }
+                        0x0167 => Some(Event::GuildCreated(data[2])),
+                        0x0b7b => Some(Event::GuildInfo(parse_guild_info(&data))),
+                        0x0b7d => Some(Event::GuildMembers(parse_members(&data))),
+                        0x016f => {
+                            let (subject, text) = parse_notice(&data);
+                            Some(Event::GuildNotice { subject, text })
+                        }
+                        0x016a => {
+                            let (guild, name) = parse_invite(&data);
+                            Some(Event::GuildInvited { guild, name })
+                        }
+                        0x0169 => Some(Event::GuildInviteResult(data[2])),
+                        0x01f2 => {
+                            let (account_id, char_id, online) = parse_member_state(&data);
+                            Some(Event::GuildMemberState { account_id, char_id, online })
+                        }
+                        0x0a82 | 0x0a83 => {
+                            let (char_id, reason) = parse_member_gone(opcode, &data);
+                            Some(Event::GuildMemberGone { char_id, reason, expelled: opcode == 0x0a82 })
                         }
                         0x0201 => Some(Event::Friends(parse_friends(&data))),
                         0x0206 => {
