@@ -108,9 +108,11 @@ impl Rsm {
                     Ok(Face { vertices, tex_coords, texture, two_sided, smooth_group })
                 })
                 .collect::<Result<_>>()?;
-            if v(5) {
+            // RSM 1.x has no per-node position keyframes; 1.6 adds scale keyframes
+            // (frame, scale xyz, reserved) before the rotation keyframes.
+            if v(6) {
                 let n = r.i32()? as usize;
-                r.bytes(n * 16)?; // position keyframes
+                r.bytes(n * 20)?;
             }
             let n = r.i32()? as usize;
             let rot_keys = (0..n)
