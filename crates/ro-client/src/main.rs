@@ -828,6 +828,8 @@ struct App {
     /// Left button held after clicking the ground: keep walking toward the cursor.
     mouse_walk: bool,
     mouse_walk_ms: f32,
+    /// Left mouse button held (from window events).
+    left_down: bool,
     cursor: Option<(f64, f64)>,
     fps: FpsCounter,
     egui_ctx: egui::Context,
@@ -1887,7 +1889,7 @@ impl App {
         if !self.mouse_walk {
             return;
         }
-        if !self.egui_ctx.input(|i| i.pointer.primary_down()) || self.dead || self.aiming.is_some() {
+        if !self.left_down || self.dead || self.aiming.is_some() {
             self.mouse_walk = false;
             return;
         }
@@ -3167,6 +3169,10 @@ impl ApplicationHandler for App {
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         // The UI sees input first; clicks and keys it uses don't reach the game.
         let ui_used = self.egui_state.as_mut().is_some_and(|s| s.on_window_event(window, &event).consumed);
+        // Track the left button ourselves (hold-to-walk), whatever the UI did with the event.
+        if let WindowEvent::MouseInput { state, button: MouseButton::Left, .. } = &event {
+            self.left_down = *state == ElementState::Pressed;
+        }
         if let WindowEvent::CursorMoved { position, .. } = &event {
             // Keep tracking the cursor even over UI so rotation deltas stay continuous.
             if ui_used {
@@ -3440,6 +3446,7 @@ fn main() -> anyhow::Result<()> {
         cursor_action: 0,
         mouse_walk: false,
         mouse_walk_ms: 0.0,
+        left_down: false,
         cursor: None,
         fps: FpsCounter::default(),
         egui_ctx: egui::Context::default(),
