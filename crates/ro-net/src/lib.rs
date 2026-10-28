@@ -240,6 +240,8 @@ pub enum Event {
     /// A lasting ground effect (Sanctuary, Fire Wall, traps...) appeared or ended.
     GroundEffect { id: u32, cell: (u16, u16), kind: u32 },
     GroundEffectGone(u32),
+    /// A dead unit (maybe us) was brought back.
+    Resurrected(u32),
     /// A misc effect on a unit (0 base level up, 1 job level up, ...).
     UnitEffect { id: u32, effect: u32 },
     Disconnected(String),
@@ -260,6 +262,8 @@ pub enum Command {
     Attack { target: u32, keep: bool },
     /// Sit down (true) or stand up.
     Sit(bool),
+    /// After dying: 0 return to the save point, 1 character select.
+    Restart(u8),
     /// Talk to an NPC or answer its dialog.
     Npc { npc: u32, reply: NpcReply },
     /// Say something in public chat.
@@ -360,6 +364,7 @@ impl MapSession {
                     Some(Command::Chat(text)) => self.send(CzChat { name, text: &text }).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
+                    Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
                     Some(Command::Npc { npc, reply }) => self.send(CzNpc { npc, reply: &reply }).await?,
                     Some(Command::Item(r)) => self.send(r).await?,
                     Some(Command::Shop(r)) => self.send(r).await?,
@@ -535,6 +540,7 @@ impl MapSession {
                             Some(Event::GroundEffect { id, cell, kind })
                         }
                         0x0120 => Some(Event::GroundEffectGone(parse_skill_disappear(&data))),
+                        0x0148 => Some(Event::Resurrected(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x019b => {
                             let (id, effect) = parse_notify_effect(&data);
                             Some(Event::UnitEffect { id, effect })

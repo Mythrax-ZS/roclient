@@ -488,3 +488,31 @@ pub fn target_marker(ctx: &egui::Context, feet: glam::Vec2, ppp: f32, aiming: bo
     painter.add(egui::Shape::convex_polygon(pts, color, Stroke::new(1.5, Color32::BLACK)));
     ctx.request_repaint();
 }
+
+/// Shown while dead, like the original client's restart window: return to the save point,
+/// or wait here for a resurrection. Returns true when the player chose to return.
+pub fn death_window(ctx: &egui::Context, pad_hint: Option<&str>) -> bool {
+    let mut go = false;
+    egui::Window::new("death")
+        .title_bar(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, -190.0))
+        .frame(panel())
+        .show(ctx, |ui| {
+            ui.set_width(260.0);
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new("You have died.").size(16.0).strong().color(Color32::from_rgb(235, 110, 100)));
+                ui.add_space(4.0);
+                ui.label(RichText::new("Wait for a resurrection, or return to your save point.").size(12.5).color(Color32::from_gray(200)));
+                ui.add_space(10.0);
+                let label = match pad_hint {
+                    Some(b) => format!("Return to Save Point  ({b})"),
+                    None => "Return to Save Point".to_string(),
+                };
+                if ui.add(egui::Button::new(RichText::new(label).size(14.0)).min_size(Vec2::new(220.0, 30.0))).clicked() {
+                    go = true;
+                }
+            });
+        });
+    go
+}

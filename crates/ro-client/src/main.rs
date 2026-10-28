@@ -670,6 +670,8 @@ struct App {
     pad_target: Option<u32>,
     pad_dir: Option<glam::Vec2>,
     pad_walk_ms: f32,
+    /// We died and wait to return to the save point (or be resurrected).
+    dead: bool,
     /// `--fx name`: loop one STR effect on the player (effect previews).
     fx_test: Option<&'static str>,
     alt: bool,
@@ -1025,6 +1027,9 @@ impl App {
                             p.set_pose(Pose::Dead, f32::MAX);
                         }
                         self.hud.push_chat(ro_net::ChatKind::System, "You have died.".into());
+                        self.dead = true;
+                        self.attack = None;
+                        self.walk_goal = None;
                     }
                 } else if reason == 1 {
                     // Died: play the death animation, then remove.
@@ -1367,6 +1372,13 @@ impl App {
                 }
             }
             GroundEffectGone(id) => self.stop_fx(id),
+            Resurrected(id) if id == self.account_id => self.revive(),
+            Resurrected(id) => {
+                if let Some(m) = self.units.get_mut(&id) {
+                    m.pose = None;
+                    m.dying = None;
+                }
+            }
             UnitEffect { id, effect } => {
                 if let (Some(name), Some(pos)) = (fx::misc_effect(effect), self.unit_pos(id)) {
                     self.play_fx(name, pos);
@@ -1378,6 +1390,8 @@ impl App {
                 }
             }
             MapMove { map, x, y } => {
+                // Respawning at the save point arrives as a map move.
+                self.revive();
                 self.units.clear();
                 self.floor.clear();
                 self.warps.clear();
@@ -1599,6 +1613,17 @@ impl App {
     }
 
     /// The player or a unit by id.
+    /// Back on our feet: respawned at the save point or resurrected.
+    fn revive(&mut self) {
+        if !std::mem::take(&mut self.dead) {
+            return;
+        }
+        if let Some(p) = self.player.as_mut() {
+            p.pose = None;
+            p.actor.time_ms = 0.0;
+        }
+    }
+
     /// Where a unit stands (its feet), if we can see it.
     fn unit_pos(&self, id: u32) -> Option<glam::Vec3> {
         if id == self.account_id { self.player.as_ref() } else { self.units.get(&id) }.map(|m| m.actor.pos)
@@ -1699,6 +1724,14 @@ impl App {
             if f.just(RightThumb) {
                 r.camera.yaw = 0.0;
             }
+        }
+
+        // Dead: A returns to the save point; nothing else acts.
+        if self.dead {
+            if f.just(South) {
+                self.send(ro_net::Command::Restart(0));
+            }
+            return;
         }
 
         // NPC dialogs take the D-pad and face buttons while open.
@@ -2145,6 +2178,10 @@ impl App {
                         None
                     }
                     Some(("drop", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::Drop { index, amount: 1 }),
+                    _ if step == "restart" => {
+                        self.send(ro_net::Command::Restart(0));
+                        None
+                    }
                     _ if step == "pickup" => {
                         self.auto_pickup = true;
                         None
@@ -2431,6 +2468,12 @@ impl App {
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars);
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
                     hud::show_minimap(ui.ctx(), map, &map_name, me, &dots);
+                }
+                if self.dead {
+                    let hint = self.pad.in_use().then_some(if self.pad.playstation { "Cross" } else { "A" });
+                    if hud::death_window(ui.ctx(), hint) {
+                        self.queued_commands.push(ro_net::Command::Restart(0));
+                    }
                 }
                 if let Some(feet) = pad_marker {
                     hud::target_marker(ui.ctx(), feet, ppp, self.aiming.is_some());
@@ -2841,6 +2884,7 @@ fn main() -> anyhow::Result<()> {
         pad_target: None,
         pad_dir: None,
         pad_walk_ms: 0.0,
+        dead: false,
         fx_test: arg("--fx").map(|s| &*s.leak()),
         alt: false,
         queued_action: None,

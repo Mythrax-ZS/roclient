@@ -835,3 +835,14 @@ pub fn parse_sprite_change(data: &[u8]) -> (u32, u8, u32, u32) {
     let mut b = &data[2..];
     (b.get_u32_le(), b.get_u8(), b.get_u32_le(), b.get_u32_le())
 }
+
+/// CZ_RESTART (0x00b2): 0 return to the save point after dying, 1 back to character select.
+pub struct CzRestart {
+    pub kind: u8,
+}
+
+impl Encode for CzRestart {
+    fn encode(&self, d: &mut BytesMut) {
+        put_db_packet(d, "Restart", &[&[self.kind]]);
+    }
+}
