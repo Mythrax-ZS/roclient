@@ -3536,10 +3536,12 @@ impl App {
                     self.skin = Some(classic::Skin::load(&self.egui_ctx, vfs));
                 }
             }
+            let guild_name = self.guild.name.clone();
             let items: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
             let skill_names = |n: &str| self.skill_names.display(n);
             let view = windows::View {
                 skin: self.skin.as_ref().filter(|_| self.settings.classic_ui),
+                guild_name: Some(guild_name.as_str()),
                 items: &items,
                 db: self.item_db.as_ref(),
                 icons: &self.icons,

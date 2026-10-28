@@ -11,7 +11,7 @@ const DIR: &str = r"data\texture\유저인터페이스\basic_interface";
 /// The images loaded (file names without .bmp).
 const NAMES: &[&str] = &[
     "titlebar_left", "titlebar_mid", "titlebar_right", "btnbar_left", "btnbar_mid", "btnbar_right", "itemwin_mid", "tab_itm_01", "tab_itm_02", "tab_itm_03", "sys_close_off",
-    "sys_close_on", "equipwin_bg",
+    "sys_close_on", "equipwin_bg", "statwin_bg", "arw_right", "arw_right_on",
 ];
 
 /// Dark text on the white window bodies.

@@ -79,6 +79,8 @@ enum InvTab {
 pub struct View<'a> {
     /// The original art, when the Classic interface is on.
     pub skin: Option<&'a crate::classic::Skin>,
+    /// Our guild's name (empty without one).
+    pub guild_name: Option<&'a str>,
     pub items: &'a [&'a InvItem],
     pub db: Option<&'a ItemDb>,
     pub icons: &'a HashMap<u32, egui::TextureHandle>,
@@ -686,7 +688,76 @@ impl Windows {
         }
 
         let mut held = false;
-        if self.stats {
+        if let (true, Some(skin), Some(s)) = (self.stats, v.skin, v.stats) {
+            let mut open = true;
+            let mut raise = None;
+            let mut hold = self.stat_hold;
+            skin.window(
+                ctx,
+                "Status",
+                col(0.0),
+                280.0,
+                &mut open,
+                |ui| {
+                    let (area, _) = ui.allocate_exact_size(Vec2::new(280.0, 103.0), egui::Sense::hover());
+                    let p = ui.painter().clone();
+                    skin.draw(&p, "statwin_bg", area.min);
+                    let at = |x: f32, row: usize| egui::pos2(area.min.x + x, area.min.y + 10.0 + row as f32 * 16.0);
+                    let small = egui::FontId::proportional(10.5);
+                    let text = egui::FontId::proportional(11.5);
+                    for i in 0..6 {
+                        // Value box: base, and bonuses beside it.
+                        let value = if s.plus[i] != 0 { format!("{}{:+}", s.base[i], s.plus[i]) } else { s.base[i].to_string() };
+                        p.text(at(73.0, i), egui::Align2::RIGHT_CENTER, value, small.clone(), crate::classic::TEXT);
+                        p.text(at(94.0, i), egui::Align2::CENTER_CENTER, s.cost[i].to_string(), small.clone(), crate::classic::TEXT);
+                        // The arrow raises; holding repeats after 0.4 s, one point every 50 ms.
+                        let can = s.points >= s.cost[i] as u32;
+                        let r = egui::Rect::from_center_size(at(80.5, i), Vec2::splat(11.0));
+                        let resp = ui.interact(r, ui.scope_id().with(("stat_up", i)), egui::Sense::click());
+                        if can {
+                            skin.draw(&p, if resp.hovered() { "arw_right_on" } else { "arw_right" }, r.min);
+                        }
+                        let resp = resp.on_hover_text(format!("Costs {} — hold to keep raising", s.cost[i]));
+                        if can && resp.clicked() {
+                            raise = Some(i);
+                        }
+                        if can && resp.is_pointer_button_down_on() {
+                            held = true;
+                            let before = hold;
+                            hold += ui.input(|inp| inp.stable_dt);
+                            if hold > 0.4 && ((hold - 0.4) / 0.05) as u32 != ((before - 0.4).max(0.0) / 0.05) as u32 {
+                                raise = Some(i);
+                            }
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                    let aspd = ((2000 - (s.aspd.0 + s.aspd.1) as i32) / 10).to_string();
+                    let pairs = [
+                        (format!("{} + {}", s.atk.0, s.atk.1), format!("{} + {}", s.def.0, s.def.1)),
+                        (format!("{} ~ {}", s.matk.0, s.matk.1), format!("{} + {}", s.mdef.0, s.mdef.1)),
+                        (s.hit.to_string(), format!("{} + {}", s.flee.0, s.flee.1)),
+                        (s.crit.to_string(), aspd),
+                    ];
+                    for (row, (l, r)) in pairs.into_iter().enumerate() {
+                        p.text(at(190.0, row), egui::Align2::RIGHT_CENTER, l, small.clone(), crate::classic::TEXT);
+                        p.text(at(274.0, row), egui::Align2::RIGHT_CENTER, r, small.clone(), crate::classic::TEXT);
+                    }
+                    p.text(at(274.0, 4), egui::Align2::RIGHT_CENTER, s.points.to_string(), text.clone(), crate::classic::TEXT);
+                    if let Some(g) = v.guild_name.filter(|g| !g.is_empty()) {
+                        p.text(at(274.0, 5), egui::Align2::RIGHT_CENTER, g, small, crate::classic::TEXT);
+                    }
+                },
+                |_| {},
+            );
+            self.stat_hold = hold;
+            if let Some(i) = raise {
+                action = Some(UiAction::RaiseStat(i));
+            }
+            self.stats = open;
+            if !held {
+                self.stat_hold = 0.0;
+            }
+        } else if self.stats {
             let mut open = true;
             egui::Window::new("Status").open(&mut open).default_pos(col(0.0)).resizable(false).show(ctx, |ui| {
                 let Some(s) = v.stats else {
