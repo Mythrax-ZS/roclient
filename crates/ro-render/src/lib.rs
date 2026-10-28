@@ -2,10 +2,13 @@
 
 mod camera;
 mod scene;
+mod effect;
 mod sprite;
 mod water;
 
 use std::sync::Arc;
+
+use wgpu::util::DeviceExt;
 
 pub use camera::{Camera, CELL};
 pub use ro_formats::image::Rgba;
@@ -93,6 +96,10 @@ pub struct Renderer {
     ui: Option<UiFrame>,
     /// Actors drawn each frame; the caller updates positions, actions and times.
     pub actors: Vec<Actor>,
+    /// Warp portal positions drawn each frame.
+    pub warps: Vec<glam::Vec3>,
+    warp_texture: Option<wgpu::BindGroup>,
+    effect_pipeline: wgpu::RenderPipeline,
     started: std::time::Instant,
     /// The grid is drawn instead while no map is loaded.
     scene: Option<scene::Scene>,
@@ -354,6 +361,16 @@ impl Renderer {
                 },
             ],
         });
+        let effect_pipeline = pipeline(
+            "effect",
+            include_str!("effect.wgsl"),
+            &[Some(&globals_layout), Some(&sprite_layout)],
+            &[Some(effect::Vertex::layout())],
+            Some(wgpu::BlendState {
+                color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add },
+                alpha: wgpu::BlendComponent::OVER,
+            }),
+        );
         let sprite_pipeline = pipeline(
             "sprite",
             include_str!("sprite.wgsl"),
@@ -389,6 +406,9 @@ impl Renderer {
             ui_renderer,
             ui: None,
             actors: vec![],
+            warps: vec![],
+            warp_texture: None,
+            effect_pipeline,
             started: std::time::Instant::now(),
             lighting: Lighting::default(),
             camera: Camera::default(),
@@ -412,6 +432,19 @@ impl Renderer {
     }
 
     /// Uploads a sprite sheet. `palette` overrides the SPR's own (hair / body dyes).
+    /// Texture for warp portals (effect\ring_blue.tga).
+    pub fn set_warp_texture(&mut self, img: &Rgba) {
+        let view = scene::upload_texture(&self.device, &self.queue, img, true);
+        self.warp_texture = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("warp texture"),
+            layout: &self.sprite_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.repeat_sampler) },
+            ],
+        }));
+    }
+
     pub fn add_sheet(&mut self, spr: &ro_formats::spr::Spr, act: ro_formats::act::Act, palette: Option<&[[u8; 4]; 256]>) -> SheetId {
         let sheet = sprite::Sheet::upload(&self.device, &self.queue, &self.sprite_layout, &self.sampler, spr, act, palette);
         self.sheets.push(sheet);
@@ -616,6 +649,19 @@ impl Renderer {
                 pass.set_bind_group(1, &w.frames[w.frame(globals.params[0])], &[]);
                 pass.set_vertex_buffer(0, w.vertices.slice(..));
                 pass.draw(0..w.count, 0..1);
+            }
+            // Warp portals (additive), then actors.
+            if let (false, Some(bind)) = (self.warps.is_empty(), self.warp_texture.as_ref()) {
+                let verts = effect::warp_portals(&self.warps, globals.params[0]);
+                let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("effects"),
+                    contents: bytemuck::cast_slice(&verts),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                pass.set_pipeline(&self.effect_pipeline);
+                pass.set_bind_group(1, bind, &[]);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..verts.len() as u32, 0..1);
             }
             // Actors back to front (by distance from the eye) so blended edges composite.
             if !self.actors.is_empty() {

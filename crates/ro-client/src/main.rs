@@ -509,6 +509,8 @@ struct App {
     auto_attack: bool,
     /// Other units in view, by id.
     units: std::collections::HashMap<u32, Mob>,
+    /// Warp portals in view (drawn as an effect, not a sprite), by unit id.
+    warps: std::collections::HashMap<u32, (u16, u16)>,
     class_names: std::collections::HashMap<i16, String>,
     /// Loaded actor templates by sprite key (None: not available, don't retry).
     sprites: std::collections::HashMap<String, Option<ro_render::Actor>>,
@@ -618,6 +620,17 @@ impl App {
             }
             return;
         }
+        // Warps are an effect; hidden NPCs are not drawn at all.
+        match info.job {
+            45 => {
+                if let ro_net::UnitPos::At { x, y, .. } = info.pos {
+                    self.warps.insert(info.id, (x, y));
+                }
+                return;
+            }
+            111 | 139 | 32767 => return,
+            _ => {}
+        }
         let actor = if is_player_class(info.job) {
             let look = Look {
                 job: job_sprite(info.job).to_string(),
@@ -680,7 +693,10 @@ impl App {
             self.walk_goal = None;
             return;
         };
-        let hop = path[path.len().min(WALK_HOP) - 1];
+        // A refused hop is retried shorter: rAthena's A* uses a small fixed node table and
+        // fails on detours (around fountains, walls) even under max_walk_path.
+        let hop_len = (WALK_HOP >> goal.tries.min(2)).max(1);
+        let hop = path[path.len().min(hop_len) - 1];
         tracing::debug!(from = ?p.walker.cell, ?target, steps = path.len(), ?hop, "walk hop");
         let _ = tx.send(ro_net::Command::Move { x: hop.0 as u16, y: hop.1 as u16 });
         goal.sent_at = Some(std::time::Instant::now());
@@ -694,6 +710,7 @@ impl App {
                 tracing::info!(%map, x, y, name = %character.name, job = character.job, "entered");
                 self.account_id = account_id;
                 self.units.clear();
+                self.warps.clear();
                 self.enter_map(&map);
                 let look = Look {
                     job: job_sprite(character.job).to_string(),
@@ -738,6 +755,7 @@ impl App {
             Chat { kind, text, .. } => self.hud.push_chat(kind, text),
             Npc(d) => self.npc_dialog(d),
             Vanish { id, reason } => {
+                self.warps.remove(&id);
                 if self.attack.is_some_and(|(t, _)| t == id) {
                     self.attack = None;
                 }
@@ -773,6 +791,7 @@ impl App {
             }
             MapMove { map, x, y } => {
                 self.units.clear();
+                self.warps.clear();
                 if self.world.as_ref().is_none_or(|w| w.name != map) {
                     self.enter_map(&map);
                 }
@@ -859,6 +878,13 @@ impl App {
             Say { npc, text } => {
                 open(&mut self.dialog, &self.units, npc);
                 self.dialog.as_mut().unwrap().lines.push(text);
+            }
+            // A close with nothing on screen (touch scripts that only `close`): end it silently.
+            Close { npc } if self.dialog.as_ref().is_none_or(|d| d.npc != npc || d.lines.is_empty()) => {
+                self.dialog = None;
+                if let Some((tx, _)) = self.net.as_ref() {
+                    let _ = tx.send(ro_net::Command::Npc { npc, reply: ro_net::NpcReply::Close });
+                }
             }
             Next { npc } | Close { npc } | Menu { npc, .. } | InputNumber { npc } | InputText { npc } => {
                 open(&mut self.dialog, &self.units, npc);
@@ -1024,6 +1050,17 @@ impl App {
 
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         r.actors.clear();
+        r.warps = self
+            .warps
+            .values()
+            .filter_map(|&(x, y)| {
+                let w = self.world.as_ref()?;
+                let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+                let (wx, wz) = (fx * ro_render::CELL, fy * ro_render::CELL);
+                let h = w.gat.as_ref().and_then(|g| g.height_at(fx, fy)).map_or_else(|| w.ground.height_at(wx, wz), |h| -h);
+                Some(glam::Vec3::new(wx, h, wz))
+            })
+            .collect();
         if let Some(w) = self.world.as_ref() {
             let octant = (r.camera.yaw / std::f32::consts::FRAC_PI_4).round() as i32;
             if let Some(p) = self.player.as_mut() {
@@ -1175,6 +1212,13 @@ impl ApplicationHandler for App {
             None,
             None,
         ));
+        if let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) {
+            let path = r"data\texture\effect\ring_blue.tga";
+            match vfs.read(path).ok().flatten().map(|d| ro_formats::image::decode(&d, path)) {
+                Some(Ok(img)) => r.set_warp_texture(&img),
+                _ => tracing::warn!(path, "warp portal texture unavailable"),
+            }
+        }
         self.window = Some(window);
         el.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
@@ -1316,6 +1360,7 @@ fn main() -> anyhow::Result<()> {
         talk_to: arg("--talk"),
         auto_attack: args.iter().any(|a| a == "--attack"),
         units: Default::default(),
+        warps: Default::default(),
         class_names: Default::default(),
         sprites: Default::default(),
         ready_at: None,
