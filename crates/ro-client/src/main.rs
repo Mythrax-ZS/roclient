@@ -918,6 +918,10 @@ struct App {
     viewpoints: std::collections::HashMap<(u32, u8), ((f32, f32), egui::Color32, Option<std::time::Instant>)>,
     /// Party and guild members elsewhere on the map: id -> (cell, guild?).
     member_pos: std::collections::HashMap<u32, ((f32, f32), bool)>,
+    /// Our normal attack reach (ZC_ATTACK_RANGE).
+    attack_range: i32,
+    /// ZC_MAPPROPERTY_R2 flags of the current map.
+    map_flags: u32,
     /// Hat effect files by id (hateffectinfo), and the ones playing: (unit, effect) -> fx tag.
     hat_files: std::collections::HashMap<u16, &'static str>,
     hat_fx: std::collections::HashMap<(u32, u16), u32>,
@@ -2543,6 +2547,11 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            AttackRange(r) => self.attack_range = r.max(1) as i32,
+            MapProperty { kind, flags } => {
+                self.map_flags = flags;
+            }
+            OverweightPercent(p) => self.hud.status.overweight_pct = p,
             Ranking { kind, list, mine } => {
                 self.ranking.open = true;
                 (self.ranking.kind, self.ranking.list, self.ranking.mine) = (kind, list, mine);
@@ -2982,10 +2991,23 @@ impl App {
         }
         match self.pick_unit().and_then(|id| self.units.get(&id)).map(|m| m.kind) {
             Some(5) => ATTACK,
+            Some(0) if self.pick_unit().is_some_and(|id| self.is_enemy_player(id)) => ATTACK,
             Some(1 | 6) => TALK,
             _ if self.pick_floor_item().is_some() => PICK_UP,
             _ => ARROW,
         }
+    }
+
+    /// On a PvP / GvG map, a player outside our party (PvP) or guild (GvG).
+    fn is_enemy_player(&self, id: u32) -> bool {
+        let Some(m) = self.units.get(&id) else { return false };
+        let pvp = self.map_flags & 1 != 0;
+        let gvg = self.map_flags & 2 != 0;
+        let in_party = self.social.party.iter().flat_map(|p| p.members.iter()).any(|pm| pm.name == m.name);
+        let in_guild = self.guild.id != 0 && m.guild == self.guild.id;
+        // DISABLE_LOCKON: players are only attacked while holding Shift.
+        let lock_ok = self.map_flags & 16 == 0 || self.egui_ctx.input(|i| i.modifiers.shift);
+        lock_ok && ((pvp && !in_party) || (gvg && !in_guild))
     }
 
     /// Back on our feet: respawned at the save point or resurrected.
@@ -3285,7 +3307,7 @@ impl App {
             let s = &self.hud.status;
             units.insert(
                 self.account_id,
-                ai::AiUnit { cell: p.walker.cell, motion: motion(p), target: self.attack.map_or(0, |a| a.0), hp: (s.hp as i32, s.max_hp as i32), sp: (s.sp as i32, s.max_sp as i32), range: 1, ..Default::default() },
+                ai::AiUnit { cell: p.walker.cell, motion: motion(p), target: self.attack.map_or(0, |a| a.0), hp: (s.hp as i32, s.max_hp as i32), sp: (s.sp as i32, s.max_sp as i32), range: self.attack_range, ..Default::default() },
             );
         }
         for (id, m) in &self.units {
@@ -3744,7 +3766,7 @@ impl App {
     fn attack_unit(&mut self, id: u32) {
         self.walk_goal = None;
         self.pending_npc = None;
-        self.attack = Some((id, 1));
+        self.attack = Some((id, self.attack_range as i16));
         if let Some((tx, _)) = self.net.as_ref() {
             let _ = tx.send(ro_net::Command::Attack { target: id, keep: true });
         }
@@ -5264,6 +5286,8 @@ impl ApplicationHandler for App {
                         self.attack = None;
                         self.talk(id);
                     }
+                    // PvP / GvG maps: clicking an enemy player attacks (the original's attack cursor).
+                    Some((id, 0)) if self.aiming.is_none() && self.is_enemy_player(id) => self.attack_unit(id),
                     // Other players: a menu (trade, party, friend).
                     Some((id, 0)) if self.aiming.is_none() => {
                         let name = self.units.get(&id).map(|m| m.name.clone()).unwrap_or_default();
@@ -5491,6 +5515,8 @@ fn main() -> anyhow::Result<()> {
         talk_to: arg("--talk"),
         viewpoints: Default::default(),
         member_pos: Default::default(),
+        attack_range: 1,
+        map_flags: 0,
         hat_files: Default::default(),
         hat_fx: Default::default(),
         emblems: Default::default(),

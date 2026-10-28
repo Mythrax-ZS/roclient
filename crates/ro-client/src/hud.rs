@@ -28,6 +28,8 @@ pub struct Status {
     pub skill_points: i64,
     pub weight: i64,
     pub max_weight: i64,
+    /// Percent of max weight where the server starts limiting (ZC_OVERWEIGHT_PERCENT; 0: 50).
+    pub overweight_pct: u32,
 }
 
 impl Status {
@@ -254,7 +256,8 @@ impl Hud {
                 p.text(at(192.0, 78.5), Align2::RIGHT_CENTER, format!("{:.1}%", pct(s.base_exp, s.next_base_exp)), f(10.5), ink);
                 p.text(at(14.0, 90.5), Align2::LEFT_CENTER, format!("Job Lv. {}", s.job_level), f(10.5), ink);
                 p.text(at(192.0, 90.5), Align2::RIGHT_CENTER, format!("{:.1}%", pct(s.job_exp, s.next_job_exp)), f(10.5), ink);
-                let heavy = s.max_weight > 0 && s.weight * 2 >= s.max_weight;
+                let pct = if s.overweight_pct == 0 { 50 } else { s.overweight_pct as i64 };
+                        let heavy = s.max_weight > 0 && s.weight * 100 >= s.max_weight * pct;
                 p.text(at(8.0, 114.0), Align2::LEFT_CENTER, format!("Weight : {} / {}", s.weight / 10, s.max_weight / 10), f(10.0), if heavy { Color32::from_rgb(200, 60, 40) } else { ink });
                 p.text(at(198.0, 114.0), Align2::RIGHT_CENTER, format!("Zeny : {}", s.zeny), f(10.0), ink);
                 // The menu buttons, two columns down the striped side.
@@ -303,7 +306,8 @@ impl Hud {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format!("{} z", s.zeny)).size(11.0).color(Color32::from_rgb(240, 210, 120)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let heavy = s.max_weight > 0 && s.weight * 2 >= s.max_weight;
+                        let pct = if s.overweight_pct == 0 { 50 } else { s.overweight_pct as i64 };
+                        let heavy = s.max_weight > 0 && s.weight * 100 >= s.max_weight * pct;
                         let c = if heavy { Color32::from_rgb(255, 140, 90) } else { Color32::LIGHT_GRAY };
                         ui.label(RichText::new(format!("Weight {} / {}", s.weight / 10, s.max_weight / 10)).size(11.0).color(c));
                     });

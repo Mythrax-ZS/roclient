@@ -373,6 +373,12 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_MAPPROPERTY_R2: map type and flags (bit 0 PvP, 1 GvG, 2 siege, 4 attacks need shift).
+    MapProperty { kind: u16, flags: u32 },
+    /// ZC_ATTACK_RANGE: our normal attack reach in cells.
+    AttackRange(u16),
+    /// ZC_OVERWEIGHT_PERCENT.
+    OverweightPercent(u32),
     /// ZC_ACK_RANKING2: (type, (char id, points), ours).
     Ranking { kind: u16, list: Vec<(u32, u32)>, mine: u32 },
     /// ZC_ACK_REQNAME_BYGID: a character id's name.
@@ -823,6 +829,9 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x099b if data.len() >= 8 => Some(Event::MapProperty { kind: u16::from_le_bytes([data[2], data[3]]), flags: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
+                        0x013a if data.len() >= 4 => Some(Event::AttackRange(u16::from_le_bytes([data[2], data[3]]))),
+                        0x0ade if data.len() >= 6 => Some(Event::OverweightPercent(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x0af6 => ro_proto::social::parse_ranking(&data).map(|(kind, list, mine)| Event::Ranking { kind, list, mine }),
                         0x0af7 if data.len() >= 32 => Some(Event::CharName { cid: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), name: ro_proto::packets::get_fixed_str(&mut &data[8..32], 24) }),
                         0x083a if data.len() >= 5 => Some(Event::SearchOpen(data[4])),
