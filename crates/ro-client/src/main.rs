@@ -4,6 +4,7 @@
 //!   ro-client              open the renderer window
 
 mod audio;
+mod fx;
 mod hud;
 mod settings;
 mod social;
@@ -139,6 +140,7 @@ fn load_character(
         dir: ro_render::Dir::S,
         time_ms: 0.0,
         once: false,
+        alpha: 1.0,
     })
 }
 
@@ -589,6 +591,8 @@ struct App {
     audio: Option<audio::Audio>,
     /// NPC to talk to once we have walked into range.
     pending_npc: Option<u32>,
+    /// A skill waiting until we have walked into range: (skill, level, target, tries).
+    pending_skill: Option<(u16, u16, u32, u8)>,
     /// The monster we keep attacking, and our reach (cells) once the server tells us.
     attack: Option<(u32, i16)>,
     /// Walking toward the attack target after the server said it was out of reach.
@@ -615,6 +619,9 @@ struct App {
     hotkey_row: u8,
     /// Casts in progress: caster -> (elapsed ms, total ms).
     casts: std::collections::HashMap<u32, (f32, f32)>,
+    fx: fx::FxLib,
+    /// `--fx name`: loop one STR effect on the player (effect previews).
+    fx_test: Option<&'static str>,
     alt: bool,
     queued_action: Option<windows::UiAction>,
     social: social::Social,
@@ -731,7 +738,7 @@ impl App {
             Some((spr, act)) => {
                 let body = r.add_sheet(&spr, act, None);
                 let shadow = self.sprites.get("shadow").cloned().flatten().and_then(|a| a.shadow);
-                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: None, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false })
+                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: None, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
             }
             None => {
                 tracing::debug!(job, %name, "no sprite for class");
@@ -1238,7 +1245,7 @@ impl App {
                 }
                 self.hud.push_chat(ro_net::ChatKind::System, format!("{name}: {why}."));
             }
-            SkillUsed { src, target, .. } => {
+            SkillUsed { skill, src, target } => {
                 self.casts.remove(&src);
                 let target_cell = self.mob_mut(target).map(|m| m.walker.cell);
                 if let Some(m) = self.mob_mut(src) {
@@ -1246,6 +1253,31 @@ impl App {
                         m.face(t);
                     }
                     m.set_pose(Pose::Attack, 400.0);
+                }
+                self.skill_fx(skill, self.unit_pos(target));
+            }
+            SkillHit { skill, act } => {
+                let target = act.target;
+                self.act(act);
+                self.skill_fx(skill, self.unit_pos(target));
+            }
+            SkillAt { skill, src, cell } => {
+                self.casts.remove(&src);
+                if let Some(m) = self.mob_mut(src) {
+                    m.face((cell.0 as i32, cell.1 as i32));
+                    m.set_pose(Pose::Attack, 400.0);
+                }
+                self.skill_fx(skill, self.cell_pos(cell));
+            }
+            UnitOption { id, option } => {
+                // Hiding, Cloaking, Chase Walk: the original draws you faded.
+                if let Some(m) = self.mob_mut(id) {
+                    m.actor.alpha = if option & (0x2 | 0x4 | 0x4000) != 0 { 0.35 } else { 1.0 };
+                }
+            }
+            UnitEffect { id, effect } => {
+                if let (Some(name), Some(pos)) = (fx::misc_effect(effect), self.unit_pos(id)) {
+                    self.play_fx(name, pos);
                 }
             }
             MonsterHp { id, hp, max_hp } => {
@@ -1330,8 +1362,32 @@ impl App {
     }
 
     fn use_skill_on(&mut self, skill: u16, level: u16, target: u32) {
-        self.walk_goal = None;
         self.attack = None;
+        // Out of reach: walk into range first, then cast (as the original client does).
+        let range = self.skills.iter().find(|s| s.id == skill).map_or(1, |s| (s.range as i32).max(1));
+        let cells = self.player.as_ref().map(|p| p.walker.cell).zip(self.units.get(&target).map(|m| m.walker.cell));
+        if let (Some((a, b)), true) = (cells, target != self.account_id) {
+            if (a.0 - b.0).abs().max((a.1 - b.1).abs()) > range {
+                let tries = self.pending_skill.filter(|p| p.2 == target).map_or(0, |p| p.3 + 1);
+                if tries > 3 {
+                    self.pending_skill = None;
+                    return;
+                }
+                let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
+                let reach = range.min(3);
+                let spot = (-reach..=reach)
+                    .flat_map(|dy| (-reach..=reach).map(move |dx| (b.0 + dx, b.1 + dy)))
+                    .filter(|&(x, y)| gat.is_some_and(|g| g.walkable(x, y)))
+                    .min_by_key(|&(x, y)| (x - a.0).abs().max((y - a.1).abs()));
+                if let Some((x, y)) = spot {
+                    self.pending_skill = Some((skill, level, target, tries));
+                    self.request_walk((x as u16, y as u16));
+                }
+                return;
+            }
+        }
+        self.pending_skill = None;
+        self.walk_goal = None;
         self.send(ro_net::Command::Stat(ro_net::StatRequest::UseSkill { skill, level, target }));
     }
 
@@ -1389,7 +1445,7 @@ impl App {
         let actor = match (spr, act) {
             (Some(spr), Some(act)) => {
                 let body = r.add_sheet(&spr, act, None);
-                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: None, shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false })
+                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: None, shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
             }
             _ => None,
         };
@@ -1451,6 +1507,36 @@ impl App {
     }
 
     /// The player or a unit by id.
+    /// Where a unit stands (its feet), if we can see it.
+    fn unit_pos(&self, id: u32) -> Option<glam::Vec3> {
+        if id == self.account_id { self.player.as_ref() } else { self.units.get(&id) }.map(|m| m.actor.pos)
+    }
+
+    /// The ground point at the centre of a cell.
+    fn cell_pos(&self, cell: (u16, u16)) -> Option<glam::Vec3> {
+        let w = self.world.as_ref()?;
+        let (fx, fy) = (cell.0 as f32 + 0.5, cell.1 as f32 + 0.5);
+        let (x, z) = (fx * ro_render::CELL, fy * ro_render::CELL);
+        let y = w.gat.as_ref().and_then(|g| g.height_at(fx, fy)).map_or_else(|| w.ground.height_at(x, z), |h| -h);
+        Some(glam::Vec3::new(x, y, z))
+    }
+
+    /// Plays a skill's effect at `pos`, if it has one.
+    fn skill_fx(&mut self, skill: u16, pos: Option<glam::Vec3>) {
+        match (fx::skill_effect(skill), pos) {
+            (Some(name), Some(pos)) => self.play_fx(name, pos),
+            (None, _) => tracing::debug!(skill, "no effect for skill"),
+            _ => {}
+        }
+    }
+
+    fn play_fx(&mut self, name: &'static str, pos: glam::Vec3) {
+        let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
+        if let Some(asset) = self.fx.get(r, vfs, name) {
+            r.effects.push(ro_render::Fx { asset, pos, time_ms: 0.0 });
+        }
+    }
+
     fn mob_mut(&mut self, id: u32) -> Option<&mut Mob> {
         if id == self.account_id { self.player.as_mut() } else { self.units.get_mut(&id) }
     }
@@ -1682,6 +1768,30 @@ impl App {
                         Some(windows::UiAction::SetHotkey { index, key: ro_net::Hotkey { skill: true, id: id as u32, count: level } })
                     }),
                     Some(("key", slot)) => slot.parse().ok().map(windows::UiAction::UseHotkey),
+                    // selfcast:skill_id on ourselves.
+                    Some(("selfcast", id)) => {
+                        if let Ok(skill) = id.parse::<u16>() {
+                            let level = self.skills.iter().find(|s| s.id == skill).map_or(1, |s| s.level.max(1));
+                            self.use_skill_on(skill, level, self.account_id);
+                        }
+                        None
+                    }
+                    // cast:skill_id on the nearest monster.
+                    Some(("cast", id)) => {
+                        let me = self.player.as_ref().map_or((0, 0), |p| p.walker.cell);
+                        let target = self
+                            .units
+                            .iter()
+                            .filter(|(_, m)| m.kind == 5)
+                            .min_by_key(|(_, m)| (m.walker.cell.0 - me.0).pow(2) + (m.walker.cell.1 - me.1).pow(2))
+                            .map(|(id, _)| *id);
+                        tracing::info!(?target, monsters = self.units.values().filter(|m| m.kind == 5).count(), "script cast {id}");
+                        if let (Ok(skill), Some(target)) = (id.parse::<u16>(), target) {
+                            let level = self.skills.iter().find(|s| s.id == skill).map_or(1, |s| s.level.max(1));
+                            self.use_skill_on(skill, level, target);
+                        }
+                        None
+                    }
                     Some(("party", name)) => {
                         self.send(ro_net::Command::Party(ro_net::PartyRequest::Create { name: name.into() }));
                         None
@@ -1798,6 +1908,16 @@ impl App {
                 self.talk(npc);
             }
         }
+        // Cast the skill we walked into range for (re-walks if the target moved).
+        if let (Some((skill, level, target, _)), None) = (self.pending_skill, self.walk_goal.as_ref()) {
+            if self.player.as_ref().is_some_and(|p| !p.walker.is_walking()) {
+                if self.units.contains_key(&target) {
+                    self.use_skill_on(skill, level, target);
+                } else {
+                    self.pending_skill = None;
+                }
+            }
+        }
 
         // Continue a long walk once the current hop has finished (or the server ignored it).
         let idle = self.player.as_ref().is_some_and(|p| !p.walker.is_walking());
@@ -1839,6 +1959,18 @@ impl App {
                 }
                 r.actors.push(a);
             }
+            if let (Some(name), true, Some(vfs), Some(p)) = (self.fx_test, r.effects.is_empty(), self.vfs.as_ref(), self.player.as_ref()) {
+                if let Some(asset) = self.fx.get(r, vfs, name) {
+                    r.effects.push(ro_render::Fx { asset, pos: p.actor.pos, time_ms: 0.0 });
+                }
+            }
+            // Skill effects run once, then go.
+            for e in &mut r.effects {
+                e.time_ms += dt;
+            }
+            let alive: Vec<bool> = r.effects.iter().map(|e| e.time_ms < r.fx_duration(e.asset)).collect();
+            let mut alive = alive.into_iter();
+            r.effects.retain(|_| alive.next().unwrap_or(false));
             // Items on the ground: their sprite at the cell plus sub-cell offset.
             for (f, actor) in self.floor.values() {
                 if let Some(mut a) = actor.clone() {
@@ -2241,6 +2373,7 @@ impl ApplicationHandler for App {
                         } else if let Some(cell) = self.pick() {
                             self.pending_npc = None;
                             self.pending_pickup = None;
+                            self.pending_skill = None;
                             self.request_walk(cell);
                         }
                     }
@@ -2316,6 +2449,7 @@ fn main() -> anyhow::Result<()> {
         }),
         audio: None,
         pending_npc: None,
+        pending_skill: None,
         attack: None,
         chasing: false,
         floaters: vec![],
@@ -2334,6 +2468,8 @@ fn main() -> anyhow::Result<()> {
         hotkeys: vec![Default::default(); HOTKEY_ROWS as usize * HOTKEYS_PER_ROW],
         hotkey_row: 0,
         casts: Default::default(),
+        fx: Default::default(),
+        fx_test: arg("--fx").map(|s| &*s.leak()),
         alt: false,
         queued_action: None,
         social: Default::default(),

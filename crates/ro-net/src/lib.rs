@@ -229,6 +229,14 @@ pub enum Event {
     SkillFailed { skill: u16, cause: u8 },
     /// A non-damaging skill went off (heal, buff...).
     SkillUsed { skill: u16, src: u32, target: u32 },
+    /// A damaging skill hit (animated like an attack).
+    SkillHit { skill: u16, act: Act },
+    /// A skill was placed on a cell.
+    SkillAt { skill: u16, src: u32, cell: (u16, u16) },
+    /// A unit's status option bits changed (hidden, cloaked, ...).
+    UnitOption { id: u32, option: u32 },
+    /// A misc effect on a unit (0 base level up, 1 job level up, ...).
+    UnitEffect { id: u32, effect: u32 },
     Disconnected(String),
 }
 
@@ -498,7 +506,22 @@ impl MapSession {
                             let (skill, cause) = parse_skill_fail(&data);
                             Some(Event::SkillFailed { skill, cause })
                         }
-                        0x01de => Some(Event::Act(parse_skill_hit(&data).1)),
+                        0x01de => {
+                            let (skill, act) = parse_skill_hit(&data);
+                            Some(Event::SkillHit { skill, act })
+                        }
+                        0x0117 => {
+                            let (skill, src, cell) = parse_ground_skill(&data);
+                            Some(Event::SkillAt { skill, src, cell })
+                        }
+                        0x0229 => {
+                            let (id, option) = parse_state_change(&data);
+                            Some(Event::UnitOption { id, option })
+                        }
+                        0x019b => {
+                            let (id, effect) = parse_notify_effect(&data);
+                            Some(Event::UnitEffect { id, effect })
+                        }
                         0x09cb => {
                             let (skill, _, target, src) = parse_skill_used(&data);
                             Some(Event::SkillUsed { skill, src, target })

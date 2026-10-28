@@ -3,6 +3,7 @@
 mod camera;
 mod scene;
 mod effect;
+mod fx;
 mod sprite;
 mod water;
 
@@ -14,6 +15,7 @@ pub use camera::{Camera, CELL};
 pub use ro_formats::image::Rgba;
 pub use scene::{SceneBuilder, SceneMesh};
 pub use water::WaterMesh;
+pub use fx::{Fx, FxId};
 pub use sprite::{Actor, Dir, SheetId};
 use winit::window::Window;
 
@@ -99,6 +101,10 @@ pub struct Renderer {
     /// Warp portal positions drawn each frame.
     pub warps: Vec<glam::Vec3>,
     warp_texture: Option<wgpu::BindGroup>,
+    fx_pipeline: wgpu::RenderPipeline,
+    fx_assets: Vec<fx::FxAsset>,
+    /// STR effects playing this frame; the client advances and removes them.
+    pub effects: Vec<Fx>,
     effect_pipeline: wgpu::RenderPipeline,
     started: std::time::Instant,
     /// The grid is drawn instead while no map is loaded.
@@ -378,6 +384,13 @@ impl Renderer {
             &[Some(sprite::Vertex::layout())],
             Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
         );
+        let fx_pipeline = pipeline(
+            "str effects",
+            include_str!("strfx.wgsl"),
+            &[Some(&globals_layout), Some(&sprite_layout)],
+            &[Some(sprite::Vertex::layout())],
+            Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+        );
 
         let ui_renderer = egui_wgpu::Renderer::new(&device, config.format.remove_srgb_suffix(), Default::default());
         let targets = Self::make_targets(&device, &config, samples);
@@ -408,6 +421,9 @@ impl Renderer {
             actors: vec![],
             warps: vec![],
             warp_texture: None,
+            fx_pipeline,
+            fx_assets: vec![],
+            effects: vec![],
             effect_pipeline,
             started: std::time::Instant::now(),
             lighting: Lighting::default(),
@@ -449,6 +465,18 @@ impl Renderer {
         let sheet = sprite::Sheet::upload(&self.device, &self.queue, &self.sprite_layout, &self.sampler, spr, act, palette);
         self.sheets.push(sheet);
         SheetId(self.sheets.len() - 1)
+    }
+
+    /// Uploads an STR effect; `images[layer][texture]` as named in the STR.
+    pub fn add_fx(&mut self, str: ro_formats::strm::Str, images: Vec<Vec<Option<Rgba>>>) -> FxId {
+        let asset = fx::FxAsset::upload(&self.device, &self.queue, &self.sprite_layout, &self.sampler, str, images);
+        self.fx_assets.push(asset);
+        FxId(self.fx_assets.len() - 1)
+    }
+
+    /// How long an effect plays, in ms.
+    pub fn fx_duration(&self, id: FxId) -> f32 {
+        self.fx_assets.get(id.0).map_or(0.0, |a| a.duration_ms())
     }
 
     /// The sound (data\wav name) an actor's body frame asks for, if it entered a new frame
@@ -690,6 +718,28 @@ impl Renderer {
                     pass.set_vertex_buffer(0, buffer.slice(..));
                     for (sheet, range) in draws {
                         pass.set_bind_group(1, &self.sheets[sheet].bind, &[]);
+                        pass.draw(range, 0..1);
+                    }
+                }
+            }
+            // Skill effects over everything else in the world.
+            if !self.effects.is_empty() {
+                let mut vertices = vec![];
+                let mut draws = vec![];
+                for e in &self.effects {
+                    let Some(asset) = self.fx_assets.get(e.asset.0) else { continue };
+                    let start = vertices.len() as u32;
+                    asset.vertices(e, &mut vertices);
+                    if vertices.len() as u32 > start {
+                        draws.push((e.asset.0, start..vertices.len() as u32));
+                    }
+                }
+                if !vertices.is_empty() {
+                    let buffer = sprite::vertex_buffer(&self.device, &vertices);
+                    pass.set_pipeline(&self.fx_pipeline);
+                    pass.set_vertex_buffer(0, buffer.slice(..));
+                    for (asset, range) in draws {
+                        pass.set_bind_group(1, &self.fx_assets[asset].bind, &[]);
                         pass.draw(range, 0..1);
                     }
                 }

@@ -67,6 +67,8 @@ pub struct Actor {
     pub time_ms: f32,
     /// Play the action once and hold its last frame (death) instead of looping.
     pub once: bool,
+    /// Opacity (1 normal; lower while hidden or cloaked).
+    pub alpha: f32,
 }
 
 pub(crate) struct Sheet {
@@ -229,11 +231,17 @@ pub(crate) fn actor_quads(sheets: &[Sheet], a: &Actor) -> Vec<(usize, Vec<Vertex
     if !facing_away {
         weapon(&mut out);
     }
+    // Hidden / cloaked: the whole actor fades.
+    if a.alpha < 1.0 {
+        for v in out.iter_mut().flat_map(|(_, v)| v.iter_mut()) {
+            v.color[3] *= a.alpha;
+        }
+    }
     out
 }
 
 /// Shelf-packs images into one atlas with a 1px transparent gutter.
-fn pack(images: &[Rgba]) -> (Rgba, Vec<(u32, u32)>) {
+pub(crate) fn pack(images: &[Rgba]) -> (Rgba, Vec<(u32, u32)>) {
     const W: u32 = 1024;
     let (mut x, mut y, mut row_h) = (1u32, 1u32, 0u32);
     let mut placed = Vec::with_capacity(images.len());

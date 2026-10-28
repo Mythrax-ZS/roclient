@@ -8,5 +8,6 @@ pub mod lub;
 pub mod rsm;
 pub mod rsw;
 pub mod spr;
+pub mod strm;
 
 pub(crate) mod reader;

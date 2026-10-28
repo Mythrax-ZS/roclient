@@ -426,3 +426,26 @@ pub fn parse_skill_used(data: &[u8]) -> (u16, i32, u32, u32) {
     let mut b = &data[2..];
     (b.get_u16_le(), b.get_i32_le(), b.get_u32_le(), b.get_u32_le())
 }
+
+/// ZC_NOTIFY_GROUNDSKILL (0x0117): a skill placed on a cell. (skill, src, cell)
+pub fn parse_ground_skill(data: &[u8]) -> (u16, u32, (u16, u16)) {
+    let mut b = &data[2..];
+    let skill = b.get_u16_le();
+    let src = b.get_u32_le();
+    b.advance(2); // level
+    (skill, src, (b.get_i16_le() as u16, b.get_i16_le() as u16))
+}
+
+/// ZC_STATE_CHANGE (0x0229): (unit, effect state / option bits: 0x2 hide, 0x4 cloak...).
+pub fn parse_state_change(data: &[u8]) -> (u32, u32) {
+    let mut b = &data[2..];
+    let id = b.get_u32_le();
+    b.advance(4); // body and health state
+    (id, b.get_i32_le() as u32)
+}
+
+/// ZC_NOTIFY_EFFECT (0x019b): (unit, effect: 0 base level up, 1 job level up, ...).
+pub fn parse_notify_effect(data: &[u8]) -> (u32, u32) {
+    let mut b = &data[2..];
+    (b.get_u32_le(), b.get_u32_le())
+}
