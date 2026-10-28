@@ -84,6 +84,8 @@ pub struct View<'a> {
     pub screen_width: f32,
     pub hotkeys: &'a [Hotkey],
     pub hotkey_row: u8,
+    /// Skills cooling down: id -> when they are ready again.
+    pub cooldowns: &'a HashMap<u16, std::time::Instant>,
     /// A controller is in use: label slots with its buttons.
     pub pad_hints: bool,
     pub playstation: bool,
@@ -127,6 +129,13 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                             paint_icon(&painter, rect, v.skill_icons.get(&(key.id as u16)), Color32::WHITE);
                             if skill.is_some_and(|s| s.level > 1) {
                                 outlined(&painter, rect.right_bottom() - Vec2::new(3.0, 1.0), egui::Align2::RIGHT_BOTTOM, &format!("{}", key.count), 11.0, Color32::from_rgb(255, 220, 120));
+                            }
+                            // Cooldown: a dark sweep with the seconds left, as in the original.
+                            if let Some(left) = v.cooldowns.get(&(key.id as u16)).map(|e| e.saturating_duration_since(std::time::Instant::now()).as_secs_f32()).filter(|s| *s > 0.0) {
+                                painter.rect_filled(rect.shrink(2.0), 4.0, Color32::from_black_alpha(150));
+                                let text = if left >= 60.0 { format!("{}m", (left / 60.0).ceil()) } else { format!("{left:.1}") };
+                                outlined(&painter, rect.center(), egui::Align2::CENTER_CENTER, &text, 12.0, Color32::WHITE);
+                                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
                             }
                         } else {
                             let count: u32 = v.items.iter().filter(|it| it.id == key.id && it.equipped == 0).map(|it| it.amount as u32).sum();

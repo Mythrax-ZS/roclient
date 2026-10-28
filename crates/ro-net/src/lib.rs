@@ -276,6 +276,8 @@ pub enum Event {
     Emotion { id: u32, kind: u8 },
     /// ZC_ACK_WHISPER: 0 sent, 1 not online, 2 ignored by them, 3 they ignore everyone.
     WhisperResult(u8),
+    /// ZC_SKILL_POSTDELAY: a skill can't be used again for this long.
+    SkillCooldown { skill: u16, ms: u32 },
     /// A pick-one menu from a skill or item.
     Menu(Menu),
     /// ZC_ACK_REQMAKINGITEM: making an item (ok, item id).
@@ -286,7 +288,8 @@ pub enum Event {
     GroundEffect { id: u32, cell: (u16, u16), kind: u32 },
     GroundEffectGone(u32),
     /// A status icon turned on or off on a unit (EFST id; 160 is night).
-    StatusIcon { id: u32, kind: u16, on: bool },
+    /// A status (EFST) icon on a unit; `remain_ms` counts down when the buff is timed.
+    StatusIcon { id: u32, kind: u16, on: bool, remain_ms: Option<u32> },
     /// A dead unit (maybe us) was brought back.
     Resurrected(u32),
     /// A misc effect on a unit (0 base level up, 1 job level up, ...).
@@ -670,6 +673,7 @@ impl MapSession {
                         }
                         0x00c0 if data.len() >= 7 => Some(Event::Emotion { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), kind: data[6] }),
                         0x09df if data.len() >= 3 => Some(Event::WhisperResult(data[2])),
+                        0x043d if data.len() >= 8 => Some(Event::SkillCooldown { skill: u16::from_le_bytes([data[2], data[3]]), ms: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
                         0x01ad | 0x018d | 0x025a | 0x0abe | 0x0afb | 0x0177 | 0x0442 | 0x01a6 => parse_menu(opcode, &data).map(Event::Menu),
                         0x018f => parse_make_result(&data).map(|(ok, item)| Event::MakeResult { ok, item }),
                         0x0a24 if data.len() >= 21 => Some(Event::Achievement {
@@ -693,6 +697,8 @@ impl MapSession {
                             kind: u16::from_le_bytes([data[2], data[3]]),
                             id: u32::from_le_bytes([data[4], data[5], data[6], data[7]]),
                             on: data[8] != 0,
+                            // 0x0983 adds the total and remaining time (0 or less: untimed).
+                            remain_ms: (opcode == 0x0983 && data.len() >= 17).then(|| i32::from_le_bytes([data[13], data[14], data[15], data[16]])).filter(|&ms| ms > 0).map(|ms| ms as u32),
                         }),
                         0x0148 => Some(Event::Resurrected(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x019b => {

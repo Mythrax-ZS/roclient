@@ -11,9 +11,11 @@ mod hud;
 mod jobs;
 mod preview;
 mod screens;
+mod buffs;
 mod emotes;
 mod settings;
 mod skilltree;
+mod status_icons;
 mod splash;
 mod social;
 mod windows;
@@ -783,6 +785,10 @@ struct App {
     last_whisper_from: Option<String>,
     /// Chat lines typed this frame, sent at the start of the next.
     queued_chat: Vec<String>,
+    /// Our buffs and debuffs (the icon column).
+    buffs: buffs::Buffs,
+    /// Skills cooling down: id -> ready again at.
+    cooldowns: std::collections::HashMap<u16, std::time::Instant>,
     /// When a paused (`wait:`) test script carries on.
     script_resume: Option<std::time::Instant>,
     pad: gamepad::Pad,
@@ -1222,6 +1228,9 @@ impl App {
                 let name = self.item_db.as_ref().map_or_else(|| format!("item {item}"), |d| d.name(item, true));
                 let msg = if ok { format!("You made {name}.") } else { format!("Making {name} failed.") };
                 self.hud.push_chat(ro_net::ChatKind::System, msg);
+            }
+            SkillCooldown { skill, ms } => {
+                self.cooldowns.insert(skill, std::time::Instant::now() + std::time::Duration::from_millis(ms as u64));
             }
             Emotion { id, kind } => {
                 self.emotes.insert(id, (kind, 0.0));
@@ -1727,13 +1736,14 @@ impl App {
             }
             GroundEffectGone(id) => self.stop_fx(id),
             // EFST_SKE on ourselves: the server's night (on) or day (off).
-            StatusIcon { id, kind: 160, on } if id == self.account_id => {
+            StatusIcon { id, kind: 160, on, .. } if id == self.account_id => {
                 tracing::info!(night = on, "day/night");
                 if let Some(r) = self.renderer.as_mut() {
                     r.night = on;
                 }
             }
-            StatusIcon { id, kind, on } => tracing::debug!(id, kind, on, me = self.account_id, "status icon"),
+            StatusIcon { id, kind, on, remain_ms } if id == self.account_id => self.buffs.set(kind, on, remain_ms),
+            StatusIcon { .. } => {}
             Resurrected(id) if id == self.account_id => self.revive(),
             Resurrected(id) => {
                 if let Some(m) = self.units.get_mut(&id) {
@@ -3112,6 +3122,7 @@ impl App {
                 screen_width: size.0 as f32 / (window.scale_factor() as f32 * self.ui_scale),
                 hotkeys: &self.hotkeys,
                 hotkey_row: self.hotkey_row,
+                cooldowns: &self.cooldowns,
                 pad_hints: self.pad.in_use(),
                 playstation: self.pad.playstation,
             };
@@ -3175,6 +3186,9 @@ impl App {
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars);
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
                     hud::show_minimap(ui.ctx(), map, &map_name, me, &dots);
+                }
+                if let Some(vfs) = self.vfs.as_ref() {
+                    self.buffs.show(ui.ctx(), vfs, if self.settings.minimap && self.minimap.is_some() { 270.0 } else { 60.0 });
                 }
                 if self.esc_menu {
                     match hud::esc_menu(ui.ctx()) {
@@ -3697,6 +3711,8 @@ fn main() -> anyhow::Result<()> {
         emotes: Default::default(),
         last_whisper_from: None,
         queued_chat: vec![],
+        buffs: Default::default(),
+        cooldowns: Default::default(),
         script_resume: None,
         pad: gamepad::Pad::new(),
         pad_target: None,
@@ -3769,6 +3785,7 @@ fn main() -> anyhow::Result<()> {
         // iteminfo.lub lives in the client's System folder; skill names in the GRF.
         let read = |p: &str| vfs.read(p).ok().flatten();
         app.fx.index(vfs);
+        app.buffs = buffs::Buffs::load(vfs);
         // Achievement titles, for the "achievement complete" notice.
         if let Some(d) = read(r"System\achievement_list.lub") {
             match ro_formats::lub::eval(&d) {
