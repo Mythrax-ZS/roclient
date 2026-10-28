@@ -1139,7 +1139,10 @@ impl App {
                 s.zeny = character.zeny as i64;
                 self.spawn_player(&look, (x, y), dir as usize, character.speed);
                 if let (Some(text), Some((tx, _))) = (self.say_on_enter.take(), self.net.as_ref()) {
-                    let _ = tx.send(ro_net::Command::Chat(text));
+                    // Several lines separated by "|" (e.g. a batch of GM commands).
+                    for line in text.split('|') {
+                        let _ = tx.send(ro_net::Command::Chat(line.trim().to_string()));
+                    }
                 }
                 if let Some(cell) = self.walk_on_enter.take() {
                     self.request_walk(cell);
