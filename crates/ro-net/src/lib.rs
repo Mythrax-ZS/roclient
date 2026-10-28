@@ -288,6 +288,8 @@ pub enum Event {
     CharDeleteStarted { char_id: u32, result: i32, seconds: u32 },
     CharDeleted { char_id: u32, result: i32 },
     CharDeleteCanceled { char_id: u32, result: i32 },
+    /// Back at character select after Esc > Character Select (Characters follows).
+    LeftGame,
     Disconnected(String),
 }
 
@@ -349,51 +351,61 @@ pub fn spawn_session(cfg: SessionConfig) -> (tokio::sync::mpsc::UnboundedSender<
             };
             let result: anyhow::Result<()> = rt.block_on(async {
                 let mut cmd_rx = cmd_rx;
-                let (auth, character, mut zone) = if cfg.auto {
-                    // Scripted / headless runs: straight in with the configured account and slot.
-                    let auth = login(&cfg.login_addr, &cfg.username, &cfg.password).await?;
-                    let server = auth.servers.first().context("no char servers offered")?.clone();
-                    let chars = enter_char(&server, &auth).await?;
-                    let character = chars
-                        .characters
-                        .iter()
-                        .find(|c| c.slot == cfg.char_slot)
-                        .cloned()
-                        .with_context(|| format!("no character in slot {}", cfg.char_slot))?;
-                    let zone = chars.select(cfg.char_slot).await?;
-                    (auth, character, zone)
-                } else {
-                    match front_end(&cfg.login_addr, &mut cmd_rx, &ev_tx).await? {
-                        Some(picked) => picked,
-                        None => return Ok(()),
-                    }
-                };
-                let char_id = zone.char_id;
-                let mut first = true;
+                // Set when the player goes back to character select from the game.
+                let mut resume: Option<(AcceptLogin, CharServerInfo)> = None;
                 loop {
-                    let map = enter_map(&zone, &auth).await?;
-                    let name = zone.map.trim_end_matches(".gat").to_string();
-                    let event = if first {
-                        Event::Entered {
-                            map: name,
-                            x: map.spawn.x,
-                            y: map.spawn.y,
-                            dir: map.spawn.dir,
-                            account_id: auth.account_id,
-                            character: character.clone(),
-                        }
+                    let (auth, server, character, mut zone) = if cfg.auto && resume.is_none() {
+                        // Scripted / headless runs: straight in with the configured account and slot.
+                        let auth = login(&cfg.login_addr, &cfg.username, &cfg.password).await?;
+                        let server = auth.servers.first().context("no char servers offered")?.clone();
+                        let chars = enter_char(&server, &auth).await?;
+                        let character = chars
+                            .characters
+                            .iter()
+                            .find(|c| c.slot == cfg.char_slot)
+                            .cloned()
+                            .with_context(|| format!("no character in slot {}", cfg.char_slot))?;
+                        let zone = chars.select(cfg.char_slot).await?;
+                        (auth, server, character, zone)
                     } else {
-                        Event::MapMove { map: name, x: map.spawn.x, y: map.spawn.y }
+                        match front_end(&cfg.login_addr, &mut cmd_rx, &ev_tx, resume.take()).await? {
+                            Some(picked) => picked,
+                            None => return Ok(()),
+                        }
                     };
-                    first = false;
-                    if ev_tx.send(event).is_err() {
+                    let char_id = zone.char_id;
+                    let mut first = true;
+                    let back_to_select = loop {
+                        let map = enter_map(&zone, &auth).await?;
+                        let name = zone.map.trim_end_matches(".gat").to_string();
+                        let event = if first {
+                            Event::Entered {
+                                map: name,
+                                x: map.spawn.x,
+                                y: map.spawn.y,
+                                dir: map.spawn.dir,
+                                account_id: auth.account_id,
+                                character: character.clone(),
+                            }
+                        } else {
+                            Event::MapMove { map: name, x: map.spawn.x, y: map.spawn.y }
+                        };
+                        first = false;
+                        if ev_tx.send(event).is_err() {
+                            return Ok(());
+                        }
+                        match map.run(&character.name, &mut cmd_rx, &ev_tx).await? {
+                            // Warped to a map on another map server: re-enter there.
+                            MapExit::Move(next) => zone = ZoneServer { char_id, ..next },
+                            MapExit::CharSelect => break true,
+                            MapExit::Closed => break false,
+                        }
+                    };
+                    if !back_to_select {
                         return Ok(());
                     }
-                    match map.run(&character.name, &mut cmd_rx, &ev_tx).await? {
-                        // Warped to a map on another map server: re-enter there.
-                        Some(next) => zone = ZoneServer { char_id, ..next },
-                        None => return Ok(()),
-                    }
+                    let _ = ev_tx.send(Event::LeftGame);
+                    resume = Some((auth, server));
                 }
             });
             let reason = match result {
@@ -414,7 +426,7 @@ impl MapSession {
         name: &str,
         commands: &mut tokio::sync::mpsc::UnboundedReceiver<Command>,
         events: &std::sync::mpsc::Sender<Event>,
-    ) -> anyhow::Result<Option<ZoneServer>> {
+    ) -> anyhow::Result<MapExit> {
         let mut keepalive = tokio::time::interval(KEEPALIVE);
         loop {
             tokio::select! {
@@ -423,7 +435,7 @@ impl MapSession {
                     self.send(CzRequestTime { client_tick: tick }).await?;
                 }
                 cmd = commands.recv() => match cmd {
-                    None => return Ok(None),
+                    None => return Ok(MapExit::Closed),
                     Some(Command::Move { x, y }) => self.send(CzRequestMove { x, y, dir: 0 }).await?,
                     Some(Command::Chat(text)) => self.send(CzChat { name, text: &text }).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
@@ -669,8 +681,10 @@ impl MapSession {
                         id::ZC_NPCACK_SERVERMOVE => {
                             let (zone, x, y) = parse_server_move(&data);
                             tracing::info!(map = %zone.map, x, y, addr = %zone.addr, "moving to another map server");
-                            return Ok(Some(zone));
+                            return Ok(MapExit::Move(zone));
                         }
+                        // ZC_RESTART_ACK: the server let us go back to character select.
+                        0x00b3 if data[2] == 1 => return Ok(MapExit::CharSelect),
                         id::SC_NOTIFY_BAN => bail!("disconnected by map server, code {}", data[2]),
                         _ => {
                             tracing::debug!(opcode = format_args!("{opcode:#06x}"), len = data.len(), "unhandled");
@@ -679,7 +693,7 @@ impl MapSession {
                     };
                     if let Some(e) = event {
                         if events.send(e).is_err() {
-                            return Ok(None); // UI gone
+                            return Ok(MapExit::Closed); // UI gone
                         }
                     }
                 }
@@ -757,8 +771,13 @@ async fn front_end(
     addr: &str,
     cmds: &mut tokio::sync::mpsc::UnboundedReceiver<Command>,
     events: &std::sync::mpsc::Sender<Event>,
-) -> anyhow::Result<Option<(AcceptLogin, CharInfo, ZoneServer)>> {
+    mut resume: Option<(AcceptLogin, CharServerInfo)>,
+) -> anyhow::Result<Option<(AcceptLogin, CharServerInfo, CharInfo, ZoneServer)>> {
     'login: loop {
+        // Back from the game (Esc > Character Select): straight to the character screen.
+        let (auth, server) = if let Some(r) = resume.take() {
+            r
+        } else {
         // Login screen.
         let auth = loop {
             let Some(cmd) = cmds.recv().await else { return Ok(None) };
@@ -788,6 +807,8 @@ async fn front_end(
                 }
             }
         };
+        (auth, server)
+        };
         let mut chars = match enter_char(&server, &auth).await {
             Ok(c) => c,
             Err(e) => {
@@ -807,7 +828,7 @@ async fn front_end(
                     Some(Command::SelectChar(slot)) => {
                         let Some(character) = chars.characters.iter().find(|c| c.slot == slot).cloned() else { continue };
                         let zone = chars.select(slot).await?;
-                        return Ok(Some((auth, character, zone)));
+                        return Ok(Some((auth, server, character, zone)));
                     }
                     _ => {}
                 },
@@ -854,4 +875,14 @@ async fn login_once(addr: &str, user: &str, pass: &str) -> Result<AcceptLogin, S
             f => ignored("login", &f),
         }
     }
+}
+
+/// Why the map session ended.
+pub enum MapExit {
+    /// Warped to a map on another map server: re-enter there.
+    Move(ZoneServer),
+    /// The player asked to go back to character select (Esc menu).
+    CharSelect,
+    /// The UI went away.
+    Closed,
 }

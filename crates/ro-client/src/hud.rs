@@ -569,3 +569,42 @@ impl CursorSprite {
         ctx.request_repaint();
     }
 }
+
+/// What the Esc game menu chose.
+pub enum EscChoice {
+    CharSelect,
+    Options,
+    Exit,
+    Back,
+}
+
+/// The Esc game menu, like the original client's: Character Select, Options, Exit,
+/// Return to Game.
+pub fn esc_menu(ctx: &egui::Context) -> Option<EscChoice> {
+    let mut choice = None;
+    egui::Window::new("game menu")
+        .title_bar(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+        .frame(panel())
+        .show(ctx, |ui| {
+            ui.set_width(200.0);
+            ui.vertical_centered(|ui| {
+                let button = |ui: &mut egui::Ui, text: &str| ui.add(egui::Button::new(RichText::new(text).size(15.0)).min_size(Vec2::new(190.0, 32.0))).clicked();
+                if button(ui, "Character Select") {
+                    choice = Some(EscChoice::CharSelect);
+                }
+                if button(ui, "Options") {
+                    choice = Some(EscChoice::Options);
+                }
+                if button(ui, "Exit") {
+                    choice = Some(EscChoice::Exit);
+                }
+                ui.add_space(4.0);
+                if button(ui, "Return to Game") {
+                    choice = Some(EscChoice::Back);
+                }
+            });
+        });
+    choice
+}

@@ -716,6 +716,8 @@ struct App {
     front: Option<screens::Front>,
     /// Exit requested from the login screen.
     quit: bool,
+    /// The Esc game menu (Character Select, Options, Exit).
+    esc_menu: bool,
     /// Start-up splash, title art and loading screens (made once the window exists).
     splash: Option<splash::Splash>,
     vfs: Option<ro_vfs::Vfs>,
@@ -1688,6 +1690,25 @@ impl App {
                     p.walker.stop_at((x as i32, y as i32));
                 }
             }
+            // Back at character select: clear the world; the screens take over again.
+            LeftGame => {
+                self.units.clear();
+                self.floor.clear();
+                self.warps.clear();
+                self.player = None;
+                self.world = None;
+                self.walk_goal = None;
+                self.attack = None;
+                self.dialog = None;
+                self.esc_menu = false;
+                let user = self.settings.last_id.clone();
+                let mut front = screens::Front::new(user, true);
+                front.screen = screens::Screen::Loading;
+                self.front = Some(front);
+                if let (Some(a), Some(v)) = (self.audio.as_mut(), self.vfs.as_ref()) {
+                    a.title(v);
+                }
+            }
             // Login and character-select replies (handled by the screens above).
             LoginFailed(_) | Servers(_) | Characters { .. } | CharCreated(_) | CharCreateFailed(_) | CharDeleteStarted { .. } | CharDeleted { .. } | CharDeleteCanceled { .. } => {}
             Disconnected(reason) => {
@@ -2592,6 +2613,10 @@ impl App {
                         None
                     }
                     Some(("drop", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::Drop { index, amount: 1 }),
+                    _ if step == "charselect" => {
+                        self.send(ro_net::Command::Restart(1));
+                        None
+                    }
                     _ if step == "restart" => {
                         self.send(ro_net::Command::Restart(0));
                         None
@@ -2922,6 +2947,21 @@ impl App {
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
                     hud::show_minimap(ui.ctx(), map, &map_name, me, &dots);
                 }
+                if self.esc_menu {
+                    match hud::esc_menu(ui.ctx()) {
+                        Some(hud::EscChoice::CharSelect) => {
+                            self.esc_menu = false;
+                            self.queued_commands.push(ro_net::Command::Restart(1));
+                        }
+                        Some(hud::EscChoice::Options) => {
+                            self.esc_menu = false;
+                            self.windows.settings = true;
+                        }
+                        Some(hud::EscChoice::Exit) => self.quit = true,
+                        Some(hud::EscChoice::Back) => self.esc_menu = false,
+                        None => {}
+                    }
+                }
                 if self.dead {
                     let hint = self.pad.in_use().then_some(if self.pad.playstation { "Cross" } else { "A" });
                     if hud::death_window(ui.ctx(), hint) {
@@ -3214,7 +3254,12 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key, state: ElementState::Pressed, repeat: false, .. }, .. } => {
                 use winit::keyboard::{Key, NamedKey};
                 match logical_key {
-                    Key::Named(NamedKey::Escape) => self.aiming = None,
+                    // Esc cancels aiming; otherwise it opens the game menu, as in the original.
+                    Key::Named(NamedKey::Escape) => {
+                        if self.aiming.take().is_none() && self.dialog.is_none() && !self.dead {
+                            self.esc_menu = !self.esc_menu;
+                        }
+                    }
                     // Shortcut bar: F1-F9 use the visible row's slots, F12 shows the next row.
                     Key::Named(NamedKey::F12) => self.queued_action = Some(windows::UiAction::HotkeyRow((self.hotkey_row + 1) % HOTKEY_ROWS)),
                     Key::Named(k) if hotkey_slot(k).is_some() => {
@@ -3376,6 +3421,7 @@ fn main() -> anyhow::Result<()> {
         net,
         session: session.clone(),
         quit: false,
+        esc_menu: false,
         splash: None,
         front: (online && !auto).then(|| screens::Front::new(settings::Settings::load(Default::default()).last_id.clone(), true)),
         world: None,
