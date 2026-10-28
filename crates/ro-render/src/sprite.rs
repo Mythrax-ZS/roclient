@@ -124,6 +124,19 @@ impl Sheet {
         })
     }
 
+    /// Sound of the frame entered between `from_ms` and `to_ms` (from < 0: the action just
+    /// started, so its first frame counts).
+    pub fn sound_between(&self, action: usize, from_ms: f32, to_ms: f32, once: bool) -> Option<&str> {
+        let a = self.action(action)?;
+        let d = a.delay_ms.max(1.0);
+        let to = (to_ms / d) as usize;
+        if (from_ms >= 0.0 && (from_ms / d) as usize == to) || (once && to >= a.frames.len()) {
+            return None;
+        }
+        let sound = a.frames[to % a.frames.len()].sound;
+        self.act.sounds.get(usize::try_from(sound).ok()?).map(String::as_str).filter(|s| !s.is_empty() && *s != "atk")
+    }
+
     /// Frame `i` of `action`, wrapping if this sheet has fewer frames.
     fn frame(&self, action: usize, i: usize) -> Option<&ro_formats::act::Frame> {
         let a = self.action(action)?;

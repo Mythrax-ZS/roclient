@@ -451,6 +451,13 @@ impl Renderer {
         SheetId(self.sheets.len() - 1)
     }
 
+    /// The sound (data\wav name) an actor's body frame asks for, if it entered a new frame
+    /// since `from_ms` (negative: the action just started).
+    pub fn actor_sound(&self, a: &Actor, from_ms: f32) -> Option<String> {
+        let index = a.action * 8 + a.dir as usize;
+        self.sheets.get(a.body.0)?.sound_between(index, from_ms, a.time_ms, a.once).map(str::to_string)
+    }
+
     /// Adds the map's water. `images[i]` is `mesh.textures[i]`.
     pub fn set_water(&mut self, mesh: &WaterMesh, images: Vec<Option<Rgba>>) {
         self.water = water::Water::upload(&self.device, &self.queue, &self.water_layout, &self.repeat_sampler, mesh, images);

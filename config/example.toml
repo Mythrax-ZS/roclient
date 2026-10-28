@@ -13,3 +13,6 @@ client_dir = "C:/Gravity/Ragnarok Online"
 grfs = ["data.grf"]
 map = "prontera"
 msaa = 4
+# Starting volumes (0..1). In-game changes (Alt+O) are saved to settings.toml beside this file.
+bgm_volume = 0.5
+sfx_volume = 0.7

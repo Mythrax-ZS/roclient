@@ -3,7 +3,9 @@
 //!   ro-client --headless   run login -> char select -> map entry and exit
 //!   ro-client              open the renderer window
 
+mod audio;
 mod hud;
+mod settings;
 mod social;
 mod windows;
 
@@ -36,6 +38,11 @@ struct Config {
     /// MSAA sample count (1, 2, 4); falls back to what the GPU supports.
     #[serde(default = "default_msaa")]
     msaa: u32,
+    /// Music and sound effect volume, 0..1 (0 mutes).
+    #[serde(default = "default_bgm_volume")]
+    bgm_volume: f32,
+    #[serde(default = "default_sfx_volume")]
+    sfx_volume: f32,
     /// Installed RO client folder; its `data/` is checked before the GRFs.
     client_dir: Option<PathBuf>,
     /// GRFs inside `client_dir`, highest priority first.
@@ -223,6 +230,14 @@ fn default_ui_scale() -> f32 {
 
 fn default_msaa() -> u32 {
     4
+}
+
+fn default_bgm_volume() -> f32 {
+    0.5
+}
+
+fn default_sfx_volume() -> f32 {
+    0.7
 }
 
 fn default_soak() -> u64 {
@@ -558,7 +573,8 @@ struct App {
     dialog: Option<hud::Dialog>,
     cutin: Option<hud::Cutin>,
     minimap: Option<hud::Minimap>,
-    show_minimap: bool,
+    settings: settings::Settings,
+    audio: Option<audio::Audio>,
     /// NPC to talk to once we have walked into range.
     pending_npc: Option<u32>,
     /// The monster we keep attacking, and our reach (cells) once the server tells us.
@@ -653,6 +669,9 @@ impl App {
                     (Some(texture), Some(g)) => Some(hud::Minimap { texture, cells: (g.width as f32, g.height as f32) }),
                     _ => None,
                 };
+                if let Some(a) = self.audio.as_mut() {
+                    a.enter_map(vfs, name);
+                }
                 self.world = Some(World { name: name.to_string(), ground: map.mesh, gat });
                 self.ready_at = Some(std::time::Instant::now());
             }
@@ -1597,7 +1616,7 @@ impl App {
             }
         }
         if std::mem::take(&mut self.open_windows) {
-            (self.windows.party, self.windows.friends) = (true, true);
+            (self.windows.party, self.windows.friends, self.windows.settings) = (true, true, true);
         }
         for c in std::mem::take(&mut self.queued_commands) {
             self.send(c);
@@ -1696,7 +1715,16 @@ impl App {
                 r.actors.push(a);
             }
             for m in self.units.values_mut() {
-                r.actors.push(m.update(dt, w, octant, 0));
+                let (action, time) = (m.actor.action, m.actor.time_ms);
+                let a = m.update(dt, w, octant, 0);
+                // Attack, hurt and death frames carry their sounds in the ACT.
+                if let (Some(_), Some(audio), Some(vfs)) = (m.pose, self.audio.as_ref(), self.vfs.as_ref()) {
+                    let from = if a.action == action && time > 0.0 && a.time_ms >= time { time } else { -1.0 };
+                    if let Some(s) = r.actor_sound(&a, from) {
+                        audio.play(vfs, &s);
+                    }
+                }
+                r.actors.push(a);
             }
             // Items on the ground: their sprite at the cell plus sub-cell offset.
             for (f, actor) in self.floor.values() {
@@ -1781,8 +1809,15 @@ impl App {
             let map_name = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
             let out = self.egui_ctx.run_ui(input, |ui| {
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars);
-                if let (true, Some(map), Some(me)) = (self.show_minimap, self.minimap.as_ref(), me) {
+                if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
                     hud::show_minimap(ui.ctx(), map, &map_name, me, &dots);
+                }
+                if self.windows.settings && self.settings.show(ui.ctx(), &mut self.windows.settings) {
+                    self.ui_scale = self.settings.ui_scale;
+                    if let Some(a) = self.audio.as_mut() {
+                        a.set_bgm_volume(self.settings.bgm_volume);
+                        a.sfx_volume = self.settings.sfx_volume;
+                    }
                 }
                 answer = self.hud.show_dialog(ui.ctx(), &mut self.dialog, self.cutin.as_ref());
                 ui_action = self.windows.show(ui.ctx(), &view);
@@ -2004,7 +2039,11 @@ impl ApplicationHandler for App {
                         "s" => self.windows.toggle_skills(),
                         "z" => self.windows.party = !self.windows.party,
                         "h" => self.windows.friends = !self.windows.friends,
-                        "m" => self.show_minimap = !self.show_minimap,
+                        "m" => {
+                            self.settings.minimap = !self.settings.minimap;
+                            self.settings.save();
+                        }
+                        "o" => self.windows.settings = !self.windows.settings,
                         _ => {}
                     },
                     _ => {}
@@ -2126,7 +2165,13 @@ fn main() -> anyhow::Result<()> {
         dialog: None,
         cutin: None,
         minimap: None,
-        show_minimap: true,
+        settings: settings::Settings::load(settings::Settings {
+            bgm_volume: cfg.bgm_volume,
+            sfx_volume: cfg.sfx_volume,
+            ui_scale: cfg.ui_scale,
+            minimap: true,
+        }),
+        audio: None,
         pending_npc: None,
         attack: None,
         chasing: false,
@@ -2183,9 +2228,14 @@ fn main() -> anyhow::Result<()> {
         egui_ctx: egui::Context::default(),
         egui_state: None,
         hud: hud::Hud::default(),
-        ui_scale: cfg.ui_scale,
+        ui_scale: 1.0, // from settings below
     };
     app.class_names = app.vfs.as_ref().map(load_class_names).unwrap_or_default();
+    app.ui_scale = app.settings.ui_scale;
+    // Captures and headless runs stay silent.
+    if app.capture.is_none() {
+        app.audio = app.vfs.as_ref().and_then(|v| audio::Audio::new(v, app.settings.bgm_volume, app.settings.sfx_volume));
+    }
     if let Some(vfs) = app.vfs.as_ref() {
         // iteminfo.lub lives in the client's System folder; skill names in the GRF.
         let read = |p: &str| vfs.read(p).ok().flatten();
