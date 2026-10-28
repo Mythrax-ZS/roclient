@@ -359,6 +359,8 @@ struct App {
     world: Option<World>,
     player: Option<Mob>,
     account_id: u32,
+    /// Connection problem shown in the title bar.
+    status: Option<String>,
     /// Other units in view, by id.
     units: std::collections::HashMap<u32, Mob>,
     class_names: std::collections::HashMap<i16, String>,
@@ -550,7 +552,10 @@ impl App {
                     p.walker.stop_at((x as i32, y as i32));
                 }
             }
-            Disconnected(reason) => tracing::error!("disconnected: {reason}"),
+            Disconnected(reason) => {
+                tracing::error!("disconnected: {reason}");
+                self.status = Some(format!("disconnected: {reason}"));
+            }
         }
     }
 
@@ -622,7 +627,12 @@ impl App {
             let (w, h) = r.size();
             let at = self.player.as_ref().map(|p| p.walker.cell).unwrap_or_default();
             let map = self.world.as_ref().map_or("-", |w| w.name.as_str());
-            window.set_title(&format!("roclient — {map} {},{} — {w}x{h} — {fps:.0} fps", at.0, at.1));
+            let title = match &self.status {
+                Some(s) => format!("roclient — {s}"),
+                None if self.world.is_none() && self.net.is_some() => "roclient — connecting…".to_string(),
+                None => format!("roclient — {map} {},{} — {w}x{h} — {fps:.0} fps", at.0, at.1),
+            };
+            window.set_title(&title);
         }
     }
 }
@@ -772,6 +782,7 @@ fn main() -> anyhow::Result<()> {
         world: None,
         player: None,
         account_id: 0,
+        status: None,
         units: Default::default(),
         class_names: Default::default(),
         sprites: Default::default(),
