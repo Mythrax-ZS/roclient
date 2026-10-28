@@ -76,6 +76,10 @@ pub struct Hud {
     menu_cursor: usize,
     /// A controller is in use: keep the menu highlight visible.
     pub pad_used: bool,
+    /// Classic interface: the original chat input bar (dialog_bg); None draws the modern box.
+    pub classic_bar: Option<egui::TextureHandle>,
+    /// Classic chat: the whisper name field; lines go to this player when it is filled.
+    whisper_to: String,
 }
 
 /// Dialog navigation from a controller.
@@ -218,28 +222,51 @@ impl Hud {
             });
 
         let mut sent = None;
+        let classic = self.classic_bar.clone();
+        // Classic: the original's square, see-through log above its input bar.
+        let frame = if classic.is_some() { Frame::new().fill(Color32::from_rgba_unmultiplied(0, 0, 0, 120)).inner_margin(Margin::same(4)) } else { panel() };
         egui::Window::new("chat")
             .title_bar(false)
             .resizable(true)
             .default_size(Vec2::new(460.0, 190.0))
             .anchor(Align2::LEFT_BOTTOM, Vec2::new(12.0, -12.0))
-            .frame(panel())
+            .frame(frame)
             .show(ctx, |ui| {
-                let input_h = 30.0;
+                let input_h = if classic.is_some() { 26.0 } else { 30.0 };
                 egui::ScrollArea::vertical()
                     .stick_to_bottom(true)
                     .auto_shrink([false, false])
-                    .max_height(ui.available_height() - input_h)
+                    .min_scrolled_height(if classic.is_some() { 150.0 } else { 0.0 })
+                    .max_height(if classic.is_some() { 150.0 } else { ui.available_height() - input_h })
                     .show(ui, |ui| {
                         for (kind, text) in &self.chat {
                             ui.label(RichText::new(text).size(12.5).color(chat_color(*kind)));
                         }
                     });
-                let edit = ui.add(
-                    egui::TextEdit::singleline(&mut self.input)
-                        .hint_text("Press Enter to chat")
-                        .desired_width(f32::INFINITY),
-                );
+                let edit = if let Some(bar) = &classic {
+                    // dialog_bg, three-sliced to the box width: whisper name box, then the
+                    // message box stretched across.
+                    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), egui::Sense::hover());
+                    let p = ui.painter();
+                    let tw = bar.size_vec2().x;
+                    let (cut_l, cut_r) = (114.0, tw - 30.0);
+                    let slice = |x0: f32, x1: f32, u0: f32, u1: f32| {
+                        p.image(bar.id(), egui::Rect::from_min_max(egui::pos2(x0, r.min.y), egui::pos2(x1, r.max.y)), egui::Rect::from_min_max(egui::pos2(u0 / tw, 0.0), egui::pos2(u1 / tw, 1.0)), Color32::WHITE);
+                    };
+                    slice(r.min.x, r.min.x + cut_l, 0.0, cut_l);
+                    slice(r.min.x + cut_l, r.max.x - (tw - cut_r), cut_l, cut_r);
+                    slice(r.max.x - (tw - cut_r), r.max.x, cut_r, tw);
+                    let dark = Color32::from_rgb(30, 30, 40);
+                    let field = |ui: &mut egui::Ui, rect: egui::Rect, text: &mut String, hint: &str| {
+                        ui.put(rect, egui::TextEdit::singleline(text).frame(egui::Frame::NONE).hint_text(hint).text_color(dark).font(egui::FontId::proportional(12.5)))
+                    };
+                    let whisper = egui::Rect::from_min_max(egui::pos2(r.min.x + 6.0, r.min.y + 4.0), egui::pos2(r.min.x + 96.0, r.max.y - 4.0));
+                    field(ui, whisper, &mut self.whisper_to, "Whisper").on_hover_text("Name to whisper to; empty for public chat");
+                    let msg = egui::Rect::from_min_max(egui::pos2(r.min.x + cut_l + 4.0, r.min.y + 4.0), egui::pos2(r.max.x - 34.0, r.max.y - 4.0));
+                    field(ui, msg, &mut self.input, "Press Enter to chat")
+                } else {
+                    ui.add(egui::TextEdit::singleline(&mut self.input).hint_text("Press Enter to chat").desired_width(f32::INFINITY))
+                };
                 if self.want_focus {
                     edit.request_focus();
                     self.want_focus = false;
@@ -275,7 +302,9 @@ impl Hud {
                                 self.history.remove(0);
                             }
                         }
-                        sent = Some(text);
+                        // A whisper name in the classic bar makes plain lines whispers.
+                        let to = self.whisper_to.trim();
+                        sent = Some(if classic.is_some() && !to.is_empty() && !text.starts_with('/') { format!("/w \"{to}\" {text}") } else { text });
                     }
                 }
             });

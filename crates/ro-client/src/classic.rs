@@ -11,7 +11,7 @@ const DIR: &str = r"data\texture\유저인터페이스\basic_interface";
 /// The images loaded (file names without .bmp).
 const NAMES: &[&str] = &[
     "titlebar_left", "titlebar_mid", "titlebar_right", "btnbar_left", "btnbar_mid", "btnbar_right", "itemwin_mid", "tab_itm_01", "tab_itm_02", "tab_itm_03", "sys_close_off",
-    "sys_close_on", "equipwin_bg", "statwin_bg", "arw_right", "arw_right_on", "tab_l", "tab_m", "tab_r", "tab_a_l", "tab_a_m", "tab_a_r",
+    "sys_close_on", "equipwin_bg", "statwin_bg", "arw_right", "arw_right_on", "dialog_bg", "tab_l", "tab_m", "tab_r", "tab_a_l", "tab_a_m", "tab_a_r",
 ];
 
 /// Dark text on the white window bodies.
@@ -30,6 +30,10 @@ impl Skin {
         let tex: HashMap<_, _> = NAMES.iter().filter_map(|n| Some((*n, crate::load_texture(ctx, vfs, &format!(r"{DIR}\{n}.bmp"))?))).collect();
         tracing::info!(images = tex.len(), "classic interface art");
         Self { tex }
+    }
+
+    pub fn texture(&self, name: &str) -> Option<&egui::TextureHandle> {
+        self.tex.get(name)
     }
 
     /// Draws an image at its own size.

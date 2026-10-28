@@ -3536,6 +3536,7 @@ impl App {
                     self.skin = Some(classic::Skin::load(&self.egui_ctx, vfs));
                 }
             }
+            self.hud.classic_bar = self.skin.as_ref().filter(|_| self.settings.classic_ui).and_then(|s| s.texture("dialog_bg")).cloned();
             let guild_name = self.guild.name.clone();
             let items: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
             let skill_names = |n: &str| self.skill_names.display(n);
