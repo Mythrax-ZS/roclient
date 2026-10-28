@@ -235,10 +235,10 @@ impl Hud {
                 gauge(21.5, "HP", s.hp, s.max_hp);
                 gauge(42.5, "SP", s.sp, s.max_sp);
                 let pct = |v: i64, n: i64| if n > 0 { v as f32 * 100.0 / n as f32 } else { 0.0 };
-                p.text(at(14.0, 81.0), Align2::LEFT_CENTER, format!("Base Lv. {}", s.base_level), f(11.0), ink);
-                p.text(at(192.0, 81.0), Align2::RIGHT_CENTER, format!("{:.1}%", pct(s.base_exp, s.next_base_exp)), f(10.5), ink);
-                p.text(at(14.0, 97.0), Align2::LEFT_CENTER, format!("Job Lv. {}", s.job_level), f(11.0), ink);
-                p.text(at(192.0, 97.0), Align2::RIGHT_CENTER, format!("{:.1}%", pct(s.job_exp, s.next_job_exp)), f(10.5), ink);
+                p.text(at(14.0, 78.5), Align2::LEFT_CENTER, format!("Base Lv. {}", s.base_level), f(10.5), ink);
+                p.text(at(192.0, 78.5), Align2::RIGHT_CENTER, format!("{:.1}%", pct(s.base_exp, s.next_base_exp)), f(10.5), ink);
+                p.text(at(14.0, 90.5), Align2::LEFT_CENTER, format!("Job Lv. {}", s.job_level), f(10.5), ink);
+                p.text(at(192.0, 90.5), Align2::RIGHT_CENTER, format!("{:.1}%", pct(s.job_exp, s.next_job_exp)), f(10.5), ink);
                 let heavy = s.max_weight > 0 && s.weight * 2 >= s.max_weight;
                 p.text(at(8.0, 114.0), Align2::LEFT_CENTER, format!("Weight : {} / {}", s.weight / 10, s.max_weight / 10), f(10.0), if heavy { Color32::from_rgb(200, 60, 40) } else { ink });
                 p.text(at(198.0, 114.0), Align2::RIGHT_CENTER, format!("Zeny : {}", s.zeny), f(10.0), ink);

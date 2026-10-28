@@ -297,11 +297,11 @@ impl Progress {
             // The art's 5 x 4 grid of day cells: stamped up to the days attended; the next
             // claimable day outlined.
             for d in 0..DAYS {
-                let s = egui::Rect::from_min_size(r.min + Vec2::new(23.0 + (d % 5) as f32 * 62.0, 90.0 + (d / 5) as f32 * 64.0), Vec2::splat(58.0));
+                let s = egui::Rect::from_min_size(r.min + Vec2::new(25.0 + (d % 5) as f32 * 62.0, 94.5 + (d / 5) as f32 * 64.0), Vec2::new(58.5, 61.5));
                 p.text(s.left_top() + Vec2::new(4.0, 2.0), egui::Align2::LEFT_TOP, format!("{}", d + 1), egui::FontId::proportional(10.5), Color32::from_rgb(120, 130, 160));
                 if d < days {
                     if let Some(t) = self.art.get("done") {
-                        p.image(t.id(), egui::Rect::from_center_size(s.center(), t.size_vec2().min(Vec2::splat(52.0))), uv, Color32::WHITE);
+                        p.image(t.id(), s, uv, Color32::WHITE);
                     } else {
                         p.text(s.center(), egui::Align2::CENTER_CENTER, "OK", egui::FontId::proportional(16.0), Color32::from_rgb(70, 110, 200));
                     }
