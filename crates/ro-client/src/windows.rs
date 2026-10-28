@@ -149,8 +149,8 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                 ui.separator();
                 let row = ui.add(egui::Button::new(RichText::new(format!("{}", v.hotkey_row + 1)).size(13.0)).min_size(Vec2::new(22.0, SIZE)));
                 if v.pad_hints {
-                    ui.label(RichText::new("hold RT
-LT: next").size(10.0).color(Color32::from_gray(170)));
+                    let hint = if v.playstation { "hold R2\nL2: next" } else { "hold RT\nLT: next" };
+                    ui.label(RichText::new(hint).size(10.0).color(Color32::from_gray(170)));
                 }
                 if row.on_hover_text("Next row (F12)").clicked() {
                     action = Some(UiAction::HotkeyRow((v.hotkey_row + 1) % HOTKEY_ROWS));

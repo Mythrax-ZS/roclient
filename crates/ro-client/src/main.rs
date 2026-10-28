@@ -126,10 +126,22 @@ fn load_character(
             }
         }
     }
-    let weapon = (g.weapon != 0)
-        .then(|| tables.weapon(g.weapon))
-        .flatten()
-        .and_then(|name| sheet(&format!("data\\sprite\\인간족\\{}\\{}_{sex}{name}", look.job, look.job), None).inspect_err(|e| tracing::debug!(weapon = g.weapon, "weapon sprite: {e:#}")).ok());
+    // Weapon, then its slash trail (_검광). Two-handed katars are named twice
+    // (어세신_남_카타르_카타르), as both hands hold one.
+    let mut weapon = vec![];
+    if let Some(name) = (g.weapon != 0).then(|| tables.weapon(g.weapon)).flatten() {
+        let dir = format!("data\\sprite\\인간족\\{}\\{}_{sex}", look.job, look.job);
+        let found = [format!("{dir}{name}"), format!("{dir}{name}{name}")].into_iter().find_map(|base| sheet(&base, None).ok().map(|id| (id, base)));
+        match found {
+            Some((id, base)) => {
+                weapon.push(id);
+                if let Ok(trail) = sheet(&format!("{base}_검광"), None) {
+                    weapon.push(trail);
+                }
+            }
+            None => tracing::debug!(weapon = g.weapon, %name, "no weapon sprite"),
+        }
+    }
     Ok(ro_render::Actor {
         pos: Default::default(),
         body,
@@ -402,6 +414,8 @@ struct Mob {
     hp: Option<(i32, i32)>,
     /// Player-sprite appearance (None for NPCs and monsters).
     look: Option<Look>,
+    /// Player attack motion: 10, or 11 for weapons drawn only there (katars).
+    attack_group: usize,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -428,13 +442,14 @@ impl Mob {
             dying: None,
             hp: None,
             look: None,
+            attack_group: 10,
         }
     }
 
     /// Action group for a pose: player sprites and monster sprites order them differently.
     fn action_for(&self, pose: Pose) -> usize {
         match (self.human, pose) {
-            (true, Pose::Attack) => 10,
+            (true, Pose::Attack) => self.attack_group,
             (true, Pose::Hurt) => 6,
             (true, Pose::Dead) => 8,
             (true, Pose::Cast) => 12,
@@ -727,6 +742,7 @@ impl App {
         let mut resolved = look.clone();
         if let Some(info) = self.item_db.as_ref().and_then(|d| d.get(look.gear.weapon)) {
             resolved.gear.weapon = info.view;
+            tracing::debug!(item = look.gear.weapon, view = info.view, name = ?self.look_tables.weapon(info.view), "weapon view");
         }
         let actor = load_character(vfs, r, &resolved, &self.look_tables).inspect_err(|e| tracing::warn!("player sprites {key}: {e:#}")).ok();
         self.sprites.insert(key, actor.clone());
@@ -751,7 +767,7 @@ impl App {
             Some((spr, act)) => {
                 let body = r.add_sheet(&spr, act, None);
                 let shadow = self.sprites.get("shadow").cloned().flatten().and_then(|a| a.shadow);
-                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: None, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
+                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: vec![], shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
             }
             None => {
                 tracing::debug!(job, %name, "no sprite for class");
@@ -1475,7 +1491,7 @@ impl App {
         let actor = match (spr, act) {
             (Some(spr), Some(act)) => {
                 let body = r.add_sheet(&spr, act, None);
-                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: None, shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
+                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: vec![], shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
             }
             _ => None,
         };
@@ -1574,7 +1590,7 @@ impl App {
                         body,
                         head: None,
                         headgear: vec![],
-                        weapon: None,
+                        weapon: vec![],
                         shadow: None,
                         action: 0,
                         dir: ro_render::Dir::S,
@@ -1602,13 +1618,14 @@ impl App {
         }
     }
 
-    /// Units the controller can target, nearest first: monsters and named NPCs in reach.
-    fn pad_candidates(&self) -> Vec<u32> {
+    /// Units the controller can target, nearest first: monsters and named NPCs in reach, or
+    /// other players while aiming a support skill.
+    fn pad_candidates(&self, players: bool) -> Vec<u32> {
         let Some(me) = self.player.as_ref().map(|p| p.walker.cell) else { return vec![] };
         let mut v: Vec<(i32, u32)> = self
             .units
             .iter()
-            .filter(|(_, m)| m.dying.is_none() && (m.kind == 5 || (matches!(m.kind, 1 | 6) && !m.name.is_empty())))
+            .filter(|(_, m)| m.dying.is_none() && if players { m.kind == 0 } else { m.kind == 5 || (matches!(m.kind, 1 | 6) && !m.name.is_empty()) })
             .map(|(id, m)| ((m.walker.cell.0 - me.0).pow(2) + (m.walker.cell.1 - me.1).pow(2), *id))
             .filter(|(d, _)| *d <= PAD_REACH * PAD_REACH)
             .collect();
@@ -1616,7 +1633,7 @@ impl App {
         v.into_iter().map(|(_, id)| id).collect()
     }
 
-    /// Controller play: left stick walks (camera-relative), right stick turns and zooms the
+    /// Controller play: left stick walks (camera-relative), right stick turns and tilts the
     /// camera, A acts on the highlighted target, LB/RB change target, X picks up, Y sits,
     /// B cancels, RT/LT + face buttons or D-pad fire the shortcut bar.
     fn pad_tick(&mut self, dt: f32) {
@@ -1628,13 +1645,10 @@ impl App {
         self.hud.pad_used = true;
         let secs = dt / 1000.0;
 
-        // Camera: right stick turns and zooms; D-pad left/right snap a quarter turn.
+        // Camera: right stick turns and tilts; D-pad left/right turn 45 degrees, up/down zoom.
         if let (Some(r), false) = (self.renderer.as_mut(), self.still) {
-            if f.right.x != 0.0 {
-                r.camera.rotate(-f.right.x * secs * 2.2, 0.0);
-            }
-            if f.right.y != 0.0 {
-                r.camera.zoom(f.right.y * secs * 5.0);
+            if f.right != glam::Vec2::ZERO {
+                r.camera.rotate(-f.right.x * secs * 2.2, -f.right.y * secs * 1.2);
             }
             if f.just(RightThumb) {
                 r.camera.yaw = 0.0;
@@ -1666,7 +1680,8 @@ impl App {
             }
         } else {
             // Target: keep the current one while it is in reach, else the nearest.
-            let list = self.pad_candidates();
+            let support_aim = self.aiming.and_then(|(s, _)| self.skills.iter().find(|k| k.id == s)).is_some_and(|k| k.target & 16 != 0 && k.target & 1 == 0);
+            let list = self.pad_candidates(support_aim);
             if self.pad_target.is_none_or(|t| !list.contains(&t)) {
                 self.pad_target = list.first().copied();
             }
@@ -1679,8 +1694,15 @@ impl App {
             let target = self.pad_target.and_then(|t| self.units.get(&t).map(|m| (t, m.kind, m.walker.cell)));
             if let Some((skill, level)) = self.aiming {
                 // Aiming a skill: A on the target (or its cell), Y on yourself, B cancels.
-                let ground = self.skills.iter().find(|s| s.id == skill).is_some_and(|s| s.target & 2 != 0);
-                if f.just(South) {
+                let flags = self.skills.iter().find(|s| s.id == skill).map_or(0, |s| s.target);
+                let ground = flags & 2 != 0;
+                // Support skills (Heal, Detoxify, Blessing...) go on a targeted player, else on us.
+                let support = flags & 16 != 0 && flags & 1 == 0;
+                if f.just(South) && support {
+                    self.aiming = None;
+                    let ally = target.filter(|t| t.1 == 0).map_or(self.account_id, |t| t.0);
+                    self.use_skill_on(skill, level, ally);
+                } else if f.just(South) {
                     self.aiming = None;
                     match target {
                         Some((_, _, c)) if ground => self.use_skill_at(skill, level, (c.0 as u16, c.1 as u16)),
@@ -2215,12 +2237,14 @@ impl App {
             if let Some(p) = self.player.as_mut() {
                 // Combat stance (weapon drawn) while attacking something.
                 let idle = if self.attack.is_some() && self.action == 0 { 4 } else { self.action };
+                p.attack_group = attack_group(r, &p.actor);
                 let a = p.update(dt, w, octant, idle);
                 r.camera.target = a.pos;
                 r.actors.push(a);
             }
             for m in self.units.values_mut() {
                 let (action, time) = (m.actor.action, m.actor.time_ms);
+                m.attack_group = attack_group(r, &m.actor);
                 let a = m.update(dt, w, octant, 0);
                 // Attack, hurt and death frames carry their sounds in the ACT.
                 if let (Some(_), Some(audio), Some(vfs)) = (m.pose, self.audio.as_ref(), self.vfs.as_ref()) {
@@ -2845,4 +2869,13 @@ fn main() -> anyhow::Result<()> {
     }
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+/// Which attack motion a player uses: the weapon sprite only has frames in its own one
+/// (katars draw in group 11, most weapons in 10).
+fn attack_group(r: &ro_render::Renderer, a: &ro_render::Actor) -> usize {
+    match a.weapon.first() {
+        Some(&w) if !r.action_visible(w, 10) && r.action_visible(w, 11) => 11,
+        _ => 10,
+    }
 }

@@ -57,8 +57,8 @@ pub struct Actor {
     pub head: Option<SheetId>,
     /// Headgear layers (lower, middle, upper), attached like the head.
     pub headgear: Vec<SheetId>,
-    /// Weapon layer: same frames as the body, no anchor shift.
-    pub weapon: Option<SheetId>,
+    /// Weapon layers (the weapon, then its slash trail): same frames as the body, no anchor shift.
+    pub weapon: Vec<SheetId>,
     pub shadow: Option<SheetId>,
     /// Action group (0 idle, 1 walk, 2 sit, ...); the ACT index is `action * 8 + dir`.
     pub action: usize,
@@ -116,6 +116,11 @@ impl Sheet {
 
     fn action(&self, action: usize) -> Option<&ro_formats::act::Action> {
         self.act.actions.get(action).or_else(|| self.act.actions.get(action % 8)).filter(|a| !a.frames.is_empty())
+    }
+
+    /// Whether any frame of `action` has a visible layer.
+    pub fn has_layers(&self, action: usize) -> bool {
+        self.act.actions.get(action).is_some_and(|a| a.frames.iter().any(|f| f.layers.iter().any(|l| l.sprite >= 0)))
     }
 
     /// Length of one pass through `action`.
@@ -194,19 +199,17 @@ pub(crate) fn actor_quads(sheets: &[Sheet], a: &Actor) -> Vec<(usize, Vec<Vertex
     // differ, not an animation: hold the pose (straight) for body and head alike.
     let body_frame = if still_head { 0 } else { body.frame_index(index, a.time_ms, a.once) };
     let Some(bf) = body.frame(index, body_frame) else { return out };
-    let mut v = vec![];
-    body.emit(bf, a.pos, [0.0, 0.0], &mut v);
-    out.push((a.body.0, v));
 
     // Facing away (NW/N/NE): the weapon is held in front of the body from the camera's view
     // only when facing us, so draw it first when facing away.
     let facing_away = matches!(a.dir, Dir::NW | Dir::N | Dir::NE);
     let weapon = |out: &mut Vec<(usize, Vec<Vertex>)>| {
-        if let Some(w) = a.weapon.and_then(|id| sheets.get(id.0)) {
+        for &id in &a.weapon {
+            let Some(w) = sheets.get(id.0) else { continue };
             if let Some(wf) = w.frame(index, body_frame) {
                 let mut v = vec![];
                 w.emit(wf, a.pos, [0.0, 0.0], &mut v);
-                out.push((a.weapon.unwrap().0, v));
+                out.push((id.0, v));
             }
         }
     };

@@ -45,11 +45,11 @@ fn deadzone(v: Vec2) -> Vec2 {
 impl Pad {
     pub fn new() -> Self {
         let gilrs = Gilrs::new().inspect_err(|e| tracing::warn!("controller support unavailable: {e}")).ok();
-        let active = gilrs.as_ref().and_then(|g| g.gamepads().next().map(|(id, pad)| {
+        let active = gilrs.as_ref().and_then(|g| g.gamepads().inspect(|(_, p)| tracing::info!(name = p.name(), "controller found")).last().map(|(id, pad)| {
             tracing::info!(name = pad.name(), "controller connected");
             id
         }));
-        let playstation = active.zip(gilrs.as_ref()).is_some_and(|(id, g)| is_playstation(g.gamepad(id).name()));
+        let playstation = gilrs.as_ref().is_some_and(|g| g.gamepads().any(|(_, p)| is_playstation(p.name())));
         Self { gilrs, active, used: false, playstation }
     }
 
@@ -64,9 +64,9 @@ impl Pad {
         while let Some(ev) = g.next_event() {
             match ev.event {
                 EventType::ButtonPressed(b, _) => {
-                    if self.active != Some(ev.id) {
-                        self.playstation = is_playstation(g.gamepad(ev.id).name());
-                    }
+                    // Steam Input can put a virtual Xbox pad in front of a PlayStation one;
+                    // label for the physical controller if one is connected.
+                    self.playstation = g.gamepads().any(|(_, p)| is_playstation(p.name()));
                     self.active = Some(ev.id);
                     self.used = true;
                     frame.pressed.push(b);
