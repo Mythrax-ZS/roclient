@@ -13,6 +13,8 @@ pub enum UiAction {
     UseItem(u16),
     Equip { index: u16, location: u32 },
     Unequip(u16),
+    /// Take off everything in these slots.
+    UnequipAll(u32),
     /// Equipment switch set: add an item, remove one, swap the whole set.
     SwitchAdd { index: u16, location: u32 },
     SwitchRemove(u16),
@@ -962,6 +964,14 @@ impl Windows {
                     if resp.double_clicked() {
                         action = Some(if self.equip_tab == 3 { UiAction::SwitchRemove(it.index) } else { UiAction::Unequip(it.index) });
                     }
+                }
+                if self.equip_tab != 3 && ui.button("Take off all").clicked() {
+                    // Real equip bits: worn gear (and ammo), costumes, shadow gear.
+                    action = Some(UiAction::UnequipAll(match self.equip_tab {
+                        0 => 0x3ff | 0x8000,
+                        1 => 0x3c00,
+                        _ => 0x3f_0000,
+                    }));
                 }
                 if self.equip_tab == 3 {
                     ui.horizontal(|ui| {

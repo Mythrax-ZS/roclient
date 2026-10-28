@@ -33,12 +33,13 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_ACK_REMEMBER_WARPPOINT (Warp Portal memo)
 - [x] ZC_EQUIP_ARROW, ZC_ACTION_FAILURE, ZC_ACK_ADDITEM_TO_CART, ZC_NOTIFY_MAPINFO, ZC_EQUIPITEM_DAMAGED
 - [x] ZC_ATTACK_RANGE, ZC_OVERWEIGHT_PERCENT, ZC_MAPPROPERTY_R2 (PvP/GvG: click enemy players to attack, Shift when the map requires it)
-- [ ] ZC_CARTOFF
+- [x] ZC_CARTOFF
 - [x] ZC_SPIRITS (spheres circling the unit)
 - [ ] ZC_SPIRITS2 / SPIRITS_ATTRIBUTE / SOULENERGY / TARGET_SPIRITS, ZC_MILLENNIUMSHIELD
 - [ ] ZC_COMBODELAY, ZC_BLADESTOP, ZC_DISPEL, ZC_HIGHJUMP, ZC_NOTIFY_SKILL_POSITION
 - [ ] ZC_NOTIFY_BIND_ON_EQUIP, ZC_CHANGE_ITEM_OPTION, ZC_UPDATE_CARDSLOT
-- [ ] ZC_ACK_TAKEOFF_EQUIP_ALL, ZC_MOVE_ITEM_FAILED, ZC_INVENTORY_TAB, ZC_INVENTORY_END
+- [x] ZC_ACK_TAKEOFF_EQUIP_ALL ("Take off all" button per equipment tab), ZC_MOVE_ITEM_FAILED
+- [ ] ZC_INVENTORY_TAB, ZC_INVENTORY_END
 - [ ] ZC_EXTEND_BODYITEM_SIZE (+ ACK / MSGBOX)
 
 ## World
@@ -58,11 +59,11 @@ Ticked items are handled and tested in game against the local server.
 - [x] Guild alliances and enemies (request, answer, list in the guild window)
 - [ ] Guild disorganize
 - [x] ZC_CONFIG, ZC_PARTY_CONFIG, party options: Game Options window
-- [ ] ZC_PARTY_JOIN_REQ_ACK, ZC_ITEM_PICKUP_PARTY
+- [x] ZC_PARTY_JOIN_REQ_ACK, ZC_ITEM_PICKUP_PARTY
 - [x] Store search (Universal Catalog: search, pages, click to locate)
 - [ ] ZC_ACK_OPENSTORE2
 - [x] Ranking window (ZC_ACK_RANKING2 + names by char id; /blacksmith /alchemist /taekwon /pk)
-- [ ] ZC_CONGRATULATION, ZC_DIVORCE
+- [x] ZC_CONGRATULATION, ZC_DIVORCE (chat notices; no wedding effect yet)
 - [ ] ZC_BAN_LIST
 
 ## Found while testing

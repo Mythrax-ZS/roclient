@@ -307,6 +307,10 @@ pub enum Event {
     /// The cart's contents start arriving (replace what we had).
     CartStart,
     CartItems(Vec<ItemData>),
+    /// ZC_CARTOFF: the cart was removed.
+    CartOff,
+    /// ZC_ITEM_PICKUP_PARTY: a party member picked up an item.
+    PartyPickup { aid: u32, item: u32, refine: u8 },
     CartCount { items: u16, max_items: u16, weight: u32, max_weight: u32 },
     CartAdded(ItemData),
     CartRemoved { index: u16, amount: u32 },
@@ -928,7 +932,7 @@ impl MapSession {
                             _ => Some(Event::Notice("The item could not be identified.".into())),
                         },
                         0x013c if data.len() >= 4 => Some(Event::ArrowEquipped(u16::from_le_bytes([data[2], data[3]]))),
-                        0x013b | 0x0189 | 0x011e | 0x012c | 0x02bb | 0x0223 | 0x01fe => notice_text(opcode, &data).map(Event::Notice),
+                        0x013b | 0x0189 | 0x011e | 0x012c | 0x02bb | 0x0223 | 0x01fe | 0x0bae | 0x02c5 | 0x0205 | 0x01ea | 0x0aa7 => notice_text(opcode, &data).map(Event::Notice),
                         0x0152 if data.len() >= 12 => Some(Event::GuildEmblem { guild: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), version: u32::from_le_bytes([data[8], data[9], data[10], data[11]]), data: data[12..].to_vec() }),
                         0x010c if data.len() >= 6 => Some(Event::Mvp(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x010a if data.len() >= 6 => Some(Event::MvpItem(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
@@ -1016,6 +1020,8 @@ impl MapSession {
                         }
                         0x0b08 if data.get(4) == Some(&0) => Some(Event::InventoryStart),
                         0x0b08 if data.get(4) == Some(&1) => Some(Event::CartStart),
+                        0x012b => Some(Event::CartOff),
+                        0x0b67 if data.len() >= 33 => Some(Event::PartyPickup { aid: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), item: u32::from_le_bytes([data[6], data[7], data[8], data[9]]), refine: data[31] }),
                         0x0b09 | 0x0b39 if data.get(4) == Some(&1) => {
                             Some(Event::CartItems(if opcode == 0x0b09 { parse_itemlist_normal(&data) } else { parse_itemlist_equip(&data) }))
                         }
@@ -1480,6 +1486,35 @@ fn notice_text(opcode: u16, data: &[u8]) -> Option<String> {
         .into(),
         // ZC_EQUIPITEM_DAMAGED
         0x02bb => "One of your equipped items was damaged.".into(),
+        // ZC_ACK_TAKEOFF_EQUIP_ALL
+        0x0bae => if *data.get(2)? == 0 { return None } else { "You can't take your equipment off right now.".into() },
+        // ZC_PARTY_JOIN_REQ_ACK: name, result
+        0x02c5 => {
+            let mut b = data.get(2..)?;
+            let name = get_fixed_str(&mut b, 24);
+            match i32::from_le_bytes(data.get(26..30)?.try_into().ok()?) {
+                0 => format!("{name} is already in another party."),
+                1 => format!("{name} declined the party invitation."),
+                2 => format!("{name} joined the party."),
+                3 => "The party is full.".into(),
+                4 => format!("A character on {name}'s account is already in the party."),
+                5 => format!("{name} is blocking party invitations."),
+                7 => format!("{name} is not online."),
+                8 => "You can't form a party on this map.".into(),
+                9 => "You can't join a party on this map.".into(),
+                10 => "You can't invite or leave while in a memorial dungeon.".into(),
+                _ => format!("Couldn't invite {name}."),
+            }
+        }
+        // ZC_DIVORCE
+        0x0205 => {
+            let mut b = data.get(2..)?;
+            format!("You are now divorced from {}.", get_fixed_str(&mut b, 24))
+        }
+        // ZC_CONGRATULATION
+        0x01ea => "Congratulations on the wedding!".into(),
+        // ZC_MOVE_ITEM_FAILED
+        0x0aa7 => "That item couldn't be moved.".into(),
         // ZC_ACK_ITEMREPAIR
         0x01fe => if *data.get(4)? == 0 { "Item has been repaired." } else { "Item repair failed." }.into(),
         // ZC_ACK_WEAPONREFINE

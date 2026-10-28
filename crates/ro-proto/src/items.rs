@@ -180,6 +180,8 @@ pub enum ItemRequest {
     Use { index: u16, account_id: u32 },
     Equip { index: u16, location: u32 },
     Unequip { index: u16 },
+    /// CZ_REQ_TAKEOFF_EQUIP_ALL: take off everything worn in these slots.
+    UnequipAll { location: u32 },
     PickUp { floor_id: u32 },
     Drop { index: u16, amount: u16 },
     /// CZ_REQ_ITEMCOMPOSITION_LIST: which equipment can take this card?
@@ -198,6 +200,10 @@ impl Encode for ItemRequest {
                 d.put_u32_le(location);
             }
             ItemRequest::Unequip { index } => put_db_packet(d, "UnequipItem", &[&index.to_le_bytes()]),
+            ItemRequest::UnequipAll { location } => {
+                d.put_u16_le(0x0bf5);
+                d.put_u32_le(location);
+            }
             ItemRequest::PickUp { floor_id } => put_db_packet(d, "TakeItem", &[&floor_id.to_le_bytes()]),
             ItemRequest::Drop { index, amount } => put_db_packet(d, "DropItem", &[&index.to_le_bytes(), &amount.to_le_bytes()]),
             ItemRequest::CardTargets { card } => {

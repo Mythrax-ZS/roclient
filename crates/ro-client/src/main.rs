@@ -1412,6 +1412,17 @@ impl App {
                     self.quests.marks.insert(npc, (mark, color));
                 }
             }
+            CartOff => {
+                self.merchant.cart.clear();
+                self.merchant.cart_count = Default::default();
+                self.merchant.cart_open = false;
+            }
+            PartyPickup { aid, item, refine } => {
+                let who = self.units.get(&aid).map(|m| m.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| "A party member".into());
+                let name = self.item_db.as_ref().map_or_else(|| format!("Item #{item}"), |d| d.name(item, true));
+                let refine = if refine > 0 { format!("+{refine} ") } else { String::new() };
+                self.hud.push_chat(ro_net::ChatKind::Party, format!("{who} got {refine}{name}."));
+            }
             CartStart => {
                 tracing::debug!("cart list");
                 self.merchant.cart.clear();
@@ -2883,6 +2894,7 @@ impl App {
             UseItem(index) => self.send(Command::Item(ItemRequest::Use { index, account_id: self.account_id })),
             Equip { index, location } => self.send(Command::Item(ItemRequest::Equip { index, location })),
             Unequip(index) => self.send(Command::Item(ItemRequest::Unequip { index })),
+            UnequipAll(location) => self.send(Command::Item(ItemRequest::UnequipAll { location })),
             SwitchAdd { index, location } => self.send(Command::Switch(ro_net::SwitchRequest::Add { index, location })),
             SwitchRemove(index) => self.send(Command::Switch(ro_net::SwitchRequest::Remove(index))),
             SwitchAll => self.send(Command::Switch(ro_net::SwitchRequest::All)),
@@ -4394,6 +4406,7 @@ impl App {
                         }
                         None
                     }
+                    Some(("offall", mask)) => u32::from_str_radix(mask, 16).ok().map(windows::UiAction::UnequipAll),
                     Some(("browse", aid)) => {
                         aid.parse().ok().map(|aid| self.queued_commands.push(ro_net::Command::Merchant(ro_net::MerchantRequest::Browse(aid))));
                         None
