@@ -23,6 +23,7 @@ pub enum UiAction {
     Menu(ro_net::MenuReply),
     /// Move an inventory item into the cart.
     CartPut { index: u16, amount: u16 },
+    OpenBank,
     /// Show the item information window (cards: their illustration).
     ItemInfo { id: u32, refine: u8, cards: [u32; 4] },
     SkillUp(u16),
@@ -418,6 +419,9 @@ impl Windows {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label(format!("{} z", v.zeny));
+                    if ui.small_button("Bank").on_hover_text("Alt+B").clicked() {
+                        action = Some(UiAction::OpenBank);
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(format!("Weight {} / {}", v.weight.0 / 10, v.weight.1 / 10));
                     });

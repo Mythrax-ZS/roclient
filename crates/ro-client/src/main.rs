@@ -1336,6 +1336,21 @@ impl App {
                 };
                 self.hud.push_chat(ro_net::ChatKind::System, msg.into());
             }
+            Bank { balance, reply } => {
+                if let Some((b, _)) = self.merchant.bank.as_mut() {
+                    *b = Some(balance);
+                }
+                if let Some((deposit, reason)) = reply.filter(|(_, r)| *r != 0) {
+                    let why = match (deposit, reason) {
+                        (true, 1) | (false, 1) => "The bank is busy; try again.",
+                        (true, 2) => "You don't have that much zeny.",
+                        (false, 2) => "The bank doesn't hold that much.",
+                        (_, 3) => "That would exceed the limit.",
+                        _ => "The bank couldn't do that.",
+                    };
+                    self.hud.push_chat(ro_net::ChatKind::System, why.into());
+                }
+            }
             RefineOpen => {
                 self.refine.open = true;
                 self.refine.selected = None;
@@ -1986,6 +2001,11 @@ impl App {
             }
             InsertCard { card, equip } => self.send(Command::Item(ItemRequest::InsertCard { card, equip })),
             Menu(reply) => self.send(Command::Menu(reply)),
+            OpenBank => {
+                if self.merchant.bank.is_none() {
+                    self.toggle_bank();
+                }
+            }
             ItemInfo { id, refine, cards } => {
                 if let Some(vfs) = self.vfs.as_ref() {
                     self.item_info.show_item(&self.egui_ctx, vfs, self.item_db.as_ref(), id, refine, cards);
@@ -2352,6 +2372,18 @@ impl App {
         let count = ((reach.length() / ro_render::CELL) as u32).clamp(3, 12);
         let shape = ro_render::Shape::Spikes { reach, count };
         r.procs.push(ro_render::ProcFx { tex, shape, pos: from, color: [0.85, 0.7, 0.5], time_ms: 0.0, duration_ms: 650.0 });
+    }
+
+    /// Opens the bank (asking for the balance) or closes it.
+    fn toggle_bank(&mut self) {
+        let aid = self.account_id;
+        if self.merchant.bank.take().is_some() {
+            self.queued_commands.push(ro_net::Command::Bank(ro_net::BankRequest::Close(aid)));
+        } else {
+            self.merchant.bank = Some((None, String::new()));
+            self.queued_commands.push(ro_net::Command::Bank(ro_net::BankRequest::Open(aid)));
+            self.queued_commands.push(ro_net::Command::Bank(ro_net::BankRequest::Check(aid)));
+        }
     }
 
     fn proc_fx(&mut self, tex: &'static str, shape: ro_render::Shape, pos: glam::Vec3, color: [f32; 3], duration_ms: f32) {
@@ -2908,6 +2940,14 @@ impl App {
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some(("card", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::CardTargets(index)),
                     // refsel:item picks equipment in the refine window; refine:material refines it.
+                    Some(("bank", _)) => {
+                        self.toggle_bank();
+                        None
+                    }
+                    Some(("deposit", z)) => {
+                        z.parse().ok().map(|zeny| self.queued_commands.push(ro_net::Command::Bank(ro_net::BankRequest::Deposit { aid: self.account_id, zeny })));
+                        None
+                    }
                     Some(("refsel", id)) => {
                         if let Some((index, _)) = id.parse().ok().and_then(item) {
                             self.refine.selected = Some((index, 0, vec![]));
@@ -3426,6 +3466,15 @@ impl App {
                 if let Some(req) = self.refine.show(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons, self.hud.status.zeny) {
                     self.queued_commands.push(ro_net::Command::Refine(req));
                 }
+                let (bank_move, bank_closed) = self.merchant.show_bank(ui.ctx(), self.hud.status.zeny);
+                let aid = self.account_id;
+                if let Some(z) = bank_move {
+                    let req = if z > 0 { ro_net::BankRequest::Deposit { aid, zeny: z as i32 } } else { ro_net::BankRequest::Withdraw { aid, zeny: (-z) as i32 } };
+                    self.queued_commands.push(ro_net::Command::Bank(req));
+                }
+                if bank_closed {
+                    self.queued_commands.push(ro_net::Command::Bank(ro_net::BankRequest::Close(aid)));
+                }
                 let zeny = self.hud.status.zeny;
                 if let Some(req) = self.merchant.show(ui.ctx(), self.item_db.as_ref(), &self.icons, zeny) {
                     self.queued_commands.push(ro_net::Command::Merchant(req));
@@ -3761,6 +3810,7 @@ impl ApplicationHandler for App {
                         "o" => self.windows.settings = !self.windows.settings,
                         "u" => self.quests.open = !self.quests.open,
                         "w" => self.merchant.cart_open = !self.merchant.cart_open,
+                        "b" => self.toggle_bank(),
                         // Alt+1..Alt+0: the emote shortcuts.
                         d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => {
                             if let Some((tx, _)) = self.net.as_ref() {

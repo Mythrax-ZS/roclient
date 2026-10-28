@@ -18,7 +18,7 @@ pub use ro_proto::guild::{GuildInfo, GuildMember, GuildRequest, GuildSkill, Posi
 use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
 pub use ro_proto::quests::{Objective, Quest};
-pub use ro_proto::merchant::{MerchantRequest, VendItem};
+pub use ro_proto::merchant::{BankRequest, MerchantRequest, VendItem};
 pub use ro_proto::refine::{RefineOption, RefineRequest};
 use ro_proto::refine::*;
 use ro_proto::merchant::*;
@@ -313,6 +313,8 @@ pub enum Event {
     ShopBuyResult(u8),
     /// The refine window opened (an NPC or @refineui).
     RefineOpen,
+    /// Bank balance; `reason` is set after a deposit (true) or withdrawal (false).
+    Bank { balance: i64, reply: Option<(bool, i16)> },
     RefineInfo { index: u16, blessing: u8, options: Vec<RefineOption> },
     RefineResult { result: u16, index: u16, refine: u16 },
     /// A pick-one menu from a skill or item.
@@ -382,6 +384,7 @@ pub enum Command {
     /// Cart and player-shop requests.
     Merchant(MerchantRequest),
     Refine(RefineRequest),
+    Bank(BankRequest),
     /// Login screen.
     Login { user: String, pass: String },
     SelectServer(usize),
@@ -511,6 +514,7 @@ impl MapSession {
                     Some(Command::QuestActive { quest, active }) => self.send(CzActiveQuest { quest, active }).await?,
                     Some(Command::Merchant(r)) => self.send(r).await?,
                     Some(Command::Refine(r)) => self.send(r).await?,
+                    Some(Command::Bank(r)) => self.send(r).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
@@ -666,6 +670,8 @@ impl MapSession {
                         0x012d if data.len() >= 4 => Some(Event::ShopSetup(u16::from_le_bytes([data[2], data[3]]))),
                         0x0b40 => Some(Event::MyShop(parse_my_shop(&data))),
                         0x0aa0 => Some(Event::RefineOpen),
+                        0x09a6 => parse_bank_balance(&data).map(|balance| Event::Bank { balance, reply: None }),
+                        0x09a8 | 0x09aa => parse_bank_ack(&data).map(|(reason, balance, _)| Event::Bank { balance, reply: Some((opcode == 0x09a8, reason)) }),
                         0x0aa2 => parse_refine_info(&data).map(|(index, blessing, options)| Event::RefineInfo { index, blessing, options }),
                         0x0188 => parse_refine_result(&data).map(|(result, index, refine)| Event::RefineResult { result, index, refine }),
                         0x09e5 => parse_sold(&data).map(|(index, amount, zeny)| Event::Sold { index, amount, zeny }),

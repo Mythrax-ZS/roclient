@@ -21,6 +21,8 @@ pub struct Merchant {
     pub setup: Option<(u16, String, BTreeMap<u16, (u16, u32)>)>,
     /// Our open shop's stock.
     pub my_shop: Option<Vec<VendItem>>,
+    /// The bank window: (balance once known, amount typed).
+    pub bank: Option<(Option<i64>, String)>,
 }
 
 fn name(db: Option<&ItemDb>, id: u32, refine: u8) -> String {
@@ -193,5 +195,48 @@ impl Merchant {
             });
         }
         clicked
+    }
+}
+
+impl Merchant {
+    /// The bank window. Returns deposit (+) or withdrawal (-) amounts, and whether it closed.
+    pub fn show_bank(&mut self, ctx: &egui::Context, zeny: i64) -> (Option<i64>, bool) {
+        let Some((balance, amount)) = self.bank.as_mut() else { return (None, false) };
+        let mut out = None;
+        let mut open = true;
+        egui::Window::new("Bank").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+            egui::Grid::new("bank").num_columns(2).show(ui, |ui| {
+                ui.label("In the bank");
+                ui.label(RichText::new(balance.map_or("…".into(), |b| format!("{b} z"))).color(Color32::from_rgb(255, 220, 120)));
+                ui.end_row();
+                ui.label("On hand");
+                ui.label(format!("{zeny} z"));
+                ui.end_row();
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label("Amount");
+                ui.add(egui::TextEdit::singleline(amount).desired_width(120.0));
+                if ui.small_button("All on hand").clicked() {
+                    *amount = zeny.to_string();
+                }
+            });
+            let value = amount.trim().replace(',', "").parse::<i64>().ok().filter(|v| *v > 0 && *v <= i32::MAX as i64);
+            ui.horizontal(|ui| {
+                if ui.add_enabled(value.is_some_and(|v| v <= zeny), egui::Button::new("Deposit")).clicked() {
+                    out = value;
+                }
+                if ui.add_enabled(value.is_some_and(|v| balance.is_none_or(|b| v <= b)), egui::Button::new("Withdraw")).clicked() {
+                    out = value.map(|v| -v);
+                }
+            });
+        });
+        if out.is_some() {
+            self.bank.as_mut().unwrap().1.clear();
+        }
+        if !open {
+            self.bank = None;
+        }
+        (out, !open)
     }
 }

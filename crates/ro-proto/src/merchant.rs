@@ -186,3 +186,41 @@ mod tests {
         assert_eq!(&d[85..87], &2u16.to_le_bytes());
     }
 }
+
+/// The zeny bank (feature.banking).
+#[derive(Debug, Clone, PartialEq)]
+pub enum BankRequest {
+    Open(u32),
+    Close(u32),
+    Check(u32),
+    Deposit { aid: u32, zeny: i32 },
+    Withdraw { aid: u32, zeny: i32 },
+}
+
+impl Encode for BankRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        let (op, aid, zeny) = match *self {
+            BankRequest::Open(a) => (0x09b6, a, None),
+            BankRequest::Close(a) => (0x09b8, a, None),
+            BankRequest::Check(a) => (0x09ab, a, None),
+            BankRequest::Deposit { aid, zeny } => (0x09a7, aid, Some(zeny)),
+            BankRequest::Withdraw { aid, zeny } => (0x09a9, aid, Some(zeny)),
+        };
+        d.put_u16_le(op);
+        d.put_u32_le(aid);
+        if let Some(z) = zeny {
+            d.put_i32_le(z);
+        }
+    }
+}
+
+/// ZC_BANKING_CHECK (0x09a6): the balance.
+pub fn parse_bank_balance(data: &[u8]) -> Option<i64> {
+    data.get(2..10).map(|mut b| b.get_i64_le())
+}
+
+/// ZC_ACK_BANKING_DEPOSIT / WITHDRAW (0x09a8 / 0x09aa): (reason, balance, zeny on hand).
+pub fn parse_bank_ack(data: &[u8]) -> Option<(i16, i64, i32)> {
+    let mut b = data.get(2..16)?;
+    Some((b.get_i16_le(), b.get_i64_le(), b.get_i32_le()))
+}
