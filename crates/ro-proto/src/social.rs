@@ -552,3 +552,34 @@ pub fn parse_ranking(data: &[u8]) -> Option<(u16, Vec<(u32, u32)>, u32)> {
     let mine = b.get_u32_le();
     Some((kind, cids.into_iter().zip(pts).filter(|(c, _)| *c != 0).collect(), mine))
 }
+
+/// Server-side options: CZ_CONFIG (type, on), CZ_PARTY_CONFIG (deny invites), and
+/// CZ_PARTY_CHANGE_OPTION (exp share, pickup share, item share; leader only).
+#[derive(Debug, Clone, PartialEq)]
+pub enum OptionRequest {
+    Config { kind: u32, on: bool },
+    DenyPartyInvites(bool),
+    PartyOptions { exp_share: bool, pickup_share: bool, item_share: bool },
+}
+
+impl Encode for OptionRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            OptionRequest::Config { kind, on } => {
+                d.put_u16_le(0x02d8);
+                d.put_u32_le(*kind);
+                d.put_u32_le(*on as u32);
+            }
+            OptionRequest::DenyPartyInvites(deny) => {
+                d.put_u16_le(0x02c8);
+                d.put_u8(*deny as u8);
+            }
+            OptionRequest::PartyOptions { exp_share, pickup_share, item_share } => {
+                d.put_u16_le(0x07d7);
+                d.put_u32_le(*exp_share as u32);
+                d.put_u8(*pickup_share as u8);
+                d.put_u8(*item_share as u8);
+            }
+        }
+    }
+}

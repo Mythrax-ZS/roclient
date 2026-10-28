@@ -22,6 +22,7 @@ mod ai;
 mod booking;
 mod battle;
 mod clan;
+mod gameopts;
 mod ranking;
 mod storesearch;
 mod stylist;
@@ -829,6 +830,7 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    game_opts: gameopts::GameOptions,
     ranking: ranking::Ranking,
     store_search: storesearch::StoreSearch,
     stylist: stylist::Stylist,
@@ -2547,6 +2549,9 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            Config { kind, on } => self.game_opts.config(kind, on),
+            DenyPartyInvites(d) => self.game_opts.deny_invites = d,
+            PartyOptions { exp_share, pickup_share, item_share } => self.game_opts.party = Some((exp_share, pickup_share, item_share)),
             AttackRange(r) => self.attack_range = r.max(1) as i32,
             MapProperty { flags, .. } => {
                 self.map_flags = flags;
@@ -3145,6 +3150,7 @@ impl App {
             "c" => self.toggle_cash_shop(),
             "y" => self.progress.open = !self.progress.open,
             "clan" => self.clan.open = !self.clan.open,
+            "opts" => self.game_opts.open = !self.game_opts.open,
             "rank" => self.send(ro_net::Command::Ranking(self.ranking.kind)),
             "battle" => {
                 self.battle.ensure_loaded(self.vfs.as_ref());
@@ -4040,6 +4046,12 @@ impl App {
                         }
                         None
                     }
+                    Some(("option", spec)) => {
+                        if let Some((k, v)) = spec.split_once(':') {
+                            self.queued_commands.push(ro_net::Command::Option(ro_net::OptionRequest::Config { kind: k.parse().unwrap_or(0), on: v == "1" }));
+                        }
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -4852,6 +4864,13 @@ impl App {
                     v
                 };
                 self.clan.show(ui.ctx());
+                {
+                    let me = self.hud.status.name.clone();
+                    let leader = self.social.party.as_ref().is_some_and(|p| p.members.iter().any(|m| m.leader && m.name == me));
+                    for r in self.game_opts.show(ui.ctx(), leader) {
+                        self.queued_commands.push(ro_net::Command::Option(r));
+                    }
+                }
                 if let Some(k) = self.ranking.show(ui.ctx()) {
                     self.queued_commands.push(ro_net::Command::Ranking(k));
                 }
@@ -5459,6 +5478,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        game_opts: Default::default(),
         ranking: Default::default(),
         store_search: Default::default(),
         stylist: Default::default(),

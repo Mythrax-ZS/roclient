@@ -35,7 +35,7 @@ pub use ro_proto::chatroom::{BookingAd, BookingRequest, ChatRoomRequest, IgnoreR
 use ro_proto::chatroom::*;
 use ro_proto::quests::*;
 use ro_proto::menus::*;
-pub use ro_proto::social::{ClanInfo, StyleRequest, Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
+pub use ro_proto::social::{ClanInfo, OptionRequest, StyleRequest, Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
 use ro_proto::social::*;
 
 type Conn = Framed<TcpStream, RoCodec<ServerTable>>;
@@ -373,6 +373,12 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_CONFIG (other than the equipment window): (type, on).
+    Config { kind: u32, on: bool },
+    /// ZC_PARTY_CONFIG: we refuse party invites.
+    DenyPartyInvites(bool),
+    /// ZC_PARTY_CONFIG_RESULT (0x07d8): exp share, pickup share, item share.
+    PartyOptions { exp_share: bool, pickup_share: bool, item_share: bool },
     /// ZC_MAPPROPERTY_R2: map type and flags (bit 0 PvP, 1 GvG, 2 siege, 4 attacks need shift).
     MapProperty { kind: u16, flags: u32 },
     /// ZC_ATTACK_RANGE: our normal attack reach in cells.
@@ -569,6 +575,7 @@ pub enum Command {
     Bg(BgRequest),
     Castle(CastleRequest),
     Style(StyleRequest),
+    Option(OptionRequest),
     Market(MarketRequest),
     Search(SearchRequest),
     Bank(BankRequest),
@@ -721,6 +728,7 @@ impl MapSession {
                     Some(Command::Bg(r)) => self.send(r).await?,
                     Some(Command::Castle(r)) => self.send(r).await?,
                     Some(Command::Style(r)) => self.send(r).await?,
+                    Some(Command::Option(r)) => self.send(r).await?,
                     Some(Command::Market(r)) => self.send(r).await?,
                     Some(Command::Search(r)) => self.send(r).await?,
                     Some(Command::Bank(r)) => self.send(r).await?,
@@ -829,6 +837,9 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x02d9 if data.len() >= 10 && data[2..6] != [0, 0, 0, 0] => Some(Event::Config { kind: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), on: data[6] != 0 }),
+                        0x02c9 if data.len() >= 3 => Some(Event::DenyPartyInvites(data[2] != 0)),
+                        0x07d8 if data.len() >= 8 => Some(Event::PartyOptions { exp_share: data[2] != 0, pickup_share: data[6] != 0, item_share: data[7] != 0 }),
                         0x099b if data.len() >= 8 => Some(Event::MapProperty { kind: u16::from_le_bytes([data[2], data[3]]), flags: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
                         0x013a if data.len() >= 4 => Some(Event::AttackRange(u16::from_le_bytes([data[2], data[3]]))),
                         0x0ade if data.len() >= 6 => Some(Event::OverweightPercent(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
