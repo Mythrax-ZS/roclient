@@ -680,6 +680,7 @@ name = "grfdump"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ro-formats",
  "ro-vfs",
  "tracing-subscriber",
 ]
@@ -1693,6 +1694,7 @@ name = "ro-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "image",
  "pollster",
  "ro-formats",
  "ro-net",

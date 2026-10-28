@@ -9,8 +9,14 @@ pub struct Rgba {
 }
 
 /// Decodes BMP/TGA/PNG/JPG. Near-magenta pixels (the RO color key) become transparent.
-pub fn decode(data: &[u8]) -> Result<Rgba> {
-    let img = image::load_from_memory(data).context("decode texture")?.to_rgba8();
+/// `name` supplies the extension, which TGA needs since it has no signature.
+pub fn decode(data: &[u8], name: &str) -> Result<Rgba> {
+    let img = match image::ImageFormat::from_path(name) {
+        Ok(fmt) => image::load_from_memory_with_format(data, fmt).or_else(|_| image::load_from_memory(data)),
+        Err(_) => image::load_from_memory(data),
+    }
+    .context("decode texture")?
+    .to_rgba8();
     let (width, height) = img.dimensions();
     let mut pixels = img.into_raw();
     for p in pixels.chunks_exact_mut(4) {

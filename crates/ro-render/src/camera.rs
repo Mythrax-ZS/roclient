@@ -50,7 +50,9 @@ impl Camera {
         // wgpu clip space is y-up with depth in 0..1, i.e. the D3D convention.
         let view = rh::view::look_at_mat4(self.eye(), self.target, Vec3::Y);
         let proj = rh::proj::directx::perspective(self.fovy, aspect.max(0.01), 10.0, 5000.0);
-        proj * view
+        // World X = east and Z = north (RO map axes) is a left-handed basis; mirror screen X
+        // so east is on the right with the default north-up view.
+        Mat4::from_scale(Vec3::new(-1.0, 1.0, 1.0)) * proj * view
     }
 }
 
@@ -66,6 +68,17 @@ mod tests {
             let p = c.view_proj(aspect).project_point3(c.target);
             assert!(p.x.abs() < 1e-4 && p.y.abs() < 1e-4, "{aspect}: {p}");
         }
+    }
+
+    #[test]
+    fn north_up_east_right() {
+        let mut c = Camera::default();
+        c.look_at_cell(100, 100);
+        let vp = c.view_proj(16.0 / 9.0);
+        let east = vp.project_point3(c.target + Vec3::X * 20.0);
+        let north = vp.project_point3(c.target + Vec3::Z * 20.0);
+        assert!(east.x > 0.0, "east should be right of center: {east}");
+        assert!(north.y > 0.0, "north should be above center: {north}");
     }
 
     #[test]

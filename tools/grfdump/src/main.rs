@@ -30,6 +30,32 @@ fn main() -> anyhow::Result<()> {
             std::fs::write(out, &data)?;
             eprintln!("wrote {} bytes to {out}", data.len());
         }
+        ("models", [map]) => {
+            // Which model files and format versions a map uses.
+            let rsw = grf.read(&format!("data\\{map}.rsw"))?.with_context(|| format!("{map}.rsw not found"))?;
+            let rsw = ro_formats::rsw::Rsw::parse(&rsw)?;
+            let files: std::collections::BTreeSet<_> = rsw.models.iter().map(|m| m.file.clone()).collect();
+            let mut versions = std::collections::BTreeMap::new();
+            for f in &files {
+                let key = match grf.read(&format!("data\\model\\{f}"))? {
+                    Some(d) if d.len() >= 6 => {
+                        let parsed = match ro_formats::rsm::Rsm::parse(&d) {
+                            Ok(_) => "parsed".to_string(),
+                            Err(e) => format!("FAILED: {e}"),
+                        };
+                        format!("{} {}.{} {parsed}", String::from_utf8_lossy(&d[..4]), d[4], d[5])
+                    }
+                    Some(_) => "truncated".into(),
+                    None => "missing".into(),
+                };
+                *versions.entry(key).or_insert(0) += 1;
+            }
+            println!("RSW {}.{}: {} placements, {} unique models", rsw.version.0, rsw.version.1, rsw.models.len(), files.len());
+            println!("light {:?}  water {:?}", rsw.light, rsw.water);
+            for (v, n) in versions {
+                println!("  {v}: {n}");
+            }
+        }
         _ => bail!("unknown command"),
     }
     Ok(())

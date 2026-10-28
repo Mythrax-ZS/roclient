@@ -62,38 +62,86 @@ fn open_vfs(cfg: &Config) -> anyhow::Result<Option<ro_vfs::Vfs>> {
 }
 
 /// Reads a map's ground and textures from the VFS.
-fn load_map(vfs: &ro_vfs::Vfs, name: &str) -> anyhow::Result<(ro_render::TerrainMesh, Vec<Option<ro_render::Rgba>>)> {
+struct LoadedMap {
+    mesh: ro_render::SceneMesh,
+    images: Vec<Option<ro_render::Rgba>>,
+    lighting: ro_render::Lighting,
+    water: Option<(ro_render::WaterMesh, Vec<Option<ro_render::Rgba>>)>,
+}
+
+fn load_map(vfs: &ro_vfs::Vfs, name: &str) -> anyhow::Result<LoadedMap> {
     let started = std::time::Instant::now();
-    let data = vfs.read(&format!("data\\{name}.gnd"))?.with_context(|| format!("{name}.gnd not found"))?;
-    let gnd = ro_formats::gnd::Gnd::parse(&data)?;
-    let mesh = ro_render::TerrainMesh::build(&gnd);
-    let images = gnd
-        .textures
-        .iter()
-        .map(|t| {
-            let path = format!("data\\texture\\{t}");
-            match vfs.read(&path).and_then(|d| d.map(|d| ro_formats::image::decode(&d)).transpose()) {
-                Ok(Some(img)) => Some(img),
+    let read = |path: String| vfs.read(&path)?.with_context(|| format!("{path} not found"));
+    let rsw = ro_formats::rsw::Rsw::parse(&read(format!("data\\{name}.rsw"))?)?;
+    let gnd_name = if rsw.gnd.is_empty() { format!("{name}.gnd") } else { rsw.gnd.clone() };
+    let gnd = ro_formats::gnd::Gnd::parse(&read(format!("data\\{gnd_name}"))?)?;
+
+    // Each model file is parsed once and shared by all its placements.
+    let mut models: std::collections::HashMap<String, Option<ro_formats::rsm::Rsm>> = Default::default();
+    let mut builder = ro_render::SceneBuilder::new(&gnd);
+    let mut failed = 0;
+    for inst in &rsw.models {
+        let rsm = models.entry(inst.file.to_ascii_lowercase()).or_insert_with(|| {
+            let path = format!("data\\model\\{}", inst.file);
+            match vfs.read(&path).map(|d| d.map(|d| ro_formats::rsm::Rsm::parse(&d))) {
+                Ok(Some(Ok(m))) => Some(m),
+                Ok(Some(Err(e))) => {
+                    tracing::warn!(%path, "model unreadable: {e:#}");
+                    None
+                }
                 Ok(None) => {
-                    tracing::warn!(%path, "texture missing");
+                    tracing::warn!(%path, "model missing");
                     None
                 }
                 Err(e) => {
-                    tracing::warn!(%path, "texture unreadable: {e:#}");
+                    tracing::warn!(%path, "model unreadable: {e:#}");
                     None
                 }
             }
-        })
-        .collect();
+        });
+        match rsm {
+            Some(m) => builder.add_model(m, inst),
+            None => failed += 1,
+        }
+    }
+    let mesh = builder.finish();
+
+    let load_textures = |names: &[String]| -> Vec<Option<ro_render::Rgba>> {
+        names
+            .iter()
+            .map(|t| {
+                let path = format!("data\\texture\\{t}");
+                match vfs.read(&path).and_then(|d| d.map(|d| ro_formats::image::decode(&d, &path)).transpose()) {
+                    Ok(Some(img)) => Some(img),
+                    Ok(None) => {
+                        tracing::warn!(%path, "texture missing");
+                        None
+                    }
+                    Err(e) => {
+                        tracing::warn!(%path, "texture unreadable: {e:#}");
+                        None
+                    }
+                }
+            })
+            .collect()
+    };
+    let images = load_textures(&mesh.textures);
+    let water = rsw.water.as_ref().map(|w| {
+        let mesh = ro_render::WaterMesh::build(&gnd, w);
+        let images = load_textures(&mesh.textures);
+        (mesh, images)
+    });
     tracing::info!(
         map = name,
         size = format_args!("{}x{}", gnd.width, gnd.height),
-        textures = gnd.textures.len(),
+        models = rsw.models.len() - failed,
+        failed,
+        textures = mesh.textures.len(),
         triangles = mesh.vertices.len() / 3,
         ms = started.elapsed().as_millis() as u64,
         "loaded map"
     );
-    Ok((mesh, images))
+    Ok(LoadedMap { mesh, images, water, lighting: ro_render::Lighting::from_rsw(&rsw.light) })
 }
 
 fn default_msaa() -> u32 {
@@ -144,6 +192,14 @@ struct App {
     msaa: u32,
     vfs: Option<ro_vfs::Vfs>,
     map: String,
+    /// Cell the camera starts on.
+    at: (u16, u16),
+    /// `--still`: ignore camera input (for reproducible captures).
+    still: bool,
+    /// `--capture file.png [--size WxH]`: render one frame offscreen, save it, exit.
+    capture: Option<(PathBuf, u32, u32)>,
+    /// `--distance`: initial camera distance.
+    distance: Option<f32>,
     window: Option<Arc<Window>>,
     renderer: Option<ro_render::Renderer>,
     /// Right mouse button held: dragging rotates the camera.
@@ -183,21 +239,39 @@ impl ApplicationHandler for App {
         let attrs = Window::default_attributes()
             .with_title("roclient")
             .with_inner_size(winit::dpi::LogicalSize::new(1600.0, 900.0))
-            .with_min_inner_size(winit::dpi::LogicalSize::new(640.0, 360.0));
+            .with_min_inner_size(winit::dpi::LogicalSize::new(640.0, 360.0))
+            .with_visible(self.capture.is_none());
         let window = Arc::new(el.create_window(attrs).unwrap());
         let backends = ro_render::parse_backends(&self.backend);
         match pollster::block_on(ro_render::Renderer::new(window.clone(), backends, self.msaa)) {
             Ok(mut r) => {
-                // Prontera spawn until the world is wired to the network session.
-                r.camera.look_at_cell(156, 191);
+                // Preview position until the world is wired to the network session.
+                r.camera.look_at_cell(self.at.0, self.at.1);
+                if let Some(d) = self.distance {
+                    r.camera.distance = d;
+                }
                 if let Some(vfs) = &self.vfs {
                     match load_map(vfs, &self.map) {
-                        Ok((mesh, images)) => {
-                            r.camera.target.y = mesh.height_at(r.camera.target.x, r.camera.target.z);
-                            r.set_terrain(&mesh, images);
+                        Ok(map) => {
+                            r.camera.target.y = map.mesh.height_at(r.camera.target.x, r.camera.target.z);
+                            r.set_scene(&map.mesh, map.images, map.lighting);
+                            if let Some((mesh, images)) = map.water {
+                                r.set_water(&mesh, images);
+                            }
                         }
                         Err(e) => tracing::error!("map {}: {e:#}", self.map),
                     }
+                }
+                if let Some((path, w, h)) = &self.capture {
+                    match r.capture(*w, *h) {
+                        Ok(img) => match image::save_buffer(path, &img.pixels, img.width, img.height, image::ColorType::Rgba8) {
+                            Ok(()) => tracing::info!(path = %path.display(), "captured"),
+                            Err(e) => tracing::error!("save capture: {e:#}"),
+                        },
+                        Err(e) => tracing::error!("capture: {e:#}"),
+                    }
+                    el.exit();
+                    return;
                 }
                 self.renderer = Some(r);
             }
@@ -219,6 +293,7 @@ impl ApplicationHandler for App {
                 window.request_redraw();
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => r.scale_factor = scale_factor,
+            WindowEvent::MouseWheel { .. } | WindowEvent::MouseInput { .. } if self.still => {}
             WindowEvent::MouseWheel { delta, .. } => {
                 let steps = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
@@ -257,6 +332,9 @@ fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
     let cfg = load_config()?;
+    // `--map name` / `--at x,y` override the preview map and cell.
+    let args: Vec<String> = std::env::args().collect();
+    let arg = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
 
     if std::env::args().any(|a| a == "--headless") {
         let rt = tokio::runtime::Runtime::new()?;
@@ -269,7 +347,16 @@ fn main() -> anyhow::Result<()> {
         backend: cfg.backend,
         msaa: cfg.msaa,
         vfs,
-        map: cfg.map,
+        map: arg("--map").unwrap_or(cfg.map),
+        still: args.iter().any(|a| a == "--still"),
+        distance: arg("--distance").and_then(|d| d.parse().ok()),
+        capture: arg("--capture").map(|p| {
+            let (w, h) = arg("--size")
+                .and_then(|s| s.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))))
+                .unwrap_or((1920, 1080));
+            (PathBuf::from(p), w, h)
+        }),
+        at: arg("--at").and_then(|s| s.split_once(',').and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))).unwrap_or((156, 191)),
         window: None,
         renderer: None,
         rotating: false,

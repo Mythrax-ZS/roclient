@@ -1,13 +1,15 @@
 //! wgpu renderer. Vulkan preferred; DX12 / GL selectable via config.
 
 mod camera;
-mod terrain;
+mod scene;
+mod water;
 
 use std::sync::Arc;
 
 pub use camera::{Camera, CELL};
 pub use ro_formats::image::Rgba;
-pub use terrain::TerrainMesh;
+pub use scene::{SceneBuilder, SceneMesh};
+pub use water::WaterMesh;
 use winit::window::Window;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -20,6 +22,33 @@ struct Globals {
     view_proj: [[f32; 4]; 4],
     focus: [f32; 4],
     eye: [f32; 4],
+    light_dir: [f32; 4],
+    ambient: [f32; 4],
+    diffuse: [f32; 4],
+    /// x: seconds since start
+    params: [f32; 4],
+}
+
+/// Map-wide sun lighting (from the RSW), in the renderer's y-up space.
+#[derive(Clone, Copy, Debug)]
+pub struct Lighting {
+    /// Direction the light travels.
+    pub direction: [f32; 3],
+    pub ambient: [f32; 3],
+    pub diffuse: [f32; 3],
+}
+
+impl Default for Lighting {
+    fn default() -> Self {
+        Self { direction: [-0.5, -0.7, -0.5], ambient: [0.5; 3], diffuse: [1.0; 3] }
+    }
+}
+
+impl Lighting {
+    pub fn from_rsw(light: &ro_formats::rsw::Light) -> Self {
+        let [x, y, z] = light.direction();
+        Self { direction: [x, -y, z], ambient: light.ambient, diffuse: light.diffuse }
+    }
 }
 
 /// Size-dependent render targets, rebuilt on resize.
@@ -39,11 +68,18 @@ pub struct Renderer {
     globals: wgpu::Buffer,
     globals_bind: wgpu::BindGroup,
     grid: wgpu::RenderPipeline,
-    terrain_pipeline: wgpu::RenderPipeline,
+    scene_pipeline: wgpu::RenderPipeline,
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    lightmap_sampler: wgpu::Sampler,
+    water_pipeline: wgpu::RenderPipeline,
+    water_layout: wgpu::BindGroupLayout,
+    repeat_sampler: wgpu::Sampler,
+    water: Option<water::Water>,
+    started: std::time::Instant,
     /// The grid is drawn instead while no map is loaded.
-    terrain: Option<terrain::Terrain>,
+    scene: Option<scene::Scene>,
+    pub lighting: Lighting,
     pub camera: Camera,
     pub scale_factor: f64,
 }
@@ -140,7 +176,29 @@ impl Renderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
+        });
+        let lightmap_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("lightmap"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("texture"),
@@ -153,7 +211,54 @@ impl Renderer {
             ..Default::default()
         });
 
-        let pipeline = |label: &str, src: &str, layouts: &[Option<&wgpu::BindGroupLayout>], buffers: &[Option<wgpu::VertexBufferLayout>]| {
+        let water_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("water"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let repeat_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("repeat"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 16,
+            ..Default::default()
+        });
+
+        // `blend: Some(..)` makes a transparent pass: blended, depth-tested but not written.
+        let pipeline = |label: &str,
+                        src: &str,
+                        layouts: &[Option<&wgpu::BindGroupLayout>],
+                        buffers: &[Option<wgpu::VertexBufferLayout>],
+                        blend: Option<wgpu::BlendState>| {
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(label),
                 source: wgpu::ShaderSource::Wgsl(src.into()),
@@ -175,7 +280,7 @@ impl Renderer {
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(true),
+                    depth_write_enabled: Some(blend.is_none()),
                     depth_compare: Some(wgpu::CompareFunction::Less),
                     stencil: Default::default(),
                     bias: Default::default(),
@@ -185,18 +290,30 @@ impl Renderer {
                     module: &shader,
                     entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
-                    targets: &[Some(config.format.into())],
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
                 }),
                 multiview_mask: None,
                 cache: None,
             })
         };
-        let grid = pipeline("grid", include_str!("grid.wgsl"), &[Some(&globals_layout)], &[]);
-        let terrain_pipeline = pipeline(
-            "terrain",
-            include_str!("terrain.wgsl"),
+        let grid = pipeline("grid", include_str!("grid.wgsl"), &[Some(&globals_layout)], &[], None);
+        let scene_pipeline = pipeline(
+            "scene",
+            include_str!("scene.wgsl"),
             &[Some(&globals_layout), Some(&texture_layout)],
-            &[Some(terrain::Vertex::layout())],
+            &[Some(scene::Vertex::layout())],
+            None,
+        );
+        let water_pipeline = pipeline(
+            "water",
+            include_str!("water.wgsl"),
+            &[Some(&globals_layout), Some(&water_layout)],
+            &[Some(water::Vertex::layout())],
+            Some(wgpu::BlendState::ALPHA_BLENDING),
         );
 
         let targets = Self::make_targets(&device, &config, samples);
@@ -210,18 +327,40 @@ impl Renderer {
             globals,
             globals_bind,
             grid,
-            terrain_pipeline,
+            scene_pipeline,
             texture_layout,
             sampler,
-            terrain: None,
+            lightmap_sampler,
+            scene: None,
+            water_pipeline,
+            water_layout,
+            repeat_sampler,
+            water: None,
+            started: std::time::Instant::now(),
+            lighting: Lighting::default(),
             camera: Camera::default(),
             scale_factor: window.scale_factor(),
         })
     }
 
-    /// Replaces the ground with a map. `images[i]` is texture i of the GND (None if missing).
-    pub fn set_terrain(&mut self, mesh: &TerrainMesh, images: Vec<Option<Rgba>>) {
-        self.terrain = Some(terrain::Terrain::upload(&self.device, &self.queue, &self.texture_layout, &self.sampler, mesh, images));
+    /// Replaces the world. `images[i]` is `mesh.textures[i]` (None if missing).
+    pub fn set_scene(&mut self, mesh: &SceneMesh, images: Vec<Option<Rgba>>, lighting: Lighting) {
+        self.scene = Some(scene::Scene::upload(
+            &self.device,
+            &self.queue,
+            &self.texture_layout,
+            &self.sampler,
+            &self.lightmap_sampler,
+            mesh,
+            images,
+        ));
+        self.lighting = lighting;
+        self.water = None;
+    }
+
+    /// Adds the map's water. `images[i]` is `mesh.textures[i]`.
+    pub fn set_water(&mut self, mesh: &WaterMesh, images: Vec<Option<Rgba>>) {
+        self.water = water::Water::upload(&self.device, &self.queue, &self.water_layout, &self.repeat_sampler, mesh, images);
     }
 
     fn make_targets(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, samples: u32) -> Targets {
@@ -274,18 +413,86 @@ impl Renderer {
             }
         };
 
+        let view = tex.texture.create_view(&Default::default());
+        let cmd = self.encode(&view, &self.targets, self.aspect());
+        self.queue.submit([cmd]);
+        self.queue.present(tex);
+        Ok(())
+    }
+
+    /// Renders one frame offscreen at `width`x`height` and returns it as RGBA8 (sRGB).
+    pub fn capture(&mut self, width: u32, height: u32) -> anyhow::Result<Rgba> {
+        let mut config = self.config.clone();
+        config.width = width;
+        config.height = height;
+        let targets = Self::make_targets(&self.device, &config, self.samples);
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("capture"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let cmd = self.encode(&view, &targets, width as f32 / height as f32);
+
+        // Rows must be padded to 256 bytes for buffer copies.
+        let row = (width * 4).div_ceil(256) * 256;
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("capture readback"),
+            size: (row * height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(height) },
+            },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        self.queue.submit([cmd, enc.finish()]);
+
+        let slice = buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        self.device.poll(wgpu::PollType::wait_indefinitely())?;
+        rx.recv()??;
+        let data = slice.get_mapped_range()?;
+        let bgra = matches!(config.format, wgpu::TextureFormat::Bgra8UnormSrgb | wgpu::TextureFormat::Bgra8Unorm);
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height as usize {
+            for px in data[y * row as usize..][..width as usize * 4].chunks_exact(4) {
+                pixels.extend(if bgra { [px[2], px[1], px[0], 255] } else { [px[0], px[1], px[2], 255] });
+            }
+        }
+        Ok(Rgba { width, height, pixels })
+    }
+
+    /// Records the whole frame into `view` using `targets` (depth / MSAA of the same size).
+    fn encode(&self, view: &wgpu::TextureView, targets: &Targets, aspect: f32) -> wgpu::CommandBuffer {
         let cam = &self.camera;
         let globals = Globals {
-            view_proj: cam.view_proj(self.aspect()).to_cols_array_2d(),
+            view_proj: cam.view_proj(aspect).to_cols_array_2d(),
             focus: [cam.target.x, CELL, cam.target.z, cam.distance * 4.0],
             eye: cam.eye().extend(1.0).to_array(),
+            light_dir: glam::Vec3::from(self.lighting.direction).normalize_or_zero().extend(0.0).to_array(),
+            ambient: glam::Vec3::from(self.lighting.ambient).extend(0.0).to_array(),
+            diffuse: glam::Vec3::from(self.lighting.diffuse).extend(0.0).to_array(),
+            params: [self.started.elapsed().as_secs_f32(), 0.0, 0.0, 0.0],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
-        let view = tex.texture.create_view(&Default::default());
-        let (color, resolve) = match &self.targets.msaa {
-            Some(m) => (m, Some(&view)),
-            None => (&view, None),
+        let (color, resolve) = match &targets.msaa {
+            Some(m) => (m, Some(view)),
+            None => (view, None),
         };
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -298,16 +505,16 @@ impl Renderer {
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(CLEAR), store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.targets.depth,
+                    view: &targets.depth,
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
                     stencil_ops: None,
                 }),
                 ..Default::default()
             });
             pass.set_bind_group(0, &self.globals_bind, &[]);
-            match &self.terrain {
+            match &self.scene {
                 Some(t) => {
-                    pass.set_pipeline(&self.terrain_pipeline);
+                    pass.set_pipeline(&self.scene_pipeline);
                     pass.set_vertex_buffer(0, t.vertices.slice(..));
                     for (range, tex) in t.ranges.iter().zip(&t.textures) {
                         if !range.is_empty() {
@@ -321,9 +528,14 @@ impl Renderer {
                     pass.draw(0..6, 0..1);
                 }
             }
+            // Transparent passes after all opaque geometry.
+            if let Some(w) = &self.water {
+                pass.set_pipeline(&self.water_pipeline);
+                pass.set_bind_group(1, &w.frames[w.frame(globals.params[0])], &[]);
+                pass.set_vertex_buffer(0, w.vertices.slice(..));
+                pass.draw(0..w.count, 0..1);
+            }
         }
-        self.queue.submit([enc.finish()]);
-        self.queue.present(tex);
-        Ok(())
+        enc.finish()
     }
 }

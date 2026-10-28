@@ -35,8 +35,35 @@ pub struct Gnd {
     /// World units per cube edge (10).
     pub zoom: f32,
     pub textures: Vec<String>,
+    pub lightmaps: Lightmaps,
     pub surfaces: Vec<Surface>,
     pub cubes: Vec<Cube>,
+}
+
+/// Baked per-surface lighting: an 8x8 shadow (brightness) map plus an RGB color map.
+#[derive(Debug)]
+pub struct Lightmaps {
+    pub width: u32,
+    pub height: u32,
+    data: Vec<u8>,
+}
+
+impl Lightmaps {
+    pub fn len(&self) -> usize {
+        let stride = (self.width * self.height * 4) as usize;
+        if stride == 0 { 0 } else { self.data.len() / stride }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// (shadow bytes, RGB bytes) of lightmap `i`.
+    pub fn get(&self, i: usize) -> Option<(&[u8], &[u8])> {
+        let n = (self.width * self.height) as usize;
+        let lm = self.data.get(i * n * 4..(i + 1) * n * 4)?;
+        Some(lm.split_at(n))
+    }
 }
 
 impl Gnd {
@@ -63,13 +90,13 @@ impl Gnd {
         let tex_len = r.u32()? as usize;
         let textures = (0..tex_count).map(|_| r.string(tex_len)).collect::<Result<_>>()?;
 
-        // Lightmaps: count, cell width/height, cells per grid, then 4 bytes per texel
-        // (1 shadow + 3 color). Not used yet.
+        // Lightmaps: count, texel width/height, cells per grid, then per lightmap
+        // w*h shadow bytes followed by w*h RGB color triples.
         let lm_count = r.u32()? as usize;
-        let lm_w = r.i32()? as usize;
-        let lm_h = r.i32()? as usize;
+        let lm_w = r.i32()? as u32;
+        let lm_h = r.i32()? as u32;
         let _lm_cells = r.i32()?;
-        r.bytes(lm_count * lm_w * lm_h * 4)?;
+        let lightmaps = Lightmaps { width: lm_w, height: lm_h, data: r.bytes(lm_count * (lm_w * lm_h * 4) as usize)?.to_vec() };
 
         let surf_count = r.u32()? as usize;
         let mut surfaces = Vec::with_capacity(surf_count);
@@ -95,7 +122,7 @@ impl Gnd {
         }
         // GND 1.8+ appends water settings; not needed for the mesh.
 
-        Ok(Self { version, width, height, zoom, textures, surfaces, cubes })
+        Ok(Self { version, width, height, zoom, textures, lightmaps, surfaces, cubes })
     }
 }
 
