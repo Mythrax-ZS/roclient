@@ -14,7 +14,7 @@ use tokio_util::codec::Framed;
 pub use ro_proto::packets::{sp, Act, CharInfo, CharRequest, ChatKind, Look, NpcDialog, NpcReply, UnitInfo, UnitPos};
 pub use ro_proto::items::{SwitchRequest, Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
-pub use ro_proto::guild::{GuildInfo, GuildMember, GuildRequest, GuildSkill, Position};
+pub use ro_proto::guild::{RelationRequest, GuildInfo, GuildMember, GuildRequest, GuildSkill, Position};
 use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
 pub use ro_proto::quests::{Objective, Quest};
@@ -373,6 +373,11 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// Guild relations: the list, an alliance request (inviter, their guild), and results.
+    GuildRelations(Vec<(u32, u32, String)>),
+    AllyRequest { inviter: u32, guild: String },
+    RelationNotice(String),
+    RelationRemoved { guild: u32, relation: u32 },
     /// ZC_START_CAPTURE: pick a monster to tame; ZC_TRYCAPTURE_MONSTER: did it work.
     StartCapture,
     Captured(bool),
@@ -597,6 +602,7 @@ pub enum Command {
     Style(StyleRequest),
     Option(OptionRequest),
     Switch(SwitchRequest),
+    Relation(RelationRequest),
     Market(MarketRequest),
     Search(SearchRequest),
     Bank(BankRequest),
@@ -751,6 +757,7 @@ impl MapSession {
                     Some(Command::Style(r)) => self.send(r).await?,
                     Some(Command::Option(r)) => self.send(r).await?,
                     Some(Command::Switch(r)) => self.send(r).await?,
+                    Some(Command::Relation(r)) => self.send(r).await?,
                     Some(Command::Market(r)) => self.send(r).await?,
                     Some(Command::Search(r)) => self.send(r).await?,
                     Some(Command::Bank(r)) => self.send(r).await?,
@@ -859,6 +866,11 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x014c => Some(Event::GuildRelations(ro_proto::guild::parse_relations(&data))),
+                        0x0171 if data.len() >= 30 => Some(Event::AllyRequest { inviter: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), guild: ro_proto::packets::get_fixed_str(&mut &data[6..30], 24) }),
+                        0x0173 if data.len() >= 3 => Some(Event::RelationNotice(match data[2] { 0 => "You are already allied with that guild.", 1 => "The alliance was declined.", 2 => "The alliance was accepted.", 3 => "Their guild has too many alliances.", 4 => "Your guild has too many alliances.", _ => "Alliances are disabled." }.into())),
+                        0x0181 if data.len() >= 3 => Some(Event::RelationNotice(match data[2] { 0 => "That guild is now your enemy.", 1 => "Your guild has too many enemies.", 2 => "That guild is already your enemy.", _ => "Enemies are disabled." }.into())),
+                        0x0184 if data.len() >= 10 => Some(Event::RelationRemoved { guild: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), relation: u32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
                         0x019e => Some(Event::StartCapture),
                         0x01a0 if data.len() >= 3 => Some(Event::Captured(data[2] != 0)),
                         0x009c if data.len() >= 9 => Some(Event::Turned { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), dir: ro_proto::packets::server_dir(data[8]) }),

@@ -2556,6 +2556,10 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            GuildRelations(list) => self.guild.relations = list,
+            AllyRequest { inviter, guild } => self.guild.ally_offer = Some((inviter, guild)),
+            RelationNotice(text) => self.hud.push_chat(ro_net::ChatKind::Guild, text),
+            RelationRemoved { guild, relation } => self.guild.relations.retain(|r| !(r.0 == relation && r.1 == guild)),
             StartCapture => {
                 self.capturing = true;
                 self.hud.push_chat(ro_net::ChatKind::System, "Click the monster you want to tame.".into());
@@ -4008,6 +4012,9 @@ impl App {
         // `--do a,b,c`: scripted actions once the inventory has arrived (tests).
         // Scripted helpers for two-client tests: accept requests, run a trade to completion.
         if self.auto_accept {
+            if let Some((inviter, _)) = self.guild.ally_offer.take() {
+                self.send(ro_net::Command::Relation(ro_net::RelationRequest::Answer { inviter, accept: true }));
+            }
             if let Some(c) = self.social.accept_first() {
                 tracing::info!(?c, "auto-accept");
                 self.send(c);
@@ -4150,6 +4157,12 @@ impl App {
                         let target = self.units.iter().filter(|(_, m)| m.kind == 5 && m.dying.is_none()).min_by_key(|(_, m)| (m.walker.cell.0 - me.0).pow(2) + (m.walker.cell.1 - me.1).pow(2)).map(|(id, _)| *id);
                         if let (Some(id), true) = (target, std::mem::take(&mut self.capturing)) {
                             self.send(ro_net::Command::Companion(ro_net::CompanionRequest::Capture(id)));
+                        }
+                        None
+                    }
+                    Some(("ally", who)) => {
+                        if let Some(id) = self.units.iter().find(|(_, m)| m.name == who).map(|(id, _)| *id) {
+                            self.send(ro_net::Command::Relation(ro_net::RelationRequest::Ally { target: id, me: self.account_id, char_id: self.char_id }));
                         }
                         None
                     }
@@ -4966,6 +4979,9 @@ impl App {
                     v
                 };
                 self.clan.show(ui.ctx());
+                if let Some((inviter, accept)) = self.guild.show_offer(ui.ctx()) {
+                    self.queued_commands.push(ro_net::Command::Relation(ro_net::RelationRequest::Answer { inviter, accept }));
+                }
                 self.reputation.show(ui.ctx());
                 {
                     let me = self.hud.status.name.clone();
@@ -5115,6 +5131,18 @@ impl App {
                             if self.guild.id != 0 && ui.button("Invite to guild").clicked() {
                                 player_cmd = Some((ro_net::Command::Guild(ro_net::GuildRequest::Invite { name: name.clone() }), None));
                                 keep = false;
+                            }
+                            // Guild masters: offer an alliance, or mark the other guild an enemy.
+                            let other_guild = self.units.get(&id).map_or(0, |m| m.guild);
+                            if self.guild.master && other_guild != 0 && other_guild != self.guild.id {
+                                if ui.button("Ask for an alliance").clicked() {
+                                    player_cmd = Some((ro_net::Command::Relation(ro_net::RelationRequest::Ally { target: id, me: self.account_id, char_id: self.char_id }), None));
+                                    keep = false;
+                                }
+                                if ui.button("Set guild as enemy").clicked() {
+                                    player_cmd = Some((ro_net::Command::Relation(ro_net::RelationRequest::Enemy(id)), None));
+                                    keep = false;
+                                }
                             }
                             if ui.button("Close").clicked() {
                                 keep = false;

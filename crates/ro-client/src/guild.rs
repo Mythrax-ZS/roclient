@@ -47,6 +47,10 @@ pub struct Guild {
     pub client_dir: Option<std::path::PathBuf>,
     emblem_files: Option<Vec<String>>,
     pub emblem_status: String,
+    /// Allied (0) and enemy (1) guilds: (relation, guild id, name).
+    pub relations: Vec<(u32, u32, String)>,
+    /// An alliance offer waiting for an answer: (inviter, their guild).
+    pub ally_offer: Option<(u32, String)>,
 }
 
 /// What the window needs from the rest of the client.
@@ -154,6 +158,10 @@ impl Guild {
             row(ui, "Members", format!("{} / {}", i.members, i.max_members));
             row(ui, "Average level", i.average_level.to_string());
             row(ui, "Castle", if i.castle.is_empty() { "None".into() } else { i.castle.clone() });
+            for (rel, title) in [(0u32, "Allies"), (1, "Enemies")] {
+                let names: Vec<&str> = self.relations.iter().filter(|r| r.0 == rel).map(|r| r.2.as_str()).collect();
+                row(ui, title, if names.is_empty() { "None".into() } else { names.join(", ") });
+            }
             ui.label(RichText::new("Experience").color(crate::classic::ink(Color32::GRAY)));
             let frac = if i.max_exp > 0 { i.exp as f32 / i.max_exp as f32 } else { 0.0 };
             ui.add(egui::ProgressBar::new(frac.clamp(0.0, 1.0)).text(format!("{} / {}", i.exp, i.max_exp)).desired_width(220.0));
@@ -443,4 +451,27 @@ pub fn decode_emblem(ctx: &egui::Context, guild: u32, version: u32, data: &[u8])
     let img = ro_formats::image::decode(&raw, "emblem.bmp").ok()?;
     let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
     Some(ctx.load_texture(format!("emblem {guild} {version}"), color, egui::TextureOptions::NEAREST))
+}
+
+impl Guild {
+    /// The alliance offer prompt: Some(accept?) once answered.
+    pub fn show_offer(&mut self, ctx: &egui::Context) -> Option<(u32, bool)> {
+        let (inviter, guild) = self.ally_offer.clone()?;
+        let mut out = None;
+        egui::Window::new("Alliance").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::new(0.0, -140.0)).show(ctx, |ui| {
+            ui.label(format!("The guild {guild} asks for an alliance."));
+            ui.horizontal(|ui| {
+                if ui.button("Accept").clicked() {
+                    out = Some((inviter, true));
+                }
+                if ui.button("Decline").clicked() {
+                    out = Some((inviter, false));
+                }
+            });
+        });
+        if out.is_some() {
+            self.ally_offer = None;
+        }
+        out
+    }
 }

@@ -310,3 +310,55 @@ pub fn parse_guild_skills(data: &[u8]) -> (i16, Vec<GuildSkill>) {
         .collect();
     (points, skills)
 }
+
+/// Guild relations: alliance requests and replies, enemies, breaking either off.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RelationRequest {
+    /// CZ_REQ_ALLY_GUILD: ask the other guild master (account id) for an alliance.
+    Ally { target: u32, me: u32, char_id: u32 },
+    /// CZ_ALLY_GUILD: answer an alliance request.
+    Answer { inviter: u32, accept: bool },
+    /// CZ_REQ_HOSTILE_GUILD: mark that player's guild as an enemy.
+    Enemy(u32),
+    /// CZ_REQ_DELETE_RELATED_GUILD: relation 0 ally, 1 enemy.
+    Remove { guild: u32, relation: u32 },
+}
+
+impl Encode for RelationRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            RelationRequest::Ally { target, me, char_id } => {
+                d.put_u16_le(0x0170);
+                d.put_u32_le(*target);
+                d.put_u32_le(*me);
+                d.put_u32_le(*char_id);
+            }
+            RelationRequest::Answer { inviter, accept } => {
+                d.put_u16_le(0x0172);
+                d.put_u32_le(*inviter);
+                d.put_u32_le(*accept as u32);
+            }
+            RelationRequest::Enemy(target) => {
+                d.put_u16_le(0x0180);
+                d.put_u32_le(*target);
+            }
+            RelationRequest::Remove { guild, relation } => {
+                d.put_u16_le(0x0183);
+                d.put_u32_le(*guild);
+                d.put_u32_le(*relation);
+            }
+        }
+    }
+}
+
+/// ZC_MYGUILD_BASIC_INFO (0x014c): (relation 0 ally / 1 enemy, guild id, name).
+pub fn parse_relations(data: &[u8]) -> Vec<(u32, u32, String)> {
+    data.get(4..)
+        .unwrap_or_default()
+        .chunks_exact(32)
+        .map(|mut b| {
+            let (rel, id) = (b.get_u32_le(), b.get_u32_le());
+            (rel, id, get_fixed_str(&mut b, 24))
+        })
+        .collect()
+}

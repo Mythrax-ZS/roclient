@@ -53,8 +53,9 @@ Ticked items are handled and tested in game against the local server.
 ## Social
 - [x] Guild emblems in the guild window (download, upload from Emblem*.bmp)
 - [x] Guild emblems beside player names (guild id from spawn packets, fetched per guild)
-- [ ] ZC_MYGUILD_BASIC_INFO, ZC_GUILD_POSITION, ZC_CHANGE_GUILD
-- [ ] ZC_REQ_ALLY_GUILD / ACK, ZC_ACK_REQ_HOSTILE_GUILD, ZC_DELETE_RELATED_GUILD, DISORGANIZE
+- [ ] ZC_GUILD_POSITION, ZC_CHANGE_GUILD
+- [x] Guild alliances and enemies (request, answer, list in the guild window)
+- [ ] Guild disorganize
 - [x] ZC_CONFIG, ZC_PARTY_CONFIG, party options: Game Options window
 - [ ] ZC_PARTY_JOIN_REQ_ACK, ZC_ITEM_PICKUP_PARTY
 - [x] Store search (Universal Catalog: search, pages, click to locate)
