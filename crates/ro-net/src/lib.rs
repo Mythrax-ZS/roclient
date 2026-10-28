@@ -12,6 +12,8 @@ use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
 pub use ro_proto::packets::{sp, Act, CharInfo, ChatKind, NpcDialog, NpcReply, UnitInfo, UnitPos};
+pub use ro_proto::items::{FloorItem, ItemData, ItemRequest, Skill, StatRequest, Stats};
+use ro_proto::items::*;
 
 type Conn = Framed<TcpStream, RoCodec<ServerTable>>;
 
@@ -167,12 +169,30 @@ pub enum Event {
     Npc(NpcDialog),
     /// A unit left view (reason: 0 out of sight, 1 died, 2 logged out, 3 teleported).
     Vanish { id: u32, reason: u8 },
+    /// The server is about to resend the whole inventory.
+    InventoryStart,
+    Items(Vec<ItemData>),
+    ItemAdded(ItemData),
+    ItemRemoved { index: u16, amount: u16 },
+    /// An item was used (by `user`); `amount` is what remains.
+    ItemUsed { index: u16, amount: u16, user: u32, ok: bool },
+    Equipped { index: u16, slots: u32, look: u16, ok: bool },
+    Unequipped { index: u16, slots: u32, ok: bool },
+    FloorItem(FloorItem),
+    FloorItemGone(u32),
+    Stats(Stats),
+    StatRaised { stat: u16, ok: bool, value: u8 },
+    StatCost { stat: u16, cost: u8 },
+    Skills(Vec<Skill>),
+    SkillUpdate { id: u16, level: u16, sp: u16, range: u16, upgradable: bool },
     Disconnected(String),
 }
 
 /// What the UI asks a session to do.
 #[derive(Debug, Clone)]
 pub enum Command {
+    Item(ItemRequest),
+    Stat(StatRequest),
     Move { x: u16, y: u16 },
     /// Attack a unit (continuously when `keep`).
     Attack { target: u32, keep: bool },
@@ -276,6 +296,8 @@ impl MapSession {
                     Some(Command::Chat(text)) => self.send(CzChat { name, text: &text }).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Npc { npc, reply }) => self.send(CzNpc { npc, reply: &reply }).await?,
+                    Some(Command::Item(r)) => self.send(r).await?,
+                    Some(Command::Stat(r)) => self.send(r).await?,
                 },
                 f = self.conn.next() => {
                     let Some(f) = f else { bail!("map server closed the connection") };
@@ -297,6 +319,41 @@ impl MapSession {
                         }
                         0x09fd | 0x09fe | 0x09ff => parse_unit(opcode, &data).map(Event::Unit),
                         0x00b4 | 0x00b5 | 0x00b6 | 0x00b7 | 0x0142 | 0x01d4 | 0x08d6 | 0x01b3 => parse_npc_dialog(opcode, &data).map(Event::Npc),
+                        // Inventory (invType 0 only; carts and storage come later).
+                        0x0b08 if data.get(4) == Some(&0) => Some(Event::InventoryStart),
+                        0x0b09 | 0x0b39 if data.get(4) == Some(&0) => {
+                            Some(Event::Items(if opcode == 0x0b09 { parse_itemlist_normal(&data) } else { parse_itemlist_equip(&data) }))
+                        }
+                        0x0b41 => parse_pickup(&data).map(Event::ItemAdded),
+                        0x07fa | 0x00af => parse_item_removed(opcode, &data).map(|(index, amount)| Event::ItemRemoved { index, amount }),
+                        0x01c8 => {
+                            let (index, amount, user, ok) = parse_use_item_ack(&data);
+                            Some(Event::ItemUsed { index, amount, user, ok })
+                        }
+                        0x0999 => {
+                            let (index, slots, look, ok) = parse_wear_ack(&data);
+                            Some(Event::Equipped { index, slots, look, ok })
+                        }
+                        0x099a => {
+                            let (index, slots, ok) = parse_takeoff_ack(&data);
+                            Some(Event::Unequipped { index, slots, ok })
+                        }
+                        0x0add | 0x009d => parse_floor_item(opcode, &data).map(Event::FloorItem),
+                        0x00a1 => Some(Event::FloorItemGone(parse_item_disappear(&data))),
+                        0x00bd => Some(Event::Stats(parse_status(&data))),
+                        0x00bc => {
+                            let (stat, ok, value) = parse_status_change_ack(&data);
+                            Some(Event::StatRaised { stat, ok, value })
+                        }
+                        0x00be => {
+                            let (stat, cost) = parse_status_cost(&data);
+                            Some(Event::StatCost { stat, cost })
+                        }
+                        0x010f => Some(Event::Skills(parse_skill_list(&data))),
+                        0x010e => {
+                            let (id, level, sp, range, upgradable) = parse_skill_update(&data);
+                            Some(Event::SkillUpdate { id, level, sp, range, upgradable })
+                        }
                         id::ZC_NOTIFY_ACT => Some(Event::Act(parse_act(&data))),
                         id::ZC_ATTACK_FAILURE_FOR_DISTANCE => {
                             let (target, target_cell, _, range) = parse_attack_out_of_range(&data);
@@ -320,7 +377,10 @@ impl MapSession {
                             return Ok(Some(zone));
                         }
                         id::SC_NOTIFY_BAN => bail!("disconnected by map server, code {}", data[2]),
-                        _ => None,
+                        _ => {
+                            tracing::debug!(opcode = format_args!("{opcode:#06x}"), len = data.len(), "unhandled");
+                            None
+                        }
                     };
                     if let Some(e) = event {
                         if events.send(e).is_err() {

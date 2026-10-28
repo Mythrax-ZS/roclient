@@ -97,7 +97,7 @@ impl Encode for ChPing {
 /// A fixed-length map-server packet laid out from the generated packet db: opcode and
 /// field offsets come from the handler's current registration, so shuffled
 /// opcodes and padding are handled by the table rather than by hand.
-fn put_db_packet(d: &mut BytesMut, handler: &str, fields: &[&[u8]]) {
+pub(crate) fn put_db_packet(d: &mut BytesMut, handler: &str, fields: &[&[u8]]) {
     let p = client_packet(handler);
     assert!(p.len > 0, "{handler} is variable-length");
     assert_eq!(p.pos.len(), fields.len(), "{handler}: field count mismatch");

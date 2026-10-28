@@ -5,6 +5,7 @@
 
 pub mod codec;
 pub mod generated;
+pub mod items;
 pub mod packets;
 pub mod table;
 

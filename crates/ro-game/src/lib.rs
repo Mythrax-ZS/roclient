@@ -1,6 +1,8 @@
 //! Client-side game state: walking along server-confirmed paths.
 
+pub mod items;
 pub mod path;
+pub mod skills;
 
 /// RO facing, counter-clockwise from south (ACT action order).
 pub fn dir_from_step(dx: i32, dy: i32) -> usize {

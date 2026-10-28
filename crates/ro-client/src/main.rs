@@ -4,6 +4,7 @@
 //!   ro-client              open the renderer window
 
 mod hud;
+mod windows;
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -282,6 +283,34 @@ struct World {
     gat: Option<ro_formats::gat::Gat>,
 }
 
+/// Fractional cell (centre plus the server's twelfth-of-a-cell offset) of a floor item.
+fn floor_cell(f: &ro_net::FloorItem) -> (f32, f32) {
+    (f.x as f32 + f.sub.0 as f32 / 12.0, f.y as f32 + f.sub.1 as f32 / 12.0)
+}
+
+fn inv_item(d: ro_net::ItemData) -> ro_game::items::InvItem {
+    ro_game::items::InvItem {
+        index: d.index,
+        id: d.id,
+        kind: d.kind,
+        amount: d.amount,
+        location: d.location,
+        equipped: d.equipped,
+        refine: d.refine,
+        identified: d.identified,
+        cards: d.cards,
+        look: d.look,
+    }
+}
+
+/// Decodes an image from the VFS into an egui texture.
+fn load_texture(ctx: &egui::Context, vfs: &ro_vfs::Vfs, path: &str) -> Option<egui::TextureHandle> {
+    let data = vfs.read(path).ok().flatten()?;
+    let img = ro_formats::image::decode(&data, path).ok()?;
+    let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
+    Some(ctx.load_texture(path, color, egui::TextureOptions::NEAREST))
+}
+
 /// Expanded-cell budget when planning a long (multi-hop) walk.
 const LONG_WALK_NODES: usize = 200_000;
 /// Steps per server walk request. rAthena refuses walks longer than `max_walk_path`
@@ -503,6 +532,28 @@ struct App {
     chasing: bool,
     /// Floating damage numbers: (world position, text, colour, age ms).
     floaters: Vec<(glam::Vec3, String, egui::Color32, f32)>,
+    item_db: Option<ro_game::items::ItemDb>,
+    skill_names: ro_game::skills::SkillNames,
+    inventory: ro_game::items::Inventory,
+    /// Items on the ground, with their sprite.
+    floor: std::collections::HashMap<u32, (ro_net::FloorItem, Option<ro_render::Actor>)>,
+    stats: Option<ro_net::Stats>,
+    skills: Vec<ro_net::Skill>,
+    windows: windows::Windows,
+    icons: std::collections::HashMap<u32, egui::TextureHandle>,
+    icons_tried: std::collections::HashSet<u32>,
+    skill_icons: std::collections::HashMap<u16, egui::TextureHandle>,
+    /// Floor item to pick up once we have walked next to it.
+    pending_pickup: Option<u32>,
+    /// A targeted skill waiting for the player to click its target.
+    aiming: Option<u16>,
+    alt: bool,
+    queued_action: Option<windows::UiAction>,
+    /// `--windows`: open all game windows (for captures).
+    open_windows: bool,
+    script: Vec<String>,
+    /// Pick up the nearest floor item once one appears (scripted tests).
+    auto_pickup: bool,
     /// `--talk name`: talk to the first NPC with this name once in view (scripted test).
     talk_to: Option<String>,
     /// `--attack`: attack the nearest monster once one is in view (scripted test).
@@ -710,6 +761,7 @@ impl App {
                 tracing::info!(%map, x, y, name = %character.name, job = character.job, "entered");
                 self.account_id = account_id;
                 self.units.clear();
+                self.floor.clear();
                 self.warps.clear();
                 self.enter_map(&map);
                 let look = Look {
@@ -751,7 +803,12 @@ impl App {
                 }
             }
             Unit(info) => self.unit(info),
-            Stat { id, value } => self.hud.status.set(id, value),
+            Stat { id, value } => {
+                self.hud.status.set(id, value);
+                if let (9, Some(s)) = (id, self.stats.as_mut()) {
+                    s.points = value as u16; // SP_STATUSPOINT
+                }
+            }
             Chat { kind, text, .. } => self.hud.push_chat(kind, text),
             Npc(d) => self.npc_dialog(d),
             Vanish { id, reason } => {
@@ -784,6 +841,70 @@ impl App {
                 self.attack = Some((target, range.max(1)));
                 self.request_walk(target_cell);
             }
+            InventoryStart => self.inventory.items.clear(),
+            Items(list) => {
+                for it in list {
+                    self.inventory.set(inv_item(it));
+                }
+                self.load_icons();
+            }
+            ItemAdded(it) => {
+                tracing::debug!(id = it.id, amount = it.amount, "item added");
+                let name = self.item_db.as_ref().map_or_else(|| format!("Item #{}", it.id), |d| d.name(it.id, it.identified));
+                self.hud.push_chat(ro_net::ChatKind::System, format!("You got {name} ({}).", it.amount));
+                self.inventory.add(inv_item(it));
+                self.load_icons();
+            }
+            ItemRemoved { index, amount } => self.inventory.remove(index, amount),
+            ItemUsed { index, amount, user, ok } => {
+                if ok && user == self.account_id {
+                    self.inventory.set_amount(index, amount);
+                }
+            }
+            Equipped { index, slots, ok, .. } => {
+                tracing::debug!(index, slots, ok, "equip");
+                if ok {
+                    self.inventory.set_equipped(index, slots);
+                } else {
+                    self.hud.push_chat(ro_net::ChatKind::System, "You cannot equip this item.".into());
+                }
+            }
+            Unequipped { index, ok, .. } => {
+                if ok {
+                    self.inventory.set_equipped(index, 0);
+                }
+            }
+            FloorItem(f) => {
+                tracing::debug!(id = f.id, item = f.item, x = f.x, y = f.y, "floor item");
+                let actor = self.item_actor(f.item, f.identified);
+                self.floor.insert(f.id, (f, actor));
+            }
+            FloorItemGone(id) => {
+                self.floor.remove(&id);
+                if self.pending_pickup == Some(id) {
+                    self.pending_pickup = None;
+                }
+            }
+            Stats(s) => self.stats = Some(s),
+            StatRaised { stat, ok, value } => {
+                if let (true, Some(s), 13..=18) = (ok, self.stats.as_mut(), stat) {
+                    s.base[(stat - 13) as usize] = value;
+                }
+            }
+            StatCost { stat, cost } => {
+                if let (Some(s), 32..=37) = (self.stats.as_mut(), stat) {
+                    s.cost[(stat - 32) as usize] = cost;
+                }
+            }
+            Skills(list) => {
+                self.skills = list;
+                self.load_skill_icons();
+            }
+            SkillUpdate { id, level, sp, range, upgradable } => {
+                if let Some(s) = self.skills.iter_mut().find(|s| s.id == id) {
+                    (s.level, s.sp, s.range, s.upgradable) = (level, sp, range, upgradable);
+                }
+            }
             MonsterHp { id, hp, max_hp } => {
                 if let Some(m) = self.units.get_mut(&id) {
                     m.hp = Some((hp, max_hp));
@@ -791,6 +912,7 @@ impl App {
             }
             MapMove { map, x, y } => {
                 self.units.clear();
+                self.floor.clear();
                 self.warps.clear();
                 if self.world.as_ref().is_none_or(|w| w.name != map) {
                     self.enter_map(&map);
@@ -802,6 +924,132 @@ impl App {
             Disconnected(reason) => {
                 tracing::error!("disconnected: {reason}");
                 self.status = Some(format!("disconnected: {reason}"));
+            }
+        }
+    }
+
+    fn send(&self, cmd: ro_net::Command) {
+        if let Some((tx, _)) = self.net.as_ref() {
+            let _ = tx.send(cmd);
+        }
+    }
+
+    /// Turns a window action into a server request.
+    fn ui_action(&mut self, a: windows::UiAction) {
+        use ro_net::{Command, ItemRequest, StatRequest};
+        use windows::UiAction::*;
+        match a {
+            UseItem(index) => self.send(Command::Item(ItemRequest::Use { index, account_id: self.account_id })),
+            Equip { index, location } => self.send(Command::Item(ItemRequest::Equip { index, location })),
+            Unequip(index) => self.send(Command::Item(ItemRequest::Unequip { index })),
+            Drop { index, amount } => self.send(Command::Item(ItemRequest::Drop { index, amount })),
+            RaiseStat(i) => self.send(Command::Stat(StatRequest::Raise(13 + i as u16))),
+            SkillUp(id) => self.send(Command::Stat(StatRequest::SkillUp(id))),
+            UseSkill(id) => {
+                let Some(s) = self.skills.iter().find(|s| s.id == id) else { return };
+                // Self skills go off at once; targeted ones wait for a click.
+                if s.target & 4 != 0 {
+                    self.use_skill_on(id, self.account_id);
+                } else if s.target & (1 | 2 | 16 | 32) != 0 {
+                    self.aiming = Some(id);
+                }
+            }
+        }
+    }
+
+    fn use_skill_on(&mut self, skill: u16, target: u32) {
+        let level = self.skills.iter().find(|s| s.id == skill).map_or(1, |s| s.level.max(1));
+        self.walk_goal = None;
+        self.send(ro_net::Command::Stat(ro_net::StatRequest::UseSkill { skill, level, target }));
+    }
+
+    fn use_skill_at(&mut self, skill: u16, cell: (u16, u16)) {
+        let level = self.skills.iter().find(|s| s.id == skill).map_or(1, |s| s.level.max(1));
+        self.send(ro_net::Command::Stat(ro_net::StatRequest::UseSkillAt { skill, level, x: cell.0, y: cell.1 }));
+    }
+
+    /// Picks an item up, walking next to it first when it is out of reach.
+    fn pick_up(&mut self, id: u32) {
+        let (Some(p), Some((f, _))) = (self.player.as_ref(), self.floor.get(&id)) else { return };
+        let (a, b) = (p.walker.cell, (f.x as i32, f.y as i32));
+        self.attack = None;
+        if (a.0 - b.0).abs().max((a.1 - b.1).abs()) <= 1 {
+            self.pending_pickup = None;
+            tracing::debug!(id, "pickup request");
+            self.send(ro_net::Command::Item(ro_net::ItemRequest::PickUp { floor_id: id }));
+        } else {
+            self.pending_pickup = Some(id);
+            self.request_walk((f.x, f.y));
+        }
+    }
+
+    /// The floor item under the cursor.
+    fn pick_floor_item(&self) -> Option<u32> {
+        let (r, (cx, cy)) = (self.renderer.as_ref()?, self.cursor?);
+        let w = self.world.as_ref()?;
+        let size = r.size();
+        self.floor
+            .iter()
+            .filter_map(|(&id, (f, _))| {
+                let (fx, fy) = floor_cell(f);
+                let (x, z) = (fx * ro_render::CELL, fy * ro_render::CELL);
+                let p = r.project(glam::Vec3::new(x, w.ground.height_at(x, z), z), size)?;
+                let d = (p.x - cx as f32).hypot(p.y - 8.0 - cy as f32);
+                (d < 22.0).then_some((id, d))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(id, _)| id)
+    }
+
+    /// Ground sprite for an item (sprite\아이템\{resource}).
+    fn item_actor(&mut self, item: u32, identified: bool) -> Option<ro_render::Actor> {
+        let info = self.item_db.as_ref()?.get(item)?;
+        let res = if identified || info.unidentified_resource.is_empty() { info.resource.clone() } else { info.unidentified_resource.clone() };
+        let key = format!("item:{res}");
+        if let Some(a) = self.sprites.get(&key) {
+            return a.clone();
+        }
+        let (r, vfs) = (self.renderer.as_mut()?, self.vfs.as_ref()?);
+        let base = format!("data\\sprite\\아이템\\{res}");
+        let spr = vfs.read(&format!("{base}.spr")).ok().flatten().and_then(|d| ro_formats::spr::Spr::parse(&d).ok());
+        let act = vfs.read(&format!("{base}.act")).ok().flatten().and_then(|d| ro_formats::act::Act::parse(&d).ok());
+        let actor = match (spr, act) {
+            (Some(spr), Some(act)) => {
+                let body = r.add_sheet(&spr, act, None);
+                Some(ro_render::Actor { pos: Default::default(), body, head: None, shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false })
+            }
+            _ => None,
+        };
+        self.sprites.insert(key, actor.clone());
+        actor
+    }
+
+    /// Loads inventory icons not yet loaded into egui textures.
+    fn load_icons(&mut self) {
+        let (Some(db), Some(vfs)) = (self.item_db.as_ref(), self.vfs.as_ref()) else { return };
+        let ids: Vec<(u32, bool)> = self.inventory.items.values().map(|i| (i.id, i.identified)).collect();
+        for (id, identified) in ids {
+            if self.icons.contains_key(&id) || !self.icons_tried.insert(id) {
+                continue;
+            }
+            let Some(info) = db.get(id) else { continue };
+            let res = if identified || info.unidentified_resource.is_empty() { &info.resource } else { &info.unidentified_resource };
+            let path = format!("data\\texture\\유저인터페이스\\item\\{res}.bmp");
+            if let Some(tex) = load_texture(&self.egui_ctx, vfs, &path) {
+                self.icons.insert(id, tex);
+            }
+        }
+    }
+
+    fn load_skill_icons(&mut self) {
+        let Some(vfs) = self.vfs.as_ref() else { return };
+        for s in &self.skills {
+            if self.skill_icons.contains_key(&s.id) {
+                continue;
+            }
+            let path = format!("data\\texture\\유저인터페이스\\item\\{}.bmp", s.name.to_ascii_lowercase());
+            if let Some(tex) = load_texture(&self.egui_ctx, vfs, &path) {
+                self.skill_icons.insert(s.id, tex);
             }
         }
     }
@@ -988,6 +1236,43 @@ impl App {
         let dt = (now - self.last_tick).as_secs_f32() * 1000.0;
         self.last_tick = now;
 
+        // `--do a,b,c`: scripted actions once the inventory has arrived (tests).
+        if !self.script.is_empty() && !self.inventory.items.is_empty() && self.stats.is_some() {
+            for step in std::mem::take(&mut self.script) {
+                let item = |id: u32| self.inventory.items.values().find(|i| i.id == id).map(|i| (i.index, i.location));
+                let action = match step.split_once(':') {
+                    Some(("equip", id)) => id.parse().ok().and_then(item).map(|(index, location)| windows::UiAction::Equip { index, location }),
+                    Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
+                    Some(("raise", n)) => n.parse().ok().map(windows::UiAction::RaiseStat),
+                    Some(("skillup", id)) => id.parse().ok().map(windows::UiAction::SkillUp),
+                    Some(("drop", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::Drop { index, amount: 1 }),
+                    _ if step == "pickup" => {
+                        self.auto_pickup = true;
+                        None
+                    }
+                    _ => None,
+                };
+                tracing::info!(%step, ?action, "script");
+                if let Some(a) = action {
+                    self.ui_action(a);
+                }
+            }
+        }
+        if self.auto_pickup {
+            let me = self.player.as_ref().map(|p| p.walker.cell);
+            let nearest = me.and_then(|a| self.floor.values().min_by_key(|(f, _)| (f.x as i32 - a.0).abs().max((f.y as i32 - a.1).abs())).map(|(f, _)| f.id));
+            if let Some(id) = nearest {
+                self.auto_pickup = false;
+                tracing::info!(id, "picking up");
+                self.pick_up(id);
+            }
+        }
+        if std::mem::take(&mut self.open_windows) {
+            (self.windows.inventory, self.windows.equipment, self.windows.stats, self.windows.skills) = (true, true, true, true);
+        }
+        if let Some(a) = self.queued_action.take() {
+            self.ui_action(a);
+        }
         let events: Vec<_> = self.net.as_ref().map(|(_, rx)| rx.try_iter().collect()).unwrap_or_default();
         for e in events {
             self.handle(e);
@@ -1035,6 +1320,14 @@ impl App {
             }
         }
 
+        // Pick up the item we were walking to once we have arrived.
+        if self.pending_pickup.is_some() && self.walk_goal.is_none() && self.player.as_ref().is_some_and(|p| !p.walker.is_walking()) {
+            if let Some(id) = self.pending_pickup.take() {
+                tracing::debug!(id, "pickup request");
+            self.send(ro_net::Command::Item(ro_net::ItemRequest::PickUp { floor_id: id }));
+            }
+        }
+
         // Talk to the NPC we were walking to once we have arrived.
         if self.pending_npc.is_some() && self.walk_goal.is_none() && self.player.as_ref().is_some_and(|p| !p.walker.is_walking()) {
             if let Some(npc) = self.pending_npc.take() {
@@ -1071,6 +1364,16 @@ impl App {
             for m in self.units.values_mut() {
                 r.actors.push(m.update(dt, w, octant, 0));
             }
+            // Items on the ground: their sprite at the cell plus sub-cell offset.
+            for (f, actor) in self.floor.values() {
+                if let Some(mut a) = actor.clone() {
+                    let (fx, fy) = floor_cell(f);
+                    let (x, z) = (fx * ro_render::CELL, fy * ro_render::CELL);
+                    let y = w.gat.as_ref().and_then(|g| g.height_at(fx, fy)).map_or_else(|| w.ground.height_at(x, z), |h| -h);
+                    a.pos = glam::Vec3::new(x, y, z);
+                    r.actors.push(a);
+                }
+            }
         }
 
         // HUD: names under actors, status, chat. Laid out for the capture size when capturing.
@@ -1098,10 +1401,36 @@ impl App {
             self.egui_ctx.set_pixels_per_point(ppp);
             let mut sent = None;
             let mut answer = None;
+            let mut ui_action = None;
+            let items: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
+            let skill_names = |n: &str| self.skill_names.display(n);
+            let view = windows::View {
+                items: &items,
+                db: self.item_db.as_ref(),
+                icons: &self.icons,
+                skill_icons: &self.skill_icons,
+                stats: self.stats.as_ref(),
+                skills: &self.skills,
+                skill_names: &skill_names,
+                skill_points: self.hud.status.skill_points,
+                weight: (self.hud.status.weight, self.hud.status.max_weight),
+                zeny: self.hud.status.zeny,
+                screen_width: size.0 as f32 / (window.scale_factor() as f32 * self.ui_scale),
+            };
             let out = self.egui_ctx.run_ui(input, |ui| {
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars);
                 answer = self.hud.show_dialog(ui.ctx(), &mut self.dialog, self.cutin.as_ref());
+                ui_action = self.windows.show(ui.ctx(), &view);
+                if let Some(skill) = self.aiming {
+                    let name = self.skills.iter().find(|s| s.id == skill).map(|s| self.skill_names.display(&s.name)).unwrap_or_default();
+                    egui::Area::new(egui::Id::unique("aiming")).anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 16.0)).show(ui.ctx(), |ui| {
+                        ui.label(egui::RichText::new(format!("{name}: choose a target (Esc to cancel)")).size(15.0).color(egui::Color32::from_rgb(255, 220, 120)));
+                    });
+                }
             });
+            drop(view);
+            // Handled next tick: the renderer is borrowed here.
+            self.queued_action = ui_action;
             if let (Some((npc, reply)), Some((tx, _))) = (answer, self.net.as_ref()) {
                 if reply == ro_net::NpcReply::Close {
                     self.cutin = None;
@@ -1255,6 +1584,21 @@ impl ApplicationHandler for App {
             {
                 self.hud.focus_chat();
             }
+            WindowEvent::ModifiersChanged(m) => self.alt = m.state().alt_key(),
+            WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key, state: ElementState::Pressed, repeat: false, .. }, .. } => {
+                use winit::keyboard::{Key, NamedKey};
+                match logical_key {
+                    Key::Named(NamedKey::Escape) => self.aiming = None,
+                    Key::Character(c) if self.alt => match c.to_ascii_lowercase().as_str() {
+                        "e" => self.windows.toggle_inventory(),
+                        "q" => self.windows.toggle_equipment(),
+                        "a" => self.windows.toggle_stats(),
+                        "s" => self.windows.toggle_skills(),
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
             WindowEvent::Resized(s) => {
                 r.resize(s.width, s.height);
                 window.request_redraw();
@@ -1280,13 +1624,23 @@ impl ApplicationHandler for App {
                         self.attack = None;
                         self.talk(id);
                     }
-                    // Monsters: attack until it dies (the server walks us within reach).
-                    Some((id, 5)) => self.attack_unit(id),
+                    // Monsters: attack until it dies (or use the skill being aimed).
+                    Some((id, 5)) => match self.aiming.take() {
+                        Some(skill) => self.use_skill_on(skill, id),
+                        None => self.attack_unit(id),
+                    },
                     _ => {
                         self.attack = None;
                         self.chasing = false;
-                        if let Some(cell) = self.pick() {
+                        if let Some(skill) = self.aiming.take() {
+                            if let Some(cell) = self.pick() {
+                                self.use_skill_at(skill, cell);
+                            }
+                        } else if let Some(item) = self.pick_floor_item() {
+                            self.pick_up(item);
+                        } else if let Some(cell) = self.pick() {
                             self.pending_npc = None;
+                            self.pending_pickup = None;
                             self.request_walk(cell);
                         }
                     }
@@ -1357,6 +1711,23 @@ fn main() -> anyhow::Result<()> {
         attack: None,
         chasing: false,
         floaters: vec![],
+        item_db: None,
+        skill_names: Default::default(),
+        inventory: Default::default(),
+        floor: Default::default(),
+        stats: None,
+        skills: vec![],
+        windows: Default::default(),
+        icons: Default::default(),
+        icons_tried: Default::default(),
+        skill_icons: Default::default(),
+        pending_pickup: None,
+        aiming: None,
+        alt: false,
+        queued_action: None,
+        open_windows: args.iter().any(|a| a == "--windows"),
+        auto_pickup: false,
+        script: arg("--do").map(|s| s.split(",").map(str::to_string).collect()).unwrap_or_default(),
         talk_to: arg("--talk"),
         auto_attack: args.iter().any(|a| a == "--attack"),
         units: Default::default(),
@@ -1383,6 +1754,24 @@ fn main() -> anyhow::Result<()> {
         ui_scale: cfg.ui_scale,
     };
     app.class_names = app.vfs.as_ref().map(load_class_names).unwrap_or_default();
+    if let Some(vfs) = app.vfs.as_ref() {
+        // iteminfo.lub lives in the client's System folder; skill names in the GRF.
+        let read = |p: &str| vfs.read(p).ok().flatten();
+        match read(r"System\iteminfo.lub").map(|d| ro_game::items::ItemDb::from_lub(&d)) {
+            Some(Ok(db)) => {
+                tracing::info!(items = db.len(), "loaded item info");
+                app.item_db = Some(db);
+            }
+            Some(Err(e)) => tracing::warn!("iteminfo: {e:#}"),
+            None => tracing::warn!("System/iteminfo.lub not found; items will show by id"),
+        }
+        let skills = read(r"data\luafiles514\lua files\skillinfoz\skillinfolist.lub").map(|d| ro_game::skills::SkillNames::from_lub(&d));
+        match skills {
+            Some(Ok(s)) => app.skill_names = s,
+            Some(Err(e)) => tracing::warn!("skillinfolist: {e:#}"),
+            None => tracing::warn!("skillinfolist.lub not found"),
+        }
+    }
     event_loop.run_app(&mut app)?;
     Ok(())
 }

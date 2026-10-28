@@ -1,0 +1,343 @@
+//! Inventory, floor items, equipment, stats and skills at PACKETVER 20250402
+//! (layouts from rAthena's preprocessed packets.hpp / packets_struct.hpp).
+
+use bytes::{Buf, BufMut, BytesMut};
+
+use crate::{
+    codec::Encode,
+    packets::{get_fixed_str, put_db_packet},
+};
+
+/// An inventory entry from the item list / pickup packets. `index` is the wire index.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ItemData {
+    pub index: u16,
+    pub id: u32,
+    pub kind: u8,
+    pub amount: u16,
+    pub location: u32,
+    pub equipped: u32,
+    pub refine: u8,
+    pub identified: bool,
+    pub cards: [u32; 4],
+    pub look: u16,
+}
+
+fn cards(b: &mut &[u8]) -> [u32; 4] {
+    [b.get_u32_le(), b.get_u32_le(), b.get_u32_le(), b.get_u32_le()]
+}
+
+/// packet_itemlist_normal (0x0b09): NORMALITEM_INFO entries, 34 bytes each.
+pub fn parse_itemlist_normal(data: &[u8]) -> Vec<ItemData> {
+    data.get(5..)
+        .unwrap_or_default()
+        .chunks_exact(34)
+        .map(|mut b| {
+            let index = b.get_u16_le();
+            let id = b.get_u32_le();
+            let kind = b.get_u8();
+            let amount = b.get_i16_le().max(0) as u16;
+            let equipped = b.get_u32_le();
+            let cards = cards(&mut b);
+            b.advance(4); // hire expire date
+            let flags = b.get_u8();
+            ItemData { index, id, kind, amount, location: 0, equipped, refine: 0, identified: flags & 1 != 0, cards, look: 0 }
+        })
+        .collect()
+}
+
+/// packet_itemlist_equip (0x0b39): EQUIPITEM_INFO entries, 68 bytes each.
+pub fn parse_itemlist_equip(data: &[u8]) -> Vec<ItemData> {
+    data.get(5..)
+        .unwrap_or_default()
+        .chunks_exact(68)
+        .map(|mut b| {
+            let index = b.get_u16_le();
+            let id = b.get_u32_le();
+            let kind = b.get_u8();
+            let location = b.get_u32_le();
+            let equipped = b.get_u32_le();
+            let cards = cards(&mut b);
+            b.advance(4 + 2); // hire expire date, bind on equip
+            let look = b.get_u16_le();
+            b.advance(1 + 25); // option count, options
+            let refine = b.get_u8();
+            b.advance(1); // grade
+            let flags = b.get_u8();
+            ItemData { index, id, kind, amount: 1, location, equipped, refine, identified: flags & 1 != 0, cards, look }
+        })
+        .collect()
+}
+
+/// ZC_ITEM_PICKUP_ACK (0x0b41): the item added to the inventory, or None when the pickup
+/// failed (overweight, no room...).
+pub fn parse_pickup(data: &[u8]) -> Option<ItemData> {
+    let mut b = &data[2..];
+    let index = b.get_u16_le();
+    let amount = b.get_u16_le();
+    let id = b.get_u32_le();
+    let identified = b.get_u8() != 0;
+    b.advance(1); // damaged
+    let cards = cards(&mut b);
+    let location = b.get_u32_le();
+    let kind = b.get_u8();
+    let result = b.get_u8();
+    b.advance(4 + 2 + 25 + 1); // hire date, bind, options, favorite
+    let look = b.get_u16_le();
+    let refine = b.get_u8();
+    (result == 0).then_some(ItemData { index, id, kind, amount, location, equipped: 0, refine, identified, cards, look })
+}
+
+/// An item lying on the ground.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FloorItem {
+    pub id: u32,
+    pub item: u32,
+    pub identified: bool,
+    pub x: u16,
+    pub y: u16,
+    pub amount: u16,
+    /// Sub-cell offset (0..=11, twelfths of a cell).
+    pub sub: (u8, u8),
+}
+
+/// packet_dropflooritem (0x0add, dropped now) / ZC_ITEM_ENTRY (0x009d, entering view).
+pub fn parse_floor_item(opcode: u16, data: &[u8]) -> Option<FloorItem> {
+    let mut b = &data[2..];
+    Some(match opcode {
+        0x0add => {
+            let id = b.get_u32_le();
+            let item = b.get_u32_le();
+            b.advance(2); // type
+            let identified = b.get_u8() != 0;
+            let (x, y) = (b.get_i16_le() as u16, b.get_i16_le() as u16);
+            let sub = (b.get_u8(), b.get_u8());
+            let amount = b.get_i16_le() as u16;
+            FloorItem { id, item, identified, x, y, amount, sub }
+        }
+        0x009d => {
+            let id = b.get_u32_le();
+            let item = b.get_u32_le();
+            let identified = b.get_u8() != 0;
+            let (x, y) = (b.get_u16_le(), b.get_u16_le());
+            let amount = b.get_u16_le();
+            let sub = (b.get_u8(), b.get_u8());
+            FloorItem { id, item, identified, x, y, amount, sub }
+        }
+        _ => return None,
+    })
+}
+
+/// ZC_ITEM_DISAPPEAR (0x00a1): floor item id.
+pub fn parse_item_disappear(data: &[u8]) -> u32 {
+    (&data[2..]).get_u32_le()
+}
+
+/// ZC_DELETE_ITEM_FROM_BODY (0x07fa) / ZC_ITEM_THROW_ACK (0x00af): (index, amount removed).
+pub fn parse_item_removed(opcode: u16, data: &[u8]) -> Option<(u16, u16)> {
+    let mut b = &data[2..];
+    match opcode {
+        0x07fa => {
+            b.advance(2);
+            Some((b.get_u16_le(), b.get_i16_le().max(0) as u16))
+        }
+        0x00af => Some((b.get_u16_le(), b.get_u16_le())),
+        _ => None,
+    }
+}
+
+/// ZC_USE_ITEM_ACK (0x01c8): (index, remaining amount, user id, success).
+pub fn parse_use_item_ack(data: &[u8]) -> (u16, u16, u32, bool) {
+    let mut b = &data[2..];
+    let index = b.get_u16_le();
+    b.advance(4); // item id
+    let aid = b.get_u32_le();
+    let amount = b.get_i16_le().max(0) as u16;
+    (index, amount, aid, b.get_u8() != 0)
+}
+
+/// ZC_REQ_WEAR_EQUIP_ACK (0x0999): (index, worn slots, view sprite, ok).
+pub fn parse_wear_ack(data: &[u8]) -> (u16, u32, u16, bool) {
+    let mut b = &data[2..];
+    (b.get_u16_le(), b.get_u32_le(), b.get_u16_le(), b.get_u8() == 0)
+}
+
+/// ZC_REQ_TAKEOFF_EQUIP_ACK (0x099a): (index, slots it left, ok).
+pub fn parse_takeoff_ack(data: &[u8]) -> (u16, u32, bool) {
+    let mut b = &data[2..];
+    (b.get_u16_le(), b.get_u32_le(), b.get_u8() == 0)
+}
+
+/// Item actions the client asks for.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ItemRequest {
+    Use { index: u16, account_id: u32 },
+    Equip { index: u16, location: u32 },
+    Unequip { index: u16 },
+    PickUp { floor_id: u32 },
+    Drop { index: u16, amount: u16 },
+}
+
+impl Encode for ItemRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match *self {
+            ItemRequest::Use { index, account_id } => put_db_packet(d, "UseItem", &[&index.to_le_bytes(), &account_id.to_le_bytes()]),
+            ItemRequest::Equip { index, location } => {
+                d.put_u16_le(0x0998); // CZ_REQ_WEAR_EQUIP
+                d.put_u16_le(index);
+                d.put_u32_le(location);
+            }
+            ItemRequest::Unequip { index } => put_db_packet(d, "UnequipItem", &[&index.to_le_bytes()]),
+            ItemRequest::PickUp { floor_id } => put_db_packet(d, "TakeItem", &[&floor_id.to_le_bytes()]),
+            ItemRequest::Drop { index, amount } => put_db_packet(d, "DropItem", &[&index.to_le_bytes(), &amount.to_le_bytes()]),
+        }
+    }
+}
+
+/// ZC_STATUS (0x00bd): base stats, their raise costs, and derived values.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Stats {
+    pub points: u16,
+    /// str, agi, vit, int, dex, luk
+    pub base: [u8; 6],
+    /// Status points needed to raise each by one.
+    pub cost: [u8; 6],
+    pub atk: (i16, i16),
+    /// (min, max)
+    pub matk: (i16, i16),
+    pub def: (i16, i16),
+    pub mdef: (i16, i16),
+    pub hit: i16,
+    pub flee: (i16, i16),
+    pub crit: i16,
+    pub aspd: (i16, i16),
+}
+
+pub fn parse_status(data: &[u8]) -> Stats {
+    let mut b = &data[2..];
+    let points = b.get_u16_le();
+    let (mut base, mut cost) = ([0; 6], [0; 6]);
+    for i in 0..6 {
+        base[i] = b.get_u8();
+        cost[i] = b.get_u8();
+    }
+    let atk = (b.get_i16_le(), b.get_i16_le());
+    let (max_matk, min_matk) = (b.get_i16_le(), b.get_i16_le());
+    let def = (b.get_i16_le(), b.get_i16_le());
+    let mdef = (b.get_i16_le(), b.get_i16_le());
+    let hit = b.get_i16_le();
+    let flee = (b.get_i16_le(), b.get_i16_le());
+    let crit = b.get_i16_le();
+    let aspd = (b.get_i16_le(), b.get_i16_le());
+    Stats { points, base, cost, atk, matk: (min_matk, max_matk), def, mdef, hit, flee, crit, aspd }
+}
+
+/// ZC_STATUS_CHANGE_ACK (0x00bc): (stat id, accepted, new value).
+pub fn parse_status_change_ack(data: &[u8]) -> (u16, bool, u8) {
+    let mut b = &data[2..];
+    (b.get_u16_le(), b.get_u8() != 0, b.get_u8())
+}
+
+/// ZC_STATUS_CHANGE (0x00be): (stat id, cost to raise).
+pub fn parse_status_cost(data: &[u8]) -> (u16, u8) {
+    let mut b = &data[2..];
+    (b.get_u16_le(), b.get_u8())
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Skill {
+    pub id: u16,
+    /// Targeting flags: 0 passive, 1 enemy, 2 place, 4 self, 16 friend, 32 trap.
+    pub target: i32,
+    pub level: u16,
+    pub sp: u16,
+    pub range: u16,
+    pub name: String,
+    pub upgradable: bool,
+}
+
+/// ZC_SKILLINFO_LIST (0x010f): SKILLDATA entries, 37 bytes each.
+pub fn parse_skill_list(data: &[u8]) -> Vec<Skill> {
+    data.get(4..)
+        .unwrap_or_default()
+        .chunks_exact(37)
+        .map(|mut b| Skill {
+            id: b.get_u16_le(),
+            target: b.get_i32_le(),
+            level: b.get_u16_le(),
+            sp: b.get_u16_le(),
+            range: b.get_u16_le(),
+            name: get_fixed_str(&mut b, 24),
+            upgradable: b.get_u8() != 0,
+        })
+        .collect()
+}
+
+/// ZC_SKILLINFO_UPDATE (0x010e): (skill, level, sp, range, upgradable).
+pub fn parse_skill_update(data: &[u8]) -> (u16, u16, u16, u16, bool) {
+    let mut b = &data[2..];
+    (b.get_u16_le(), b.get_u16_le(), b.get_u16_le(), b.get_u16_le(), b.get_u8() != 0)
+}
+
+/// Stat and skill actions the client asks for.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StatRequest {
+    /// Raise a base stat by one; `stat` is the rAthena SP_STR..SP_LUK id (13..=18).
+    Raise(u16),
+    SkillUp(u16),
+    UseSkill { skill: u16, level: u16, target: u32 },
+    UseSkillAt { skill: u16, level: u16, x: u16, y: u16 },
+}
+
+impl Encode for StatRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match *self {
+            StatRequest::Raise(stat) => put_db_packet(d, "StatusUp", &[&stat.to_le_bytes(), &[1]]),
+            StatRequest::SkillUp(skill) => put_db_packet(d, "SkillUp", &[&skill.to_le_bytes()]),
+            StatRequest::UseSkill { skill, level, target } => {
+                put_db_packet(d, "UseSkillToId", &[&level.to_le_bytes(), &skill.to_le_bytes(), &target.to_le_bytes()])
+            }
+            StatRequest::UseSkillAt { skill, level, x, y } => put_db_packet(
+                d,
+                "UseSkillToPos",
+                &[&level.to_le_bytes(), &skill.to_le_bytes(), &x.to_le_bytes(), &y.to_le_bytes()],
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client_packet;
+
+    #[test]
+    fn normal_item_layout() {
+        let mut p = vec![0x09, 0x0b, 0, 0, 0];
+        p.extend_from_slice(&2u16.to_le_bytes());
+        p.extend_from_slice(&501u32.to_le_bytes());
+        p.push(0);
+        p.extend_from_slice(&5i16.to_le_bytes());
+        p.extend_from_slice(&0u32.to_le_bytes());
+        p.extend_from_slice(&[0; 16]);
+        p.extend_from_slice(&0i32.to_le_bytes());
+        p.push(1);
+        assert_eq!(p.len(), 5 + 34);
+        let items = parse_itemlist_normal(&p);
+        assert_eq!((items[0].index, items[0].id, items[0].amount, items[0].identified), (2, 501, 5, true));
+    }
+
+    #[test]
+    fn request_sizes() {
+        let size = |r: &dyn Encode| {
+            let mut b = BytesMut::new();
+            r.encode(&mut b);
+            b.len()
+        };
+        assert_eq!(size(&ItemRequest::Use { index: 2, account_id: 9 }), client_packet("UseItem").len as usize);
+        assert_eq!(size(&ItemRequest::PickUp { floor_id: 3 }), client_packet("TakeItem").len as usize);
+        assert_eq!(size(&ItemRequest::Equip { index: 2, location: 256 }), 8);
+        assert_eq!(size(&StatRequest::Raise(13)), client_packet("StatusUp").len as usize);
+        assert_eq!(size(&StatRequest::UseSkill { skill: 1, level: 1, target: 1 }), client_packet("UseSkillToId").len as usize);
+    }
+}

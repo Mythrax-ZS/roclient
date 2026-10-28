@@ -5,3 +5,4 @@ version.workspace = true
 
 [dependencies]
 ro-formats = { path = "../ro-formats" }
+anyhow.workspace = true

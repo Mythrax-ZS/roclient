@@ -24,6 +24,7 @@ pub struct Status {
     pub job_exp: i64,
     pub next_job_exp: i64,
     pub zeny: i64,
+    pub skill_points: i64,
     pub weight: i64,
     pub max_weight: i64,
 }
@@ -42,6 +43,7 @@ impl Status {
             sp::JOBEXP => self.job_exp = value,
             sp::NEXTJOBEXP => self.next_job_exp = value,
             sp::ZENY => self.zeny = value,
+            12 => self.skill_points = value, // SP_SKILLPOINT
             sp::WEIGHT => self.weight = value,
             sp::MAXWEIGHT => self.max_weight = value,
             _ => {}
