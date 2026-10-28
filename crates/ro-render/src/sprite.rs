@@ -193,7 +193,9 @@ pub(crate) fn actor_quads(sheets: &[Sheet], a: &Actor) -> Vec<(usize, Vec<Vertex
     }
     let index = a.action * 8 + a.dir as usize;
     // Idle and sitting heads hold frame 0: their extra frames are head-turn poses, not animation.
-    let still_head = matches!(a.action, 0 | 2);
+    // Only player sprites (which have a separate head) work this way; monsters and NPCs
+    // animate while idle.
+    let still_head = a.head.is_some() && matches!(a.action, 0 | 2);
     let Some(body) = sheets.get(a.body.0) else { return out };
     // Idle and sitting frames are head-turn poses (straight / left / right) whose anchors
     // differ, not an animation: hold the pose (straight) for body and head alike.
