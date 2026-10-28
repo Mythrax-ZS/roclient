@@ -263,6 +263,21 @@ struct World {
     gat: Option<ro_formats::gat::Gat>,
 }
 
+/// Expanded-cell budget when planning a long (multi-hop) walk.
+const LONG_WALK_NODES: usize = 200_000;
+/// Steps per server walk request. rAthena refuses walks longer than `max_walk_path`
+/// (conf/battle/client.conf, 17 by default); stay well under it, since the server's
+/// position can trail the client's by a cell or two when the next hop is sent.
+const WALK_HOP: usize = 12;
+
+/// A clicked destination being reached through one or more server walks.
+struct WalkGoal {
+    cell: (u16, u16),
+    sent_at: Option<std::time::Instant>,
+    /// Hops sent without the previous one moving us; gives up after a few.
+    tries: u32,
+}
+
 /// Anything that stands and walks on the map: the player, other players, NPCs, monsters.
 struct Mob {
     actor: ro_render::Actor,
@@ -296,7 +311,14 @@ impl Mob {
             self.actor.time_ms = 0.0; // restart the animation on start/stop
         }
         let (x, z) = ((fx + 0.5) * ro_render::CELL, (fy + 0.5) * ro_render::CELL);
-        self.actor.pos = glam::Vec3::new(x, world.ground.height_at(x, z), z);
+        // Stand on the GAT surface: it includes stairs, bridges and other walkable models
+        // that sit above the GND ground.
+        let y = world
+            .gat
+            .as_ref()
+            .and_then(|g| g.height_at(fx + 0.5, fy + 0.5))
+            .map_or_else(|| world.ground.height_at(x, z), |h| -h);
+        self.actor.pos = glam::Vec3::new(x, y, z);
         self.actor.action = if walking { 1 } else { idle_action };
         self.actor.dir = DIRS[(self.walker.dir as i32 + octant).rem_euclid(8) as usize];
         self.actor.time_ms += dt;
@@ -351,6 +373,8 @@ struct App {
     walk_on_enter: Option<(u16, u16)>,
     /// `--distance`: initial camera distance.
     distance: Option<f32>,
+    /// `--yaw degrees`: initial camera rotation (0 looks north).
+    yaw: Option<f32>,
     /// Offline preview appearance and pose (`--job`, `--sex`, `--action n`, `--dir 0..7`).
     look: Look,
     action: usize,
@@ -361,6 +385,7 @@ struct App {
     account_id: u32,
     /// Connection problem shown in the title bar.
     status: Option<String>,
+    walk_goal: Option<WalkGoal>,
     /// Other units in view, by id.
     units: std::collections::HashMap<u32, Mob>,
     class_names: std::collections::HashMap<i16, String>,
@@ -492,19 +517,42 @@ impl App {
 
     /// Asks to walk to a cell: through the server online, locally offline.
     fn request_walk(&mut self, cell: (u16, u16)) {
-        match &self.net {
-            Some((tx, _)) => {
-                let _ = tx.send(ro_net::Command::Move { x: cell.0, y: cell.1 });
-            }
-            None => {
-                let (Some(p), Some(w)) = (self.player.as_mut(), self.world.as_ref()) else { return };
-                if let Some(gat) = &w.gat {
-                    if let Some(path) = ro_game::path::find(gat, p.walker.cell, (cell.0 as i32, cell.1 as i32)) {
-                        p.walker.walk(path);
-                    }
+        if self.net.is_none() {
+            let (Some(p), Some(w)) = (self.player.as_mut(), self.world.as_ref()) else { return };
+            if let Some(gat) = &w.gat {
+                if let Some(path) = ro_game::path::find_long(gat, p.walker.cell, (cell.0 as i32, cell.1 as i32), LONG_WALK_NODES) {
+                    p.walker.walk(path);
                 }
             }
+            return;
         }
+        self.walk_goal = Some(WalkGoal { cell, sent_at: None, tries: 0 });
+        self.next_hop();
+    }
+
+    /// Online walks longer than the server's MAX_WALKPATH go as a chain of hops along the
+    /// full client-side path; the next hop is sent when the previous one finishes.
+    fn next_hop(&mut self) {
+        let (Some(goal), Some(p), Some(w), Some((tx, _))) = (self.walk_goal.as_mut(), self.player.as_ref(), self.world.as_ref(), self.net.as_ref())
+        else {
+            return;
+        };
+        let target = (goal.cell.0 as i32, goal.cell.1 as i32);
+        if p.walker.cell == target || goal.tries >= 5 {
+            self.walk_goal = None; // arrived, or the server keeps refusing
+            return;
+        }
+        let path = w.gat.as_ref().and_then(|g| ro_game::path::find_long(g, p.walker.cell, target, LONG_WALK_NODES));
+        let Some(path) = path.filter(|p| !p.is_empty()) else {
+            tracing::debug!(from = ?p.walker.cell, ?target, "no path to walk target");
+            self.walk_goal = None;
+            return;
+        };
+        let hop = path[path.len().min(WALK_HOP) - 1];
+        tracing::debug!(from = ?p.walker.cell, ?target, steps = path.len(), ?hop, "walk hop");
+        let _ = tx.send(ro_net::Command::Move { x: hop.0 as u16, y: hop.1 as u16 });
+        goal.sent_at = Some(std::time::Instant::now());
+        goal.tries += 1;
     }
 
     fn handle(&mut self, event: ro_net::Event) {
@@ -530,6 +578,9 @@ impl App {
                 let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
                 if let Some(p) = self.player.as_mut() {
                     tracing::debug!(?from, ?to, "walk");
+                    if let Some(g) = self.walk_goal.as_mut() {
+                        g.tries = 0; // the server accepted this hop
+                    }
                     p.walk(gat, from, to);
                 }
             }
@@ -585,6 +636,12 @@ impl App {
         let events: Vec<_> = self.net.as_ref().map(|(_, rx)| rx.try_iter().collect()).unwrap_or_default();
         for e in events {
             self.handle(e);
+        }
+
+        // Continue a long walk once the current hop has finished (or the server ignored it).
+        let idle = self.player.as_ref().is_some_and(|p| !p.walker.is_walking());
+        if idle && self.walk_goal.as_ref().is_some_and(|g| g.sent_at.is_none_or(|t| t.elapsed().as_millis() > 500)) {
+            self.next_hop();
         }
 
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
@@ -675,6 +732,9 @@ impl ApplicationHandler for App {
         match pollster::block_on(ro_render::Renderer::new(window.clone(), backends, self.msaa)) {
             Ok(mut r) => {
                 r.camera.look_at_cell(self.at.0, self.at.1);
+                if let Some(yaw) = self.yaw {
+                    r.camera.yaw = yaw.to_radians();
+                }
                 if let Some(d) = self.distance {
                     r.camera.distance = d;
                 }
@@ -773,6 +833,7 @@ fn main() -> anyhow::Result<()> {
         map: arg("--map").unwrap_or(cfg.map),
         still: args.iter().any(|a| a == "--still"),
         distance: arg("--distance").and_then(|d| d.parse().ok()),
+        yaw: arg("--yaw").and_then(|d| d.parse().ok()),
         look: Look { job: arg("--job").unwrap_or_else(|| "초보자".into()), male: arg("--sex").is_none_or(|s| s != "f"), hair: 1, hair_color: 0 },
         action: arg("--action").and_then(|a| a.parse().ok()).unwrap_or(0),
         dir: arg("--dir").and_then(|d| d.parse::<usize>().ok()).unwrap_or(0) % 8,
@@ -783,6 +844,7 @@ fn main() -> anyhow::Result<()> {
         player: None,
         account_id: 0,
         status: None,
+        walk_goal: None,
         units: Default::default(),
         class_names: Default::default(),
         sprites: Default::default(),

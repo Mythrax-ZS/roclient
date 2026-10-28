@@ -25,8 +25,19 @@ fn heuristic(x0: i32, y0: i32, x1: i32, y1: i32) -> i32 {
     MOVE_COST * ((x1 - x0).abs() + (y1 - y0).abs())
 }
 
-/// Cells from start (exclusive) to goal (inclusive), or None if unreachable or too long.
+/// Cells from start (exclusive) to goal (inclusive) for a single server walk: at most
+/// MAX_WALKPATH steps, or None.
 pub fn find(map: &impl Walkable, from: (i32, i32), to: (i32, i32)) -> Option<Vec<(i32, i32)>> {
+    search(map, from, to, MAX_WALKPATH * MAX_WALKPATH).filter(|p| p.len() <= MAX_WALKPATH)
+}
+
+/// Like [`find`] but without the server's length cap, for planning long walks as a chain
+/// of server-sized hops. Bounded by `max_nodes` expanded cells.
+pub fn find_long(map: &impl Walkable, from: (i32, i32), to: (i32, i32), max_nodes: usize) -> Option<Vec<(i32, i32)>> {
+    search(map, from, to, max_nodes)
+}
+
+fn search(map: &impl Walkable, from: (i32, i32), to: (i32, i32), max_nodes: usize) -> Option<Vec<(i32, i32)>> {
     if !map.walkable(to.0, to.1) {
         return None;
     }
@@ -50,7 +61,7 @@ pub fn find(map: &impl Walkable, from: (i32, i32), to: (i32, i32)) -> Option<Vec
             break;
         }
         // Bound the search the way the server's fixed-size node table does.
-        if closed.len() > MAX_WALKPATH * MAX_WALKPATH {
+        if closed.len() > max_nodes {
             return None;
         }
         let (x, y) = cur;
@@ -97,7 +108,7 @@ pub fn find(map: &impl Walkable, from: (i32, i32), to: (i32, i32)) -> Option<Vec
         c = p;
     }
     path.reverse();
-    (path.len() <= MAX_WALKPATH).then_some(path)
+    Some(path)
 }
 
 #[cfg(test)]
@@ -136,5 +147,24 @@ mod tests {
     fn unreachable() {
         let g = Grid(vec!["..#..", "..#..", "..#.."]);
         assert!(find(&g, (0, 0), (4, 0)).is_none());
+    }
+}
+
+#[cfg(test)]
+mod long_tests {
+    use super::*;
+
+    struct Open(i32);
+    impl Walkable for Open {
+        fn walkable(&self, x: i32, y: i32) -> bool {
+            (0..self.0).contains(&x) && (0..self.0).contains(&y)
+        }
+    }
+
+    #[test]
+    fn long_paths_exceed_the_server_cap() {
+        let map = Open(100);
+        assert!(find(&map, (0, 0), (60, 0)).is_none());
+        assert_eq!(find_long(&map, (0, 0), (60, 0), 100_000).unwrap().len(), 60);
     }
 }

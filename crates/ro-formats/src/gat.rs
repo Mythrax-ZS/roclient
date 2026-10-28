@@ -10,6 +10,9 @@ pub struct Gat {
     pub height: u32,
     /// Cell type: 0 walkable, 1 blocked, 3 walkable water, 5 cliff (blocked, shootable).
     pub cells: Vec<u32>,
+    /// Corner heights per cell, RO space (y down), corners (x,y), (x+1,y), (x,y+1), (x+1,y+1).
+    /// Unlike the GND these include walkable model surfaces such as stairs and bridges.
+    pub heights: Vec<[f32; 4]>,
 }
 
 impl Gat {
@@ -19,12 +22,14 @@ impl Gat {
         r.bytes(2)?; // version
         let width = r.u32()?;
         let height = r.u32()?;
-        let mut cells = Vec::with_capacity((width * height) as usize);
-        for _ in 0..width * height {
-            r.bytes(16)?; // corner heights
+        let n = (width * height) as usize;
+        let mut cells = Vec::with_capacity(n);
+        let mut heights = Vec::with_capacity(n);
+        for _ in 0..n {
+            heights.push([r.f32()?, r.f32()?, r.f32()?, r.f32()?]);
             cells.push(r.u32()?);
         }
-        Ok(Self { width, height, cells })
+        Ok(Self { width, height, cells, heights })
     }
 
     pub fn walkable(&self, x: i32, y: i32) -> bool {
@@ -32,5 +37,19 @@ impl Gat {
             return false;
         }
         matches!(self.cells[(y as u32 * self.width + x as u32) as usize], 0 | 3)
+    }
+
+    /// Surface height (RO space, y down) at a fractional cell position; cell (x, y) spans
+    /// [x, x+1) x [y, y+1). None outside the map.
+    pub fn height_at(&self, fx: f32, fy: f32) -> Option<f32> {
+        let (cx, cy) = (fx.floor(), fy.floor());
+        if cx < 0.0 || cy < 0.0 || cx as u32 >= self.width || cy as u32 >= self.height {
+            return None;
+        }
+        let h = self.heights[(cy as u32 * self.width + cx as u32) as usize];
+        let (tx, ty) = (fx - cx, fy - cy);
+        let near = h[0] + (h[1] - h[0]) * tx;
+        let far = h[2] + (h[3] - h[2]) * tx;
+        Some(near + (far - near) * ty)
     }
 }
