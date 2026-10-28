@@ -244,19 +244,6 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
 }
 
 /// Equipment slots in display order: (bits, label).
-const SLOTS: [(u32, &str); 10] = [
-    (0x100, "Upper Headgear"),
-    (0x200, "Middle Headgear"),
-    (0x001, "Lower Headgear"),
-    (0x010, "Armor"),
-    (0x002, "Weapon"),
-    (0x020, "Shield"),
-    (0x004, "Garment"),
-    (0x040, "Shoes"),
-    (0x008, "Accessory"),
-    (0x080, "Accessory"),
-];
-
 /// The equipment window's tabs: worn gear, costumes, shadow gear.
 const EQUIP_TABS: [&str; 3] = ["Equip", "Costume", "Shadow"];
 
@@ -598,22 +585,46 @@ impl Windows {
                             ("Status", "Alt+A", &mut self.stats),
                             ("Skills", "Alt+S", &mut self.skills),
                             ("Party", "Alt+Z", &mut self.party),
-                            ("Friends", "Alt+H", &mut self.friends),
                             ("Guild", "Alt+G", &mut self.guild),
-                            ("Settings", "Alt+O", &mut self.settings),
                         ] {
                             if ui.selectable_label(*open, label).on_hover_text(key).clicked() {
                                 *open = !*open;
                             }
                         }
-                        for (label, key, tip) in [("Clan", "clan", "Your clan"), ("Battle", "battle", "Battlegrounds and castles"), ("Navi", "navi", "Navigation: find NPCs and places (/navi)"), ("Booking", "n", "Alt+N"), ("Chat", "k", "Chat room (Alt+K)"), ("Mail", "x", "Alt+X"), ("Companions", "r", "Alt+R"), ("Achievements", "y", "Alt+Y"), ("Attendance", "j", "Alt+J")] {
-                            if ui.selectable_label(false, label).on_hover_text(tip).clicked() {
-                                self.menu_key = Some(key);
-                            }
+                        if ui.selectable_label(false, "Mail").on_hover_text("Alt+X").clicked() {
+                            self.menu_key = Some("x");
                         }
                         if ui.selectable_label(self.cash_shown, "Cash Shop").on_hover_text("Alt+C").clicked() {
                             self.cash_toggle = true;
                         }
+                        // Everything else, in a dropdown so the bar stays short.
+                        ui.menu_button("More…", |ui| {
+                            ui.set_min_width(190.0);
+                            if ui.selectable_label(self.friends, "Friends   Alt+H").clicked() {
+                                self.friends = !self.friends;
+                                ui.close();
+                            }
+                            for (label, key) in [
+                                ("Clan", "clan"),
+                                ("Companions   Alt+R", "r"),
+                                ("Navigation   /navi", "navi"),
+                                ("Party Booking   Alt+N", "n"),
+                                ("Chat Room   Alt+K", "k"),
+                                ("Battle & Castles", "battle"),
+                                ("Achievements   Alt+Y", "y"),
+                                ("Attendance   Alt+J", "j"),
+                            ] {
+                                if ui.selectable_label(false, label).clicked() {
+                                    self.menu_key = Some(key);
+                                    ui.close();
+                                }
+                            }
+                            ui.separator();
+                            if ui.selectable_label(self.settings, "Settings   Alt+O").clicked() {
+                                self.settings = !self.settings;
+                                ui.close();
+                            }
+                        });
                     });
                 });
         });
@@ -877,9 +888,6 @@ impl Windows {
                     }
                     ui.separator();
                 }
-                if let Some(t) = v.portrait {
-                    ui.vertical_centered(|ui| ui.image((t.id(), Vec2::splat(120.0))));
-                }
                 ui.horizontal(|ui| {
                     for (i, name) in EQUIP_TABS.iter().enumerate() {
                         if ui.selectable_label(self.equip_tab == i as u8, *name).clicked() {
@@ -888,34 +896,67 @@ impl Windows {
                     }
                 });
                 ui.separator();
+                // A paper doll like the original: slots down both sides of the character.
+                const ROW: f32 = 46.0;
+                const SIDE: f32 = 170.0;
+                const MID: f32 = 120.0;
+                let (area, _) = ui.allocate_exact_size(Vec2::new(SIDE * 2.0 + MID, ROW * 5.0), egui::Sense::hover());
+                let p = ui.painter_at(area);
+                if let Some(t) = v.portrait {
+                    let c = area.center() + Vec2::new(0.0, -10.0);
+                    p.image(t.id(), egui::Rect::from_center_size(c, Vec2::splat(MID + 20.0)), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                }
+                // (slot bits, left column?, row, label) in the same order as the Classic art.
+                const DOLL: [(u32, bool, usize, &str); 10] = [
+                    (0x100, true, 0, "Upper"), (0x200, false, 0, "Middle"), (0x001, true, 1, "Lower"), (0x010, false, 1, "Armor"), (0x002, true, 2, "Weapon"),
+                    (0x020, false, 2, "Shield"), (0x004, true, 3, "Garment"), (0x040, false, 3, "Shoes"), (0x008, true, 4, "Accessory"), (0x080, false, 4, "Accessory"),
+                ];
                 let mut used_acc = vec![];
-                egui::Grid::new("equip").num_columns(2).spacing(Vec2::new(8.0, 4.0)).show(ui, |ui| {
-                    for (bits, label) in SLOTS {
-                        if bits & tab_slots(self.equip_tab) == 0 {
-                            continue;
-                        }
-                        let worn = v.items.iter().find(|it| tab_bits(it.equipped, self.equip_tab) & bits != 0 && !used_acc.contains(&it.index));
-                        if let Some(it) = worn {
-                            if bits & 0x88 != 0 {
-                                used_acc.push(it.index);
-                            }
-                            let resp = item_slot(ui, v.icons, it, 32.0).on_hover_ui(|ui| item_tooltip(ui, v.db, it));
-                            if resp.secondary_clicked() {
-                                action = Some(UiAction::ItemInfo { id: it.id, refine: it.refine, cards: it.cards });
-                            }
-                            if resp.double_clicked() {
-                                action = Some(UiAction::Unequip(it.index));
-                            }
-                            ui.label(item_name(v.db, it));
-                        } else {
-                            ui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::hover());
-                            let label = match self.equip_tab { 1 => format!("Costume {label}"), 2 => format!("Shadow {label}"), _ => label.to_string() };
-                            ui.label(RichText::new(label).color(crate::classic::ink(Color32::GRAY)));
-                        }
-                        ui.end_row();
+                for (bits, left, row, label) in DOLL {
+                    let y = area.min.y + row as f32 * ROW + 4.0;
+                    let x = if left { area.min.x } else { area.max.x - SIDE };
+                    let cell = egui::Rect::from_min_size(egui::pos2(x, y), Vec2::new(SIDE, ROW - 8.0));
+                    let icon = egui::Rect::from_min_size(egui::pos2(if left { cell.min.x } else { cell.max.x - 38.0 }, y), Vec2::splat(38.0));
+                    let (text_at, align) = if left { (egui::pos2(icon.max.x + 6.0, icon.center().y), egui::Align2::LEFT_CENTER) } else { (egui::pos2(icon.min.x - 6.0, icon.center().y), egui::Align2::RIGHT_CENTER) };
+                    let available = bits & tab_slots(self.equip_tab) != 0;
+                    if !available {
+                        continue;
                     }
-                });
-                ui.label(RichText::new("Double-click to take off").size(11.0).color(crate::classic::ink(Color32::GRAY)));
+                    p.rect_filled(icon, 5.0, Color32::from_white_alpha(14));
+                    let worn = v.items.iter().find(|it| tab_bits(it.equipped, self.equip_tab) & bits != 0 && !used_acc.contains(&it.index));
+                    let Some(it) = worn else {
+                        p.text(text_at, align, label, egui::FontId::proportional(12.0), crate::classic::ink(Color32::from_gray(110)));
+                        continue;
+                    };
+                    if bits & 0x88 != 0 {
+                        used_acc.push(it.index);
+                    }
+                    p.rect_stroke(icon, 5.0, egui::Stroke::new(1.5, Color32::from_rgb(120, 200, 255)), egui::StrokeKind::Inside);
+                    match v.icons.get(&it.id) {
+                        Some(t) => {
+                            p.image(t.id(), egui::Rect::from_center_size(icon.center(), Vec2::splat(28.0)), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                        }
+                        None => {
+                            p.text(icon.center(), egui::Align2::CENTER_CENTER, "?", egui::FontId::proportional(16.0), Color32::from_gray(150));
+                        }
+                    }
+                    let mut name = item_name(v.db, it);
+                    if name.chars().count() > 18 {
+                        name = name.chars().take(17).collect::<String>() + "…";
+                    }
+                    p.text(text_at, align, name, egui::FontId::proportional(12.5), crate::classic::ink(Color32::WHITE));
+                    let resp = ui.interact(cell, ui.scope_id().with(("doll", bits)), egui::Sense::click()).on_hover_ui(|ui| item_tooltip(ui, v.db, it));
+                    if resp.hovered() {
+                        p.rect_filled(cell, 5.0, Color32::from_rgba_unmultiplied(120, 150, 230, 30));
+                    }
+                    if resp.secondary_clicked() {
+                        action = Some(UiAction::ItemInfo { id: it.id, refine: it.refine, cards: it.cards });
+                    }
+                    if resp.double_clicked() {
+                        action = Some(UiAction::Unequip(it.index));
+                    }
+                }
+                ui.label(RichText::new("Double-click to take off, right-click for details").size(11.0).color(crate::classic::ink(Color32::GRAY)));
             });
             self.equipment = open;
         }
