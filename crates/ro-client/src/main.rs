@@ -516,6 +516,8 @@ struct Mob {
     hp: Option<(i32, i32)>,
     /// Player-sprite appearance (None for NPCs and monsters).
     look: Option<Look>,
+    /// Players: (party, guild, guild rank) from ZC_ACK_REQNAMEALL, shown under the name.
+    titles: Option<(String, String, String)>,
     /// Drawn position (cells), eased toward the walker's.
     smooth: Option<(f32, f32)>,
     /// Player attack motion: 10, or 11 for weapons drawn only there (katars).
@@ -549,6 +551,7 @@ impl Mob {
             dying: None,
             hp: None,
             look: None,
+            titles: None,
             smooth: None,
             attack_group: 10,
             pose_len: 0.0,
@@ -1156,6 +1159,10 @@ impl App {
         if let ro_net::UnitPos::Walking { from, to } = info.pos {
             let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
             mob.walk(gat, from, to);
+        }
+        // Players: ask for their party and guild names, shown under the name.
+        if info.object_type == 0 {
+            self.send(ro_net::Command::ReqName(info.id));
         }
         tracing::debug!(id = info.id, job = info.job, name = %info.name, ?cell, "unit");
         self.units.insert(info.id, mob);
@@ -2502,6 +2509,16 @@ impl App {
             }
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
+            NameAll { id, party, guild, rank } => {
+                let titles = (party, guild, rank);
+                if id == self.account_id {
+                    if let Some(p) = self.player.as_mut() {
+                        p.titles = Some(titles);
+                    }
+                } else if let Some(m) = self.units.get_mut(&id) {
+                    m.titles = Some(titles);
+                }
+            }
             AutorunSkill { id, target, level } => {
                 // Self (and passive-flagged) skills go off at once; others wait for a target click.
                 if target & 4 != 0 || target & (1 | 2 | 16 | 32) == 0 {
@@ -4418,7 +4435,19 @@ impl App {
         for m in self.player.iter().chain(self.units.values()) {
             let shown = m.actor.alpha > 0.01 && self.world.as_ref().is_none_or(|w| w.shows_cell(m.walker.cell.0, m.walker.cell.1));
             if let (true, Some(color), Some(feet)) = (shown, m.label_color(), r.project(m.actor.pos, size)) {
-                labels.push(hud::Label { feet, text: m.name.clone(), color });
+                // As the original: "Name (Party)", then "Guild [Rank]" on a second line.
+                let mut text = m.name.clone();
+                if let Some((party, guild, rank)) = &m.titles {
+                    if !party.is_empty() {
+                        text = format!("{text} ({party})");
+                    }
+                    if !guild.is_empty() {
+                        text = if rank.is_empty() { format!("{text}
+{guild}") } else { format!("{text}
+{guild} [{rank}]") };
+                    }
+                }
+                labels.push(hud::Label { feet, text, color });
             }
         }
         let floaters: Vec<_> = self.floaters.iter().filter_map(|(pos, text, color, age)| Some((r.project(*pos, size)?, text.clone(), *color, *age))).collect();

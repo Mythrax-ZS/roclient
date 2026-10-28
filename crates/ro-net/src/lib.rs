@@ -372,6 +372,8 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_ACK_REQNAMEALL: a player's party, guild and rank names.
+    NameAll { id: u32, party: String, guild: String, rank: String },
     /// ZC_AUTORUN_SKILL: an item (itemskill) asks us to cast a skill: (id, target flags, level).
     AutorunSkill { id: u16, target: u32, level: u16 },
     /// A one-line notice the original shows in chat (map info, warp memo, cart, ammo...).
@@ -522,6 +524,8 @@ pub enum Command {
     Whisper { to: String, text: String },
     /// Show an emote (ET_* id).
     Emotion(u8),
+    /// Ask for a player's party / guild names.
+    ReqName(u32),
     /// Answer a skill or item menu.
     Menu(MenuReply),
     /// Show (true) or hide a quest in the active list.
@@ -671,6 +675,7 @@ impl MapSession {
                     Some(Command::Chat(text)) => self.send(CzChat { name, text: &text }).await?,
                     Some(Command::Whisper { to, text }) => self.send(CzWhisper { to: &to, text: &text }).await?,
                     Some(Command::Emotion(e)) => self.send(CzEmotion(e)).await?,
+                    Some(Command::ReqName(id)) => self.send(ro_proto::social::ReqName(id)).await?,
                     Some(Command::Menu(reply)) => self.send(reply).await?,
                     Some(Command::QuestActive { quest, active }) => self.send(CzActiveQuest { quest, active }).await?,
                     Some(Command::Merchant(r)) => self.send(r).await?,
@@ -785,6 +790,7 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0a30 => ro_proto::social::parse_name_all(&data).map(|(id, _, party, guild, rank)| Event::NameAll { id, party, guild, rank }),
                         0x0147 if data.len() >= 10 => Some(Event::AutorunSkill { id: u16::from_le_bytes([data[2], data[3]]), target: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), level: u16::from_le_bytes([data[8], data[9]]) }),
                         0x0179 if data.len() >= 5 => match data[4] {
                             0 => Some(Event::Identified(u16::from_le_bytes([data[2], data[3]]))),

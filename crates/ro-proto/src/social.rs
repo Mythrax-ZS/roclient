@@ -495,3 +495,19 @@ pub fn parse_clan_info(data: &[u8]) -> Option<ClanInfo> {
 pub fn parse_clan_chat(data: &[u8]) -> String {
     text_from(data, 28)
 }
+
+/// CZ_REQNAME_BYGID: ask for a unit's full name (party, guild, rank).
+pub struct ReqName(pub u32);
+
+impl Encode for ReqName {
+    fn encode(&self, d: &mut BytesMut) {
+        put_db_packet(d, "SolveCharName", &[&self.0.to_le_bytes()]);
+    }
+}
+
+/// ZC_ACK_REQNAMEALL (0x0a30): (id, name, party, guild, rank).
+pub fn parse_name_all(data: &[u8]) -> Option<(u32, String, String, String, String)> {
+    let mut b = data.get(2..102)?;
+    let id = b.get_u32_le();
+    Some((id, get_fixed_str(&mut b, 24), get_fixed_str(&mut b, 24), get_fixed_str(&mut b, 24), get_fixed_str(&mut b, 24)))
+}

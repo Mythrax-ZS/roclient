@@ -56,3 +56,4 @@ Ticked items are handled and tested in game against the local server.
 - [x] `specialeffect` (ZC_NOTIFY_EFFECT2): 110 EF_* ids matched to STR files by name; the rest (engine-drawn) still missing
 - [ ] Some NPC classes have no sprite name (e.g. 10243 4_m_drzonda01)
 - Note: `setnpcdisplay` to a monster class makes rAthena send class 0 (a Novice); the original client shows the same
+- [x] ZC_ACK_REQNAMEALL: party, guild and rank under player names
