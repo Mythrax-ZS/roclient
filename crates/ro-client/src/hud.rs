@@ -311,7 +311,7 @@ pub struct Cutin {
 }
 
 /// NPC text with ^RRGGBB colour codes. ^000000 means "default colour".
-fn npc_text(text: &str, size: f32) -> egui::text::LayoutJob {
+pub(crate) fn npc_text(text: &str, size: f32) -> egui::text::LayoutJob {
     let default = Color32::from_rgb(230, 230, 230);
     let mut job = egui::text::LayoutJob::default();
     let mut color = default;
@@ -515,4 +515,57 @@ pub fn death_window(ctx: &egui::Context, pad_hint: Option<&str>) -> bool {
             });
         });
     go
+}
+
+/// The game's mouse cursors (data\sprite\cursors.spr/act), drawn in place of the system
+/// cursor. Actions: 0 arrow, 1 talk, 4 rotate camera, 5 attack, 7 warp, 8 not allowed,
+/// 9 pick up, 10 skill target.
+pub struct CursorSprite {
+    images: Vec<egui::TextureHandle>,
+    act: ro_formats::act::Act,
+}
+
+pub mod cursor {
+    pub const ARROW: usize = 0;
+    pub const TALK: usize = 1;
+    pub const ROTATE: usize = 4;
+    pub const ATTACK: usize = 5;
+    pub const PICK_UP: usize = 9;
+    pub const TARGET: usize = 10;
+}
+
+impl CursorSprite {
+    pub fn load(ctx: &egui::Context, vfs: &ro_vfs::Vfs) -> Option<Self> {
+        let spr = ro_formats::spr::Spr::parse(&vfs.read(r"data\sprite\cursors.spr").ok()??).ok()?;
+        let act = ro_formats::act::Act::parse(&vfs.read(r"data\sprite\cursors.act").ok()??).ok()?;
+        let (indexed, rgba) = spr.images(None);
+        let images = indexed
+            .into_iter()
+            .chain(rgba)
+            .enumerate()
+            .map(|(i, img)| {
+                let color = egui::ColorImage::from_rgba_premultiplied([img.width as usize, img.height as usize], &img.pixels);
+                ctx.load_texture(format!("cursor{i}"), color, egui::TextureOptions::NEAREST)
+            })
+            .collect();
+        Some(Self { images, act })
+    }
+
+    /// Draws cursor `action` with its hotspot at `pos` (UI points), `time` seconds in.
+    pub fn draw(&self, ctx: &egui::Context, pos: egui::Pos2, action: usize, time: f64) {
+        let Some(a) = self.act.actions.get(action).or_else(|| self.act.actions.first()) else { return };
+        if a.frames.is_empty() {
+            return;
+        }
+        let frame = &a.frames[(time * 1000.0 / a.delay_ms.max(1.0) as f64) as usize % a.frames.len()];
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Debug, egui::Id::unique("game cursor")));
+        for l in &frame.layers {
+            let Some(tex) = usize::try_from(l.sprite).ok().and_then(|i| self.images.get(i)) else { continue };
+            let size = tex.size_vec2();
+            let min = pos + Vec2::new(l.x as f32, l.y as f32) - size / 2.0;
+            let uv = if l.mirror { egui::Rect::from_min_max(egui::pos2(1.0, 0.0), egui::pos2(0.0, 1.0)) } else { egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)) };
+            painter.image(tex.id(), egui::Rect::from_min_size(min, size), uv, Color32::WHITE);
+        }
+        ctx.request_repaint();
+    }
 }

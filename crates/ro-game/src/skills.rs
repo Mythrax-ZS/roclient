@@ -9,6 +9,8 @@ use ro_formats::lub::{self, Value};
 pub struct SkillNames {
     /// Internal name (as the server sends it) -> display name.
     names: HashMap<String, String>,
+    /// Internal name -> description lines (skilldescript.lub; may hold ^RRGGBB colour codes).
+    descriptions: HashMap<String, Vec<String>>,
 }
 
 impl SkillNames {
@@ -24,7 +26,23 @@ impl SkillNames {
                 Some((internal, name))
             })
             .collect();
-        Ok(Self { names })
+        Ok(Self { names, descriptions: HashMap::new() })
+    }
+
+    /// Adds descriptions from skilldescript.lub (`SKILL_DESCRIPT[SKID.X] = { "line", ... }`).
+    pub fn add_descriptions(&mut self, data: &[u8]) -> anyhow::Result<()> {
+        let chunk = lub::eval(data)?;
+        let list = chunk.globals.get("SKILL_DESCRIPT").ok_or_else(|| anyhow::anyhow!("no SKILL_DESCRIPT"))?;
+        for (k, t) in chunk.entries(list) {
+            let Some(internal) = k.as_str() else { continue };
+            let lines = chunk.entries(t).iter().filter_map(|(_, v)| v.as_str().map(str::to_string)).collect();
+            self.descriptions.insert(internal.to_string(), lines);
+        }
+        Ok(())
+    }
+
+    pub fn description(&self, internal: &str) -> Option<&[String]> {
+        self.descriptions.get(internal).map(Vec::as_slice)
     }
 
     pub fn len(&self) -> usize {

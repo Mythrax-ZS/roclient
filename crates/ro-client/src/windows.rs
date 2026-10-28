@@ -57,6 +57,7 @@ pub struct View<'a> {
     pub stats: Option<&'a Stats>,
     pub skills: &'a [Skill],
     pub skill_names: &'a dyn Fn(&str) -> String,
+    pub skill_info: Option<&'a ro_game::skills::SkillNames>,
     pub skill_points: i64,
     pub weight: (i64, i64),
     pub zeny: i64,
@@ -434,21 +435,37 @@ impl Windows {
                 }
                 egui::Grid::new("skills").num_columns(4).spacing(Vec2::new(8.0, 4.0)).show(ui, |ui| {
                     for s in v.skills {
-                        match v.skill_icons.get(&s.id) {
-                            Some(t) => {
-                                let icon = ui.add(egui::Image::new((t.id(), Vec2::splat(24.0))).sense(egui::Sense::click_and_drag()));
-                                if s.level > 0 && s.target != 0 {
-                                    icon.dnd_set_drag_payload(Hotkey { skill: true, id: s.id as u32, count: s.level as i16 });
-                                }
-                            }
-                            None => {
-                                ui.allocate_exact_size(Vec2::splat(24.0), egui::Sense::hover());
-                            }
-                        }
                         let name = (v.skill_names)(&s.name);
                         let usable = s.level > 0 && s.target != 0;
+                        // Hovering the icon or name shows the skill's description; double-clicking
+                        // either uses it, as in the original skill window.
+                        let tooltip = |ui: &mut egui::Ui| {
+                            ui.set_max_width(360.0);
+                            ui.label(RichText::new(&name).strong());
+                            ui.label(RichText::new(format!("Lv {}   SP {}   Range {}", s.level, s.sp, s.range)).color(Color32::GRAY));
+                            if let Some(lines) = v.skill_info.and_then(|i| i.description(&s.name)) {
+                                ui.separator();
+                                for line in lines {
+                                    ui.label(crate::hud::npc_text(line, 12.5));
+                                }
+                            }
+                            if usable {
+                                ui.separator();
+                                ui.label(RichText::new("Double-click to use, or drag to the shortcut bar").color(Color32::GRAY).size(11.5));
+                            }
+                        };
+                        let icon = match v.skill_icons.get(&s.id) {
+                            Some(t) => ui.add(egui::Image::new((t.id(), Vec2::splat(24.0))).sense(egui::Sense::click_and_drag())),
+                            None => ui.allocate_exact_size(Vec2::splat(24.0), egui::Sense::click()).1,
+                        };
+                        if usable {
+                            icon.dnd_set_drag_payload(Hotkey { skill: true, id: s.id as u32, count: s.level as i16 });
+                        }
                         let label = ui.add(egui::Label::new(RichText::new(&name)).sense(egui::Sense::click()));
-                        if usable && label.on_hover_text("Double-click to use").double_clicked() {
+                        let clicked = icon.double_clicked() || label.double_clicked();
+                        icon.on_hover_ui(tooltip);
+                        label.on_hover_ui(tooltip);
+                        if usable && clicked {
                             action = Some(UiAction::UseSkill(s.id));
                         }
                         ui.label(format!("Lv {}", s.level));

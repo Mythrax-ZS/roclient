@@ -716,6 +716,9 @@ struct App {
     renderer: Option<ro_render::Renderer>,
     /// Right mouse button held: dragging rotates the camera.
     rotating: bool,
+    cursor_sprite: Option<hud::CursorSprite>,
+    /// Which cursor to show (hud::cursor), from what is under the mouse.
+    cursor_action: usize,
     cursor: Option<(f64, f64)>,
     fps: FpsCounter,
     egui_ctx: egui::Context,
@@ -1613,6 +1616,26 @@ impl App {
     }
 
     /// The player or a unit by id.
+    /// The cursor for what is under the mouse, as the original client shows it.
+    fn hover_cursor(&self) -> usize {
+        use hud::cursor::*;
+        if self.rotating {
+            return ROTATE;
+        }
+        if self.aiming.is_some() {
+            return TARGET;
+        }
+        if self.cursor.is_none() || self.egui_ctx.is_pointer_over_egui() {
+            return ARROW;
+        }
+        match self.pick_unit().and_then(|id| self.units.get(&id)).map(|m| m.kind) {
+            Some(5) => ATTACK,
+            Some(1 | 6) => TALK,
+            _ if self.pick_floor_item().is_some() => PICK_UP,
+            _ => ARROW,
+        }
+    }
+
     /// Back on our feet: respawned at the save point or resurrected.
     fn revive(&mut self) {
         if !std::mem::take(&mut self.dead) {
@@ -2090,6 +2113,7 @@ impl App {
         let dt = (now - self.last_tick).as_secs_f32() * 1000.0;
         self.last_tick = now;
         self.pad_tick(dt);
+        self.cursor_action = self.hover_cursor();
 
         // `--do a,b,c`: scripted actions once the inventory has arrived (tests).
         // Scripted helpers for two-client tests: accept requests, run a trade to completion.
@@ -2427,6 +2451,7 @@ impl App {
                 stats: self.stats.as_ref(),
                 skills: &self.skills,
                 skill_names: &skill_names,
+                skill_info: Some(&self.skill_names),
                 skill_points: self.hud.status.skill_points,
                 weight: (self.hud.status.weight, self.hud.status.max_weight),
                 zeny: self.hud.status.zeny,
@@ -2468,6 +2493,10 @@ impl App {
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars);
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
                     hud::show_minimap(ui.ctx(), map, &map_name, me, &dots);
+                }
+                if let (Some(c), Some((x, y))) = (self.cursor_sprite.as_ref(), self.cursor) {
+                    let time = ui.ctx().input(|i| i.time);
+                    c.draw(ui.ctx(), egui::pos2(x as f32 / ppp, y as f32 / ppp), self.cursor_action, time);
                 }
                 if self.dead {
                     let hint = self.pad.in_use().then_some(if self.pad.playstation { "Cross" } else { "A" });
@@ -2626,6 +2655,10 @@ impl ApplicationHandler for App {
             .with_min_inner_size(winit::dpi::LogicalSize::new(640.0, 360.0))
             .with_visible(self.capture.is_none());
         let window = Arc::new(el.create_window(attrs).unwrap());
+        // The game draws its own cursors (hud::CursorSprite).
+        if self.cursor_sprite.is_some() && self.capture.is_none() {
+            window.set_cursor_visible(false);
+        }
         let backends = ro_render::parse_backends(&self.backend);
         match pollster::block_on(ro_render::Renderer::new(window.clone(), backends, self.msaa)) {
             Ok(mut r) => {
@@ -2921,6 +2954,8 @@ fn main() -> anyhow::Result<()> {
         window: None,
         renderer: None,
         rotating: false,
+        cursor_sprite: None,
+        cursor_action: 0,
         cursor: None,
         fps: FpsCounter::default(),
         egui_ctx: egui::Context::default(),
@@ -2930,6 +2965,7 @@ fn main() -> anyhow::Result<()> {
     };
     app.class_names = app.vfs.as_ref().map(load_class_names).unwrap_or_default();
     app.ui_scale = app.settings.ui_scale;
+    app.cursor_sprite = app.vfs.as_ref().and_then(|v| hud::CursorSprite::load(&app.egui_ctx, v));
     // Captures and headless runs stay silent.
     if app.capture.is_none() {
         app.audio = app.vfs.as_ref().and_then(|v| audio::Audio::new(v, app.settings.bgm_volume, app.settings.sfx_volume));
@@ -2957,6 +2993,11 @@ fn main() -> anyhow::Result<()> {
             Some(Ok(s)) => app.skill_names = s,
             Some(Err(e)) => tracing::warn!("skillinfolist: {e:#}"),
             None => tracing::warn!("skillinfolist.lub not found"),
+        }
+        if let Some(d) = read(r"data\luafiles514\lua files\skillinfoz\skilldescript.lub") {
+            if let Err(e) = app.skill_names.add_descriptions(&d) {
+                tracing::warn!("skilldescript: {e:#}");
+            }
         }
     }
     event_loop.run_app(&mut app)?;
