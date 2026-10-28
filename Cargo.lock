@@ -2526,6 +2526,7 @@ dependencies = [
  "egui",
  "egui-winit",
  "encoding_rs",
+ "flate2",
  "gilrs",
  "glam",
  "image",
