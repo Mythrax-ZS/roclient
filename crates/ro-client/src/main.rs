@@ -21,6 +21,7 @@ mod screens;
 mod ai;
 mod booking;
 mod clan;
+mod navigation;
 mod grade;
 mod buffs;
 mod chatrooms;
@@ -814,6 +815,9 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    navi: navigation::Navigation,
+    /// A walk the navigation window asked for (done outside the UI pass).
+    navi_walk: Option<(u16, u16)>,
     grade: grade::Grade,
     /// Chat rooms.
     rooms: chatrooms::ChatRooms,
@@ -1494,6 +1498,12 @@ impl App {
             }
             ClanInfo(info) => self.clan.info = Some(info),
             ClanOnline(on, max) => self.clan.online = Some((on, max)),
+            Navigate { map, x, y } => {
+                self.navi.ensure_loaded(self.vfs.as_ref());
+                let cell = (x > 0 && y > 0).then_some((x, y));
+                let label = match cell { Some((x, y)) => format!("{map} ({x}, {y})"), None => map.clone() };
+                self.navi.go(&map, cell, label);
+            }
             ClanLeft => {
                 self.clan.left();
                 self.hud.push_chat(ro_net::ChatKind::System, "You left your clan.".into());
@@ -2833,6 +2843,10 @@ impl App {
             "c" => self.toggle_cash_shop(),
             "y" => self.progress.open = !self.progress.open,
             "clan" => self.clan.open = !self.clan.open,
+            "navi" => {
+                self.navi.ensure_loaded(self.vfs.as_ref());
+                self.navi.open = !self.navi.open;
+            }
             "n" => {
                 self.booking.open = !self.booking.open;
                 if self.booking.open {
@@ -3087,6 +3101,23 @@ impl App {
                     _ => None,
                 },
             };
+            // /navi map [x/y]: guide there, as the original client; /navi alone opens the window.
+            if let Some(rest) = text.trim().strip_prefix("/navi") {
+                self.navi.ensure_loaded(self.vfs.as_ref());
+                let mut parts = rest.split(|c: char| c == ' ' || c == '/' || c == ',').filter(|s| !s.is_empty());
+                match parts.next() {
+                    Some(map) => {
+                        let cell = match (parts.next().and_then(|x| x.parse().ok()), parts.next().and_then(|y| y.parse().ok())) {
+                            (Some(x), Some(y)) => Some((x, y)),
+                            _ => None,
+                        };
+                        let label = match cell { Some((x, y)) => format!("{map} ({x}, {y})"), None => map.to_string() };
+                        self.navi.go(map, cell, label);
+                    }
+                    None => self.navi.open = true,
+                }
+                return;
+            }
             if let Some(r) = ignore {
                 if let ro_net::IgnoreRequest::Player { name, block } = &r {
                     self.ignore_pending = Some((name.clone(), *block));
@@ -3621,6 +3652,25 @@ impl App {
                         }
                         None
                     }
+                    // navi:map:x:y guides there; navigo walks to the next stop.
+                    Some(("navi", spec)) => {
+                        let f: Vec<&str> = spec.split(':').collect();
+                        self.navi.ensure_loaded(self.vfs.as_ref());
+                        let cell = match (f.get(1).and_then(|x| x.parse().ok()), f.get(2).and_then(|y| y.parse().ok())) {
+                            (Some(x), Some(y)) => Some((x, y)),
+                            _ => None,
+                        };
+                        self.navi.go(f[0], cell, f[0].to_string());
+                        None
+                    }
+                    Some(("navigo", _)) => {
+                        let map = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
+                        if let Some(p) = self.player.as_ref() {
+                            self.navi.update(&map, (p.walker.cell.0 as u16, p.walker.cell.1 as u16));
+                        }
+                        self.navi_walk = self.navi.waypoint(&map);
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -4011,6 +4061,13 @@ impl App {
         if self.windows.equipment {
             self.refresh_portrait();
         }
+        if let (Some(w), Some(p)) = (self.world.as_ref(), self.player.as_ref()) {
+            let (map, me) = (w.name.clone(), (p.walker.cell.0 as u16, p.walker.cell.1 as u16));
+            self.navi.update(&map, me);
+        }
+        if let Some(cell) = self.navi_walk.take() {
+            self.request_walk(cell);
+        }
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         r.actors.clear();
         r.warps = self
@@ -4289,7 +4346,7 @@ impl App {
                 }
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars);
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
-                    hud::show_minimap(ui.ctx(), map, &map_name, me, &dots);
+                    hud::show_minimap(ui.ctx(), map, &map_name, me, &dots, self.navi.waypoint(&map_name).map(|(x, y)| (x as f32, y as f32)));
                 }
                 if let Some(vfs) = self.vfs.as_ref() {
                     self.buffs.show(ui.ctx(), vfs, if self.settings.minimap && self.minimap.is_some() { 270.0 } else { 60.0 });
@@ -4362,6 +4419,9 @@ impl App {
                     v
                 };
                 self.clan.show(ui.ctx());
+                if let Some(navigation::NaviAction::Walk(x, y)) = self.navi.show(ui.ctx(), &map_name) {
+                    self.navi_walk = Some((x, y));
+                }
                 let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
                 for r in self.grade.show(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons, self.hud.status.zeny) {
                     self.queued_commands.push(ro_net::Command::Grade(r));
@@ -4904,6 +4964,8 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        navi: Default::default(),
+        navi_walk: None,
         grade: Default::default(),
         rooms: Default::default(),
         booking: Default::default(),

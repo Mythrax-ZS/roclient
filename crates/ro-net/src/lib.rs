@@ -370,6 +370,8 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// The server asks us to guide the player (script navigateto): map, cell (0 = any).
+    Navigate { map: String, x: u16, y: u16 },
     /// The grade enchant options for the chosen item.
     GradeOptions(GradeOptions),
     GradeResult { index: u16, grade: u16, result: u32 },
@@ -731,6 +733,12 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x08e2 if data.len() >= 27 => {
+                            let raw = &data[5..21];
+                            let end = raw.iter().position(|c| *c == 0).unwrap_or(raw.len());
+                            let map = String::from_utf8_lossy(&raw[..end]).trim_end_matches(".gat").to_string();
+                            Some(Event::Navigate { map, x: u16::from_le_bytes([data[21], data[22]]), y: u16::from_le_bytes([data[23], data[24]]) })
+                        }
                         // ZC_UPDATE_GDID: 0x02f7 at this PACKETVER (0x016c is the older form).
                         0x016c | 0x02f7 => {
                             let (id, master, name) = parse_belong(&data);
