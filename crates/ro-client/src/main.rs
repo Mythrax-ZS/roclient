@@ -719,6 +719,9 @@ struct App {
     cursor_sprite: Option<hud::CursorSprite>,
     /// Which cursor to show (hud::cursor), from what is under the mouse.
     cursor_action: usize,
+    /// Left button held after clicking the ground: keep walking toward the cursor.
+    mouse_walk: bool,
+    mouse_walk_ms: f32,
     cursor: Option<(f64, f64)>,
     fps: FpsCounter,
     egui_ctx: egui::Context,
@@ -1344,12 +1347,12 @@ impl App {
                     }
                     m.set_pose(Pose::Attack, 400.0);
                 }
-                self.skill_fx(skill, self.unit_pos(target));
+                self.skill_fx(skill, self.unit_pos(target), false);
             }
             SkillHit { skill, act } => {
                 let target = act.target;
                 self.act(act);
-                self.skill_fx(skill, self.unit_pos(target));
+                self.skill_fx(skill, self.unit_pos(target), true);
             }
             SkillAt { skill, src, cell } => {
                 self.casts.remove(&src);
@@ -1357,7 +1360,7 @@ impl App {
                     m.face((cell.0 as i32, cell.1 as i32));
                     m.set_pose(Pose::Attack, 400.0);
                 }
-                self.skill_fx(skill, self.cell_pos(cell));
+                self.skill_fx(skill, self.cell_pos(cell), true);
             }
             UnitOption { id, option } => {
                 // Hiding, Cloaking, Chase Walk: the original draws you faded.
@@ -1616,6 +1619,31 @@ impl App {
     }
 
     /// The player or a unit by id.
+    /// Left button held on the ground: re-aim the walk at the cursor every few frames, as
+    /// the original client does when you hold the button and point.
+    fn steer_to_cursor(&mut self, dt: f32) {
+        if !self.mouse_walk {
+            return;
+        }
+        if !self.egui_ctx.input(|i| i.pointer.primary_down()) || self.dead || self.aiming.is_some() {
+            self.mouse_walk = false;
+            return;
+        }
+        self.mouse_walk_ms -= dt;
+        if self.mouse_walk_ms > 0.0 {
+            return;
+        }
+        self.mouse_walk_ms = 150.0;
+        if self.egui_ctx.is_pointer_over_egui() {
+            return;
+        }
+        if let Some(cell) = self.pick() {
+            if self.walk_goal.as_ref().is_none_or(|g| g.cell != cell) {
+                self.request_walk(cell);
+            }
+        }
+    }
+
     /// The cursor for what is under the mouse, as the original client shows it.
     fn hover_cursor(&self) -> usize {
         use hud::cursor::*;
@@ -1662,7 +1690,9 @@ impl App {
     }
 
     /// Plays a skill's effect at `pos`, if it has one.
-    fn skill_fx(&mut self, skill: u16, pos: Option<glam::Vec3>) {
+    /// Plays a skill's effect at `pos`: its known visual, else an STR named after the skill
+    /// (AS_SONICBLOW -> sonicblow.str), else a generic hit (damage) or light (support).
+    fn skill_fx(&mut self, skill: u16, pos: Option<glam::Vec3>, damaging: bool) {
         let Some(pos) = pos else { return };
         let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
         match fx::skill_visual(skill) {
@@ -1696,7 +1726,21 @@ impl App {
                     self.sprite_fx.push((actor, ms));
                 }
             }
-            None => tracing::debug!(skill, "no effect for skill"),
+            None => {
+                let by_name = self.skill_names.internal(skill).map(|n| {
+                    let short = n.split_once('_').map_or(n, |(_, rest)| rest).to_ascii_lowercase();
+                    [short.clone(), short.replace('_', "")]
+                });
+                let asset = by_name.iter().flatten().find_map(|n| self.fx.get(r, vfs, n)).or_else(|| damaging.then(|| self.fx.get(r, vfs, "hit")).flatten());
+                if let Some(asset) = asset {
+                    r.effects.push(ro_render::Fx { asset, pos, time_ms: 0.0, looping: false, tag: 0 });
+                } else if let Some(tex) = self.fx.texture(r, vfs, "alpha_down.tga") {
+                    // Buffs and other support skills without their own effect: a soft light.
+                    let shape = ro_render::Shape::Column { radius: 0.8, height: 3.0 };
+                    r.procs.push(ro_render::ProcFx { tex, shape, pos, color: [0.45, 0.45, 0.5], time_ms: 0.0, duration_ms: 900.0 });
+                }
+                tracing::debug!(skill, name = ?self.skill_names.internal(skill), "no mapped effect; used fallback");
+            }
         }
     }
 
@@ -2114,6 +2158,7 @@ impl App {
         self.last_tick = now;
         self.pad_tick(dt);
         self.cursor_action = self.hover_cursor();
+        self.steer_to_cursor(dt);
 
         // `--do a,b,c`: scripted actions once the inventory has arrived (tests).
         // Scripted helpers for two-client tests: accept requests, run a trade to completion.
@@ -2306,7 +2351,7 @@ impl App {
             let idle = self.renderer.as_ref().is_some_and(|r| r.effects.is_empty() && r.procs.is_empty()) && self.sprite_fx.is_empty();
             if idle {
                 let pos = self.unit_pos(self.account_id).or_else(|| self.player.as_ref().map(|p| p.actor.pos));
-                self.skill_fx(id, pos);
+                self.skill_fx(id, pos, true);
             }
         }
         // Cast the skill we walked into range for (re-walks if the target moved).
@@ -2817,6 +2862,9 @@ impl ApplicationHandler for App {
                             self.pending_npc = None;
                             self.pending_pickup = None;
                             self.pending_skill = None;
+                            // Holding the button keeps steering toward the cursor.
+                            self.mouse_walk = true;
+                            self.mouse_walk_ms = 150.0;
                             self.request_walk(cell);
                         }
                     }
@@ -2956,6 +3004,8 @@ fn main() -> anyhow::Result<()> {
         rotating: false,
         cursor_sprite: None,
         cursor_action: 0,
+        mouse_walk: false,
+        mouse_walk_ms: 0.0,
         cursor: None,
         fps: FpsCounter::default(),
         egui_ctx: egui::Context::default(),
@@ -2993,6 +3043,11 @@ fn main() -> anyhow::Result<()> {
             Some(Ok(s)) => app.skill_names = s,
             Some(Err(e)) => tracing::warn!("skillinfolist: {e:#}"),
             None => tracing::warn!("skillinfolist.lub not found"),
+        }
+        if let Some(d) = read(r"data\luafiles514\lua files\skillinfoz\skillid.lub") {
+            if let Err(e) = app.skill_names.add_ids(&d) {
+                tracing::warn!("skillid: {e:#}");
+            }
         }
         if let Some(d) = read(r"data\luafiles514\lua files\skillinfoz\skilldescript.lub") {
             if let Err(e) = app.skill_names.add_descriptions(&d) {

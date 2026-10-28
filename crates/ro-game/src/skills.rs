@@ -11,6 +11,8 @@ pub struct SkillNames {
     names: HashMap<String, String>,
     /// Internal name -> description lines (skilldescript.lub; may hold ^RRGGBB colour codes).
     descriptions: HashMap<String, Vec<String>>,
+    /// Skill id -> internal name (skillid.lub), for skills that are not ours (monsters, others).
+    ids: HashMap<u16, String>,
 }
 
 impl SkillNames {
@@ -26,7 +28,7 @@ impl SkillNames {
                 Some((internal, name))
             })
             .collect();
-        Ok(Self { names, descriptions: HashMap::new() })
+        Ok(Self { names, descriptions: HashMap::new(), ids: HashMap::new() })
     }
 
     /// Adds descriptions from skilldescript.lub (`SKILL_DESCRIPT[SKID.X] = { "line", ... }`).
@@ -39,6 +41,23 @@ impl SkillNames {
             self.descriptions.insert(internal.to_string(), lines);
         }
         Ok(())
+    }
+
+    /// Adds the id table from skillid.lub (`SKID = { NV_BASIC = 1, ... }`).
+    pub fn add_ids(&mut self, data: &[u8]) -> anyhow::Result<()> {
+        let chunk = lub::eval(data)?;
+        let list = chunk.globals.get("SKID").ok_or_else(|| anyhow::anyhow!("no SKID"))?;
+        for (k, v) in chunk.entries(list) {
+            if let (Some(name), Value::Number(id)) = (k.as_str(), v) {
+                self.ids.insert(*id as u16, name.to_string());
+            }
+        }
+        Ok(())
+    }
+
+    /// Internal name (e.g. AS_GRIMTOOTH) for a skill id.
+    pub fn internal(&self, id: u16) -> Option<&str> {
+        self.ids.get(&id).map(String::as_str)
     }
 
     pub fn description(&self, internal: &str) -> Option<&[String]> {

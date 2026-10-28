@@ -127,7 +127,7 @@ pub fn misc_effect(effect: u32) -> Option<&'static str> {
 
 #[derive(Default)]
 pub struct FxLib {
-    cache: HashMap<&'static str, Option<ro_render::FxId>>,
+    cache: HashMap<String, Option<ro_render::FxId>>,
     textures: HashMap<&'static str, Option<ro_render::TexId>>,
     sprites: HashMap<&'static str, Option<ro_render::SheetId>>,
 }
@@ -162,8 +162,8 @@ impl FxLib {
     }
 
     /// The uploaded effect, loading it on first use (None if missing or unreadable).
-    pub fn get(&mut self, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, name: &'static str) -> Option<ro_render::FxId> {
-        *self.cache.entry(name).or_insert_with(|| {
+    pub fn get(&mut self, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, name: &str) -> Option<ro_render::FxId> {
+        *self.cache.entry(name.to_string()).or_insert_with(|| {
             let path = format!("data\\texture\\effect\\{name}.str");
             let str = vfs
                 .read(&path)
