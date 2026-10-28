@@ -13,6 +13,7 @@ mod jobs;
 mod merchant;
 mod preview;
 mod quests;
+mod refine;
 mod screens;
 mod buffs;
 mod emotes;
@@ -796,6 +797,7 @@ struct App {
     merchant: merchant::Merchant,
     /// The item information / card illustration window.
     item_info: iteminfo::ItemInfo,
+    refine: refine::Refine,
     /// Skills cooling down: id -> ready again at.
     cooldowns: std::collections::HashMap<u16, std::time::Instant>,
     /// When a paused (`wait:`) test script carries on.
@@ -1333,6 +1335,30 @@ impl App {
                     _ => "The purchase failed.",
                 };
                 self.hud.push_chat(ro_net::ChatKind::System, msg.into());
+            }
+            RefineOpen => {
+                self.refine.open = true;
+                self.refine.selected = None;
+                self.windows.inventory = true;
+            }
+            RefineInfo { index, blessing, options } => {
+                let ids: Vec<u32> = options.iter().map(|o| o.material).collect();
+                self.load_icons_for(&ids);
+                self.refine.selected = Some((index, blessing, options));
+            }
+            RefineResult { result, index, refine } => {
+                let name = self.inventory.items.get(&index).and_then(|i| self.item_db.as_ref().map(|d| d.name(i.id, true))).unwrap_or_else(|| "The item".into());
+                let (msg, sound) = match result {
+                    0 => (format!("Refine succeeded: +{refine} {name}!"), "bs_refinesuccess.wav"),
+                    1 => (format!("Refine failed: {name} broke."), "bs_refinefailed.wav"),
+                    2 => (format!("Refine failed: {name} went down to +{refine}."), "bs_refinefailed.wav"),
+                    _ => (format!("Refine failed: {name} stays +{refine}."), "bs_refinefailed.wav"),
+                };
+                if let Some(it) = self.inventory.items.get_mut(&index) {
+                    it.refine = refine as u8;
+                }
+                self.play_sound(sound);
+                self.hud.push_chat(ro_net::ChatKind::System, msg);
             }
             SkillCooldown { skill, ms } => {
                 self.cooldowns.insert(skill, std::time::Instant::now() + std::time::Duration::from_millis(ms as u64));
@@ -2881,6 +2907,20 @@ impl App {
                     Some(("equip", id)) => id.parse().ok().and_then(item).map(|(index, location)| windows::UiAction::Equip { index, location }),
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some(("card", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::CardTargets(index)),
+                    // refsel:item picks equipment in the refine window; refine:material refines it.
+                    Some(("refsel", id)) => {
+                        if let Some((index, _)) = id.parse().ok().and_then(item) {
+                            self.refine.selected = Some((index, 0, vec![]));
+                            self.queued_commands.push(ro_net::Command::Refine(ro_net::RefineRequest::Select(index)));
+                        }
+                        None
+                    }
+                    Some(("refine", mat)) => {
+                        if let (Some((index, _, _)), Ok(material)) = (self.refine.selected.as_ref(), mat.parse()) {
+                            self.queued_commands.push(ro_net::Command::Refine(ro_net::RefineRequest::Refine { index: *index, material, blessing: false }));
+                        }
+                        None
+                    }
                     Some(("info", id)) => id.parse().ok().map(|id| windows::UiAction::ItemInfo { id, refine: 0, cards: [0; 4] }),
                     // Merchant tests: cartwin opens the cart; vend:price fills the shop
                     // set-up with everything in the cart; browse:aid looks in a shop; buyone
@@ -3382,6 +3422,10 @@ impl App {
                     }
                 }
                 self.item_info.show(ui.ctx(), self.item_db.as_ref());
+                let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
+                if let Some(req) = self.refine.show(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons, self.hud.status.zeny) {
+                    self.queued_commands.push(ro_net::Command::Refine(req));
+                }
                 let zeny = self.hud.status.zeny;
                 if let Some(req) = self.merchant.show(ui.ctx(), self.item_db.as_ref(), &self.icons, zeny) {
                     self.queued_commands.push(ro_net::Command::Merchant(req));
@@ -3919,6 +3963,7 @@ fn main() -> anyhow::Result<()> {
         quests: Default::default(),
         merchant: Default::default(),
         item_info: Default::default(),
+        refine: Default::default(),
         cooldowns: Default::default(),
         script_resume: None,
         pad: gamepad::Pad::new(),

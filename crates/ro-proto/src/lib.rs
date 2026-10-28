@@ -10,6 +10,7 @@ pub mod items;
 pub mod menus;
 pub mod merchant;
 pub mod quests;
+pub mod refine;
 pub mod packets;
 pub mod social;
 pub mod table;

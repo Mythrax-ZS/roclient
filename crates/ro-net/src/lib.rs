@@ -19,6 +19,8 @@ use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
 pub use ro_proto::quests::{Objective, Quest};
 pub use ro_proto::merchant::{MerchantRequest, VendItem};
+pub use ro_proto::refine::{RefineOption, RefineRequest};
+use ro_proto::refine::*;
 use ro_proto::merchant::*;
 use ro_proto::quests::*;
 use ro_proto::menus::*;
@@ -309,6 +311,10 @@ pub enum Event {
     Sold { index: u16, amount: u16, zeny: i32 },
     /// Buying from a shop: 0 ok, 1 not enough zeny, 2 overweight, 4 out of stock...
     ShopBuyResult(u8),
+    /// The refine window opened (an NPC or @refineui).
+    RefineOpen,
+    RefineInfo { index: u16, blessing: u8, options: Vec<RefineOption> },
+    RefineResult { result: u16, index: u16, refine: u16 },
     /// A pick-one menu from a skill or item.
     Menu(Menu),
     /// ZC_ACK_REQMAKINGITEM: making an item (ok, item id).
@@ -375,6 +381,7 @@ pub enum Command {
     QuestActive { quest: u32, active: bool },
     /// Cart and player-shop requests.
     Merchant(MerchantRequest),
+    Refine(RefineRequest),
     /// Login screen.
     Login { user: String, pass: String },
     SelectServer(usize),
@@ -503,6 +510,7 @@ impl MapSession {
                     Some(Command::Menu(reply)) => self.send(reply).await?,
                     Some(Command::QuestActive { quest, active }) => self.send(CzActiveQuest { quest, active }).await?,
                     Some(Command::Merchant(r)) => self.send(r).await?,
+                    Some(Command::Refine(r)) => self.send(r).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
@@ -657,6 +665,9 @@ impl MapSession {
                         0x0b3d => parse_shop(&data).map(|(seller, shop, items)| Event::Shop { seller, shop, items }),
                         0x012d if data.len() >= 4 => Some(Event::ShopSetup(u16::from_le_bytes([data[2], data[3]]))),
                         0x0b40 => Some(Event::MyShop(parse_my_shop(&data))),
+                        0x0aa0 => Some(Event::RefineOpen),
+                        0x0aa2 => parse_refine_info(&data).map(|(index, blessing, options)| Event::RefineInfo { index, blessing, options }),
+                        0x0188 => parse_refine_result(&data).map(|(result, index, refine)| Event::RefineResult { result, index, refine }),
                         0x09e5 => parse_sold(&data).map(|(index, amount, zeny)| Event::Sold { index, amount, zeny }),
                         0x0135 if data.len() >= 7 => Some(Event::ShopBuyResult(data[6])),
                         0x0b09 | 0x0b39 if data.get(4) == Some(&0) => {
