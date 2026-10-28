@@ -11,6 +11,7 @@ mod hud;
 mod jobs;
 mod preview;
 mod screens;
+mod emotes;
 mod settings;
 mod skilltree;
 mod splash;
@@ -776,6 +777,12 @@ struct App {
     sprite_fx: Vec<(ro_render::Actor, f32)>,
     /// When each unit last showed an area burst (one per cast, not per monster hit).
     burst_at: std::collections::HashMap<u32, std::time::Instant>,
+    /// Emotes showing over units: id -> (ET_* id, ms shown).
+    emotes: std::collections::HashMap<u32, (u8, f32)>,
+    /// Who last whispered us, for /r.
+    last_whisper_from: Option<String>,
+    /// Chat lines typed this frame, sent at the start of the next.
+    queued_chat: Vec<String>,
     pad: gamepad::Pad,
     /// The unit the controller acts on (highlighted), the walk direction being held and
     /// time until the walk is re-aimed.
@@ -1141,10 +1148,10 @@ impl App {
                 s.base_exp = character.base_exp;
                 s.zeny = character.zeny as i64;
                 self.spawn_player(&look, (x, y), dir as usize, character.speed);
-                if let (Some(text), Some((tx, _))) = (self.say_on_enter.take(), self.net.as_ref()) {
+                if let Some(text) = self.say_on_enter.take() {
                     // Several lines separated by "|" (e.g. a batch of GM commands).
                     for line in text.split('|') {
-                        let _ = tx.send(ro_net::Command::Chat(line.trim().to_string()));
+                        self.queued_chat.push(line.trim().to_string());
                     }
                 }
                 if let Some(cell) = self.walk_on_enter.take() {
@@ -1192,7 +1199,25 @@ impl App {
                     }
                 }
             }
-            Chat { kind, text, .. } => self.hud.push_chat(kind, text),
+            Chat { kind, text, .. } => {
+                if let (ro_net::ChatKind::Whisper, Some(name)) = (kind, text.strip_prefix("(From ").and_then(|t| t.split_once(") : ")).map(|(n, _)| n.to_string())) {
+                    self.last_whisper_from = Some(name);
+                    self.play_sound("_chat_whisper.wav");
+                }
+                self.hud.push_chat(kind, text);
+            }
+            Emotion { id, kind } => {
+                self.emotes.insert(id, (kind, 0.0));
+            }
+            WhisperResult(code) => {
+                let why = match code {
+                    0 => return,
+                    1 => "That character is not online.",
+                    2 => "Your whisper was ignored.",
+                    _ => "That character is ignoring all whispers.",
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, why.into());
+            }
             Npc(d) => self.npc_dialog(d),
             Vanish { id, reason } => {
                 self.warps.remove(&id);
@@ -2174,6 +2199,60 @@ impl App {
         }
     }
 
+    /// Sends a chat line, handling the client's own commands (whispers, emotes, /where...).
+    fn submit_chat(&mut self, text: String) {
+        let Some((tx, _)) = self.net.as_ref() else { return };
+            // "/p text" goes to the party, "/g text" to the guild.
+            let speaker = self.hud.status.name.clone();
+            let mut note = None;
+            let cmd = match text.split_once(' ') {
+                Some(("/p", rest)) => Some(ro_net::Command::Party(ro_net::PartyRequest::Chat { speaker, text: rest.to_string() })),
+                Some(("/g", rest)) => Some(ro_net::Command::Party(ro_net::PartyRequest::GuildChat { speaker, text: rest.to_string() })),
+                // /guild "Name": found a guild, as in the original client.
+                Some(("/guild", rest)) => Some(ro_net::Command::Guild(ro_net::GuildRequest::Create { char_id: self.char_id, name: rest.trim().trim_matches('"').to_string() })),
+                // /r text: answer whoever whispered last.
+                Some(("/r", rest)) => match self.last_whisper_from.clone() {
+                    Some(to) => {
+                        note = Some((ro_net::ChatKind::Whisper, format!("(To {to}) : {rest}")));
+                        Some(ro_net::Command::Whisper { to, text: rest.to_string() })
+                    }
+                    None => {
+                        note = Some((ro_net::ChatKind::System, "Nobody has whispered you yet.".into()));
+                        None
+                    }
+                },
+                _ if text.starts_with("/w ") || text.starts_with("/whisper ") => match emotes::whisper(&text) {
+                    Some((to, msg)) => {
+                        note = Some((ro_net::ChatKind::Whisper, format!("(To {to}) : {msg}")));
+                        Some(ro_net::Command::Whisper { to, text: msg })
+                    }
+                    None => {
+                        note = Some((ro_net::ChatKind::System, "Usage: /w Name message  (quote names with spaces)".into()));
+                        None
+                    }
+                },
+                _ => match emotes::command(&text) {
+                    Some(e) => Some(ro_net::Command::Emotion(e)),
+                    // Commands the client handles itself.
+                    None if text == "/sit" || text == "/stand" => Some(ro_net::Command::Sit(text == "/sit")),
+                    None if text == "/where" => {
+                        let map = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
+                        if let Some((x, y)) = self.player.as_ref().map(|p| p.walker.cell) {
+                            note = Some((ro_net::ChatKind::System, format!("{map} {x}, {y}")));
+                        }
+                        None
+                    }
+                    None => Some(ro_net::Command::Chat(text)),
+                },
+            };
+            if let Some(cmd) = cmd {
+                let _ = tx.send(cmd);
+            }
+            if let Some((kind, line)) = note {
+                self.hud.push_chat(kind, line);
+            }
+    }
+
     /// Units the controller can target, nearest first: monsters and named NPCs in reach, or
     /// other players while aiming a support skill.
     fn pad_candidates(&self, players: bool) -> Vec<u32> {
@@ -2721,6 +2800,9 @@ impl App {
             if args.iter().any(|a| a == "--skills-win") { self.windows.skills = true; self.windows.skill_list = args.iter().any(|a| a == "--skill-list"); self.windows.skill_tab = args.iter().skip_while(|a| *a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()); } else { self.windows.guild = true; }
             self.guild.start_tab = std::env::args().skip_while(|a| a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()).unwrap_or(0);
         }
+        for text in std::mem::take(&mut self.queued_chat) {
+            self.submit_chat(text);
+        }
         for c in std::mem::take(&mut self.queued_commands) {
             self.send(c);
         }
@@ -2890,6 +2972,33 @@ impl App {
             }
             self.sprite_fx.retain(|(_, left)| *left > 0.0);
             r.actors.extend(self.sprite_fx.iter().map(|(a, _)| a.clone()));
+            // Emotes over heads (sprite\이팩트\emotion, one action per ET_* id).
+            if let (false, Some(vfs)) = (self.emotes.is_empty(), self.vfs.as_ref()) {
+                if let Some(sheet) = self.fx.sprite(r, vfs, "emotion") {
+                    for (id, (kind, t)) in &mut self.emotes {
+                        *t += dt;
+                        let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) };
+                        let Some(m) = m.filter(|_| *t < r.action_ms(sheet, *kind as usize).max(1500.0)) else {
+                            *t = f32::MAX;
+                            continue;
+                        };
+                        r.actors.push(ro_render::Actor {
+                            pos: m.actor.pos + glam::Vec3::Y * ro_render::CELL * 2.8,
+                            body: sheet,
+                            head: None,
+                            headgear: vec![],
+                            weapon: vec![],
+                            shadow: None,
+                            action: *kind as usize / 8,
+                            dir: ro_render::Dir::from_index(*kind as usize),
+                            time_ms: *t,
+                            once: true,
+                            alpha: 1.0,
+                        });
+                    }
+                    self.emotes.retain(|_, (_, t)| *t < f32::MAX);
+                }
+            }
             // Items on the ground: their sprite at the cell plus sub-cell offset.
             for (f, actor) in self.floor.values() {
                 if let Some(mut a) = actor.clone() {
@@ -3150,17 +3259,8 @@ impl App {
             state.handle_platform_output(window, platform);
             let primitives = self.egui_ctx.tessellate(out.shapes, out.pixels_per_point);
             r.set_ui(ro_render::UiFrame { primitives, textures: out.textures_delta, pixels_per_point: out.pixels_per_point });
-            if let (Some(text), Some((tx, _))) = (sent, self.net.as_ref()) {
-                // "/p text" goes to the party, "/g text" to the guild.
-                let speaker = self.hud.status.name.clone();
-                let cmd = match text.split_once(' ') {
-                    Some(("/p", rest)) => ro_net::Command::Party(ro_net::PartyRequest::Chat { speaker, text: rest.to_string() }),
-                    Some(("/g", rest)) => ro_net::Command::Party(ro_net::PartyRequest::GuildChat { speaker, text: rest.to_string() }),
-                    // /guild "Name": found a guild, as in the original client.
-                    Some(("/guild", rest)) => ro_net::Command::Guild(ro_net::GuildRequest::Create { char_id: self.char_id, name: rest.trim().trim_matches('"').to_string() }),
-                    _ => ro_net::Command::Chat(text),
-                };
-                let _ = tx.send(cmd);
+            if let Some(text) = sent {
+                self.queued_chat.push(text);
             }
         }
 
@@ -3356,6 +3456,12 @@ impl ApplicationHandler for App {
                             self.settings.save();
                         }
                         "o" => self.windows.settings = !self.windows.settings,
+                        // Alt+1..Alt+0: the emote shortcuts.
+                        d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => {
+                            if let Some((tx, _)) = self.net.as_ref() {
+                                let _ = tx.send(ro_net::Command::Emotion(emotes::shortcut(d.as_bytes()[0] - b'0')));
+                            }
+                        }
                         _ => {}
                     },
                     _ => {}
@@ -3545,6 +3651,9 @@ fn main() -> anyhow::Result<()> {
         fx: Default::default(),
         sprite_fx: vec![],
         burst_at: Default::default(),
+        emotes: Default::default(),
+        last_whisper_from: None,
+        queued_chat: vec![],
         pad: gamepad::Pad::new(),
         pad_target: None,
         pad_dir: None,

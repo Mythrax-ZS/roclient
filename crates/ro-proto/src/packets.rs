@@ -602,6 +602,37 @@ impl Encode for CzChat<'_> {
     }
 }
 
+/// CZ_WHISPER (WisMessage): a private message to a character by name.
+pub struct CzWhisper<'a> {
+    pub to: &'a str,
+    pub text: &'a str,
+}
+
+impl Encode for CzWhisper<'_> {
+    fn encode(&self, d: &mut BytesMut) {
+        let (to, _, _) = EUC_KR.encode(self.to);
+        let (msg, _, _) = EUC_KR.encode(self.text);
+        d.put_u16_le(client_packet("WisMessage").opcode);
+        d.put_u16_le((28 + msg.len() + 1) as u16);
+        let mut name = [0u8; 24];
+        let n = to.len().min(23);
+        name[..n].copy_from_slice(&to[..n]);
+        d.put_slice(&name);
+        d.put_slice(&msg);
+        d.put_u8(0);
+    }
+}
+
+/// CZ_REQ_EMOTION: show an emote over our head.
+pub struct CzEmotion(pub u8);
+
+impl Encode for CzEmotion {
+    fn encode(&self, d: &mut BytesMut) {
+        d.put_u16_le(0x00bf);
+        d.put_u8(self.0);
+    }
+}
+
 #[cfg(test)]
 mod chat_tests {
     use super::*;

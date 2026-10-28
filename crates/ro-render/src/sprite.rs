@@ -49,6 +49,14 @@ pub enum Dir {
     SE,
 }
 
+impl Dir {
+    /// The direction for an ACT index's low three bits (flat sheets such as emotes use
+    /// `action * 8 + dir` as a plain action number).
+    pub fn from_index(i: usize) -> Dir {
+        [Dir::S, Dir::SW, Dir::W, Dir::NW, Dir::N, Dir::NE, Dir::E, Dir::SE][i % 8]
+    }
+}
+
 /// One actor to draw this frame.
 #[derive(Clone, Debug)]
 pub struct Actor {

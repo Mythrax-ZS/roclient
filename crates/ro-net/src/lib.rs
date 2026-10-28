@@ -270,6 +270,10 @@ pub enum Event {
     SkillAt { skill: u16, src: u32, cell: (u16, u16) },
     /// A unit's status option bits changed (hidden, cloaked, ...).
     UnitOption { id: u32, option: u32 },
+    /// ZC_EMOTION: a unit showed an emote.
+    Emotion { id: u32, kind: u8 },
+    /// ZC_ACK_WHISPER: 0 sent, 1 not online, 2 ignored by them, 3 they ignore everyone.
+    WhisperResult(u8),
     /// ZC_ACH_UPDATE: an achievement's progress changed (id, now complete).
     Achievement { id: u32, completed: bool },
     /// A lasting ground effect (Sanctuary, Fire Wall, traps...) appeared or ended.
@@ -321,6 +325,10 @@ pub enum Command {
     Npc { npc: u32, reply: NpcReply },
     /// Say something in public chat.
     Chat(String),
+    /// A private message to a character.
+    Whisper { to: String, text: String },
+    /// Show an emote (ET_* id).
+    Emotion(u8),
     /// Login screen.
     Login { user: String, pass: String },
     SelectServer(usize),
@@ -444,6 +452,8 @@ impl MapSession {
                     None => return Ok(MapExit::Closed),
                     Some(Command::Move { x, y }) => self.send(CzRequestMove { x, y, dir: 0 }).await?,
                     Some(Command::Chat(text)) => self.send(CzChat { name, text: &text }).await?,
+                    Some(Command::Whisper { to, text }) => self.send(CzWhisper { to: &to, text: &text }).await?,
+                    Some(Command::Emotion(e)) => self.send(CzEmotion(e)).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
@@ -649,6 +659,8 @@ impl MapSession {
                             let (skill, src, cell) = parse_ground_skill(&data);
                             Some(Event::SkillAt { skill, src, cell })
                         }
+                        0x00c0 if data.len() >= 7 => Some(Event::Emotion { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), kind: data[6] }),
+                        0x09df if data.len() >= 3 => Some(Event::WhisperResult(data[2])),
                         0x0a24 if data.len() >= 21 => Some(Event::Achievement {
                             id: u32::from_le_bytes([data[16], data[17], data[18], data[19]]),
                             completed: data[20] != 0,
