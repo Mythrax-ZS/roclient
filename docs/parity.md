@@ -11,7 +11,7 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_CHANGE_DIRECTION; server directions (0 north) converted to sprite directions (0 south): standing units faced the wrong way
 - [x] ZC_DIALOG_TEXT_ALIGN / WINDOW_SIZE / WINDOW_POS / POS2 (ZC_SAY_DIALOG2 / WAIT_DIALOG2 are never sent by rAthena)
 - [x] ZC_MSG_COLOR, ZC_MSG_VALUE, ZC_MSG_SKILL, and every ZC_MSG id (was: only two)
-- [x] ZC_SPECIALPOPUP (Systemspopup.lub: chat and/or floating banner), ZC_SKILLMSG
+- [x] ZC_SPECIALPOPUP (System/spopup.lub: chat and/or floating banner), ZC_SKILLMSG
 - [x] ZC_REMOVE_EFFECT, ZC_EQUIPMENT_EFFECT
 - [ ] ZC_NOTIFY_EFFECT3
 - [x] ZC_NPC_MARKET_OPEN / PURCHASE_RESULT (market shops)
