@@ -37,11 +37,22 @@ fn flip(v: Vec3) -> [f32; 3] {
 
 /// Lightmap texels per slot edge (GND lightmaps are 8x8).
 const LM: u32 = 8;
+/// The useful interior of a lightmap: its outer ring duplicates the neighbouring tiles.
+const LM_IN: u32 = LM - 2;
 
-/// Packs GND lightmaps into one atlas. Slot 0 is reserved: full brightness, no color,
-/// used by models and unlit surfaces.
+/// Packs GND lightmaps into one atlas.
+///
+/// - Slots (top part): every lightmap in its own 8x8 cell, for walls. Slot 0 is reserved:
+///   full brightness, no colour, used by models and unlit surfaces.
+/// - Ground grid (below the slots): each tile's 6x6 interior placed at its map position,
+///   so filtering blends shadows smoothly across tile edges instead of showing a grid of
+///   soft squares.
 struct LightmapAtlas {
     per_row: u32,
+    /// Atlas size in texels, and the row where the ground grid starts.
+    width: u32,
+    height: u32,
+    grid_y: u32,
     image: Rgba,
 }
 
@@ -49,43 +60,118 @@ impl LightmapAtlas {
     fn build(gnd: &Gnd) -> Self {
         let slots = gnd.lightmaps.len() as u32 + 1;
         let per_row = (slots as f32).sqrt().ceil() as u32;
-        let size = per_row * LM;
-        let mut pixels = vec![0u8; (size * size * 4) as usize];
-        let mut put = |slot: u32, shadow: &[u8], color: &[u8]| {
-            let (sx, sy) = ((slot % per_row) * LM, (slot / per_row) * LM);
-            for y in 0..LM {
-                for x in 0..LM {
-                    let t = (y * LM + x) as usize;
-                    let p = (((sy + y) * size + sx + x) * 4) as usize;
-                    pixels[p..p + 3].copy_from_slice(&color[t * 3..t * 3 + 3]);
-                    pixels[p + 3] = shadow[t];
-                }
-            }
+        let slot_rows = slots.div_ceil(per_row);
+        let has_maps = gnd.lightmaps.width == LM && gnd.lightmaps.height == LM;
+        let grid_w = if has_maps { gnd.width * LM_IN } else { 0 };
+        let grid_h = if has_maps { gnd.height * LM_IN } else { 0 };
+        let width = (per_row * LM).max(grid_w);
+        let grid_y = slot_rows * LM;
+        let height = grid_y + grid_h;
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+        // Unlit by default: full shadow value (no darkening), no colour.
+        for p in pixels.chunks_exact_mut(4) {
+            p[3] = 255;
+        }
+        let mut texel = |x: u32, y: u32, shadow: u8, rgb: &[u8]| {
+            let p = ((y * width + x) * 4) as usize;
+            pixels[p..p + 3].copy_from_slice(rgb);
+            pixels[p + 3] = shadow;
         };
-        put(0, &[255; (LM * LM) as usize], &[0; (LM * LM * 3) as usize]);
-        if gnd.lightmaps.width == LM && gnd.lightmaps.height == LM {
+        if has_maps {
             for i in 0..gnd.lightmaps.len() {
                 let (shadow, color) = gnd.lightmaps.get(i).unwrap();
-                put(i as u32 + 1, shadow, color);
+                let slot = i as u32 + 1;
+                let (sx, sy) = ((slot % per_row) * LM, (slot / per_row) * LM);
+                for y in 0..LM {
+                    for x in 0..LM {
+                        let t = (y * LM + x) as usize;
+                        texel(sx + x, sy + y, shadow[t], &color[t * 3..t * 3 + 3]);
+                    }
+                }
+            }
+            for ty in 0..gnd.height {
+                for tx in 0..gnd.width {
+                    let Some(s) = gnd.cube(tx, ty).and_then(|c| gnd.surface(c.top)) else { continue };
+                    let Some((shadow, color)) = gnd.lightmaps.get(s.lightmap as usize) else { continue };
+                    for y in 0..LM_IN {
+                        for x in 0..LM_IN {
+                            let t = ((y + 1) * LM + x + 1) as usize;
+                            texel(tx * LM_IN + x, grid_y + ty * LM_IN + y, shadow[t], &color[t * 3..t * 3 + 3]);
+                        }
+                    }
+                }
             }
         }
-        Self { per_row, image: Rgba { width: size, height: size, pixels } }
+        // Baked shadows are only ~6 texels per tile, so building shadows come out as hard
+        // steps. A small blur over the ground grid gives soft, painterly edges.
+        if grid_h > 0 {
+            blur_region(&mut pixels, width, grid_y, grid_w, grid_h, 2);
+        }
+        Self { per_row, width, height, grid_y, image: Rgba { width, height, pixels } }
     }
 
-    /// Corner UVs (same order as GND surfaces) for a lightmap, inset by one texel so
+    /// Corner UVs (same order as GND surfaces) for a lightmap slot, inset by one texel so
     /// linear filtering never reads a neighbouring slot.
     fn uvs(&self, lightmap: Option<u16>) -> [[f32; 2]; 4] {
         let slot = lightmap.map_or(0, |l| l as u32 + 1);
-        let size = (self.per_row * LM) as f32;
+        let (w, h) = (self.width as f32, self.height as f32);
         let (sx, sy) = ((slot % self.per_row * LM) as f32, (slot / self.per_row * LM) as f32);
-        let (u0, u1) = ((sx + 1.0) / size, (sx + LM as f32 - 1.0) / size);
-        let (v0, v1) = ((sy + 1.0) / size, (sy + LM as f32 - 1.0) / size);
+        let (u0, u1) = ((sx + 1.0) / w, (sx + LM as f32 - 1.0) / w);
+        let (v0, v1) = ((sy + 1.0) / h, (sy + LM as f32 - 1.0) / h);
+        [[u0, v0], [u1, v0], [u0, v1], [u1, v1]]
+    }
+
+    /// Corner UVs of tile (x, y) in the continuous ground grid.
+    fn ground_uvs(&self, x: u32, y: u32) -> [[f32; 2]; 4] {
+        let (w, h) = (self.width as f32, self.height as f32);
+        let (u0, u1) = ((x * LM_IN) as f32 / w, ((x + 1) * LM_IN) as f32 / w);
+        let (v0, v1) = ((self.grid_y + y * LM_IN) as f32 / h, (self.grid_y + (y + 1) * LM_IN) as f32 / h);
         [[u0, v0], [u1, v0], [u0, v1], [u1, v1]]
     }
 
     fn white(&self) -> [f32; 2] {
-        let size = (self.per_row * LM) as f32;
-        [(LM as f32 / 2.0) / size; 2]
+        [(LM as f32 / 2.0) / self.width as f32, (LM as f32 / 2.0) / self.height as f32]
+    }
+}
+
+/// Separable box blur (radius `r`) over all four channels of a `w` x `h` block starting
+/// at row `y0` of an RGBA image `stride` texels wide.
+fn blur_region(pixels: &mut [u8], stride: u32, y0: u32, w: u32, h: u32, r: i32) {
+    let idx = |x: u32, y: u32| ((y0 + y) * stride + x) as usize * 4;
+    let mut tmp = vec![0u8; (w * h * 4) as usize];
+    let n = (2 * r + 1) as u32;
+    // Horizontal into tmp, then vertical back into pixels (edges clamp).
+    for y in 0..h {
+        for x in 0..w {
+            let mut sum = [0u32; 4];
+            for d in -r..=r {
+                let sx = (x as i32 + d).clamp(0, w as i32 - 1) as u32;
+                let p = idx(sx, y);
+                for c in 0..4 {
+                    sum[c] += pixels[p + c] as u32;
+                }
+            }
+            let t = ((y * w + x) * 4) as usize;
+            for c in 0..4 {
+                tmp[t + c] = (sum[c] / n) as u8;
+            }
+        }
+    }
+    for y in 0..h {
+        for x in 0..w {
+            let mut sum = [0u32; 4];
+            for d in -r..=r {
+                let sy = (y as i32 + d).clamp(0, h as i32 - 1) as u32;
+                let t = ((sy * w + x) * 4) as usize;
+                for c in 0..4 {
+                    sum[c] += tmp[t + c] as u32;
+                }
+            }
+            let p = idx(x, y);
+            for c in 0..4 {
+                pixels[p + c] = (sum[c] / n) as u8;
+            }
+        }
     }
 }
 
@@ -162,37 +248,56 @@ impl<'a> SceneBuilder<'a> {
             sum.normalize_or(Vec3::Y)
         };
 
+        // Tile tint colours blend across tiles at shared corners, like the original
+        // client's filtered colour map, instead of changing in hard steps.
+        let tile_color = |x: i64, y: i64| -> Option<Vec3> {
+            if x < 0 || y < 0 || x >= w || y >= h {
+                return None;
+            }
+            let s = gnd.cube(x as u32, y as u32).and_then(|c| gnd.surface(c.top))?;
+            Some(Vec3::new(s.color[2] as f32, s.color[1] as f32, s.color[0] as f32) / 255.0)
+        };
+        let smooth_color = |x: i64, y: i64, k: usize| -> [f32; 3] {
+            let (gx, gy) = (x + (k % 2) as i64, y + (k / 2) as i64);
+            let near: Vec<Vec3> = [tile_color(gx - 1, gy - 1), tile_color(gx, gy - 1), tile_color(gx - 1, gy), tile_color(gx, gy)].into_iter().flatten().collect();
+            (near.iter().sum::<Vec3>() / near.len().max(1) as f32).to_array()
+        };
         for y in 0..h {
             for x in 0..w {
                 let c = gnd.cube(x as u32, y as u32).unwrap();
                 let p = corner(c, x, y);
                 if let Some(s) = gnd.surface(c.top) {
                     let normals = [0, 1, 2, 3].map(|k| smooth(x, y, k));
-                    self.ground_quad(&tex, s, p, normals);
+                    let colors = [0, 1, 2, 3].map(|k| smooth_color(x, y, k));
+                    self.ground_quad(&tex, s, p, normals, Some((x as u32, y as u32)), Some(colors));
                 }
                 // Walls face the lower neighbour, which is the side that can be seen.
                 if let (Some(s), Some(n)) = (gnd.surface(c.front), gnd.cube(x as u32, y as u32 + 1)) {
                     let np = corner(n, x, y + 1);
                     let quad = [p[2], p[3], np[0], np[1]];
                     let facing = if p[2].y + p[3].y > np[0].y + np[1].y { Vec3::Z } else { -Vec3::Z };
-                    self.ground_quad(&tex, s, quad, [facing; 4]);
+                    self.ground_quad(&tex, s, quad, [facing; 4], None, None);
                 }
                 if let (Some(s), Some(n)) = (gnd.surface(c.right), gnd.cube(x as u32 + 1, y as u32)) {
                     let np = corner(n, x + 1, y);
                     let quad = [p[3], p[1], np[2], np[0]];
                     let facing = if p[1].y + p[3].y > np[0].y + np[2].y { Vec3::X } else { -Vec3::X };
-                    self.ground_quad(&tex, s, quad, [facing; 4]);
+                    self.ground_quad(&tex, s, quad, [facing; 4], None, None);
                 }
             }
         }
     }
 
     /// `p`/`normals` are already y-up.
-    fn ground_quad(&mut self, tex: &[usize], s: &ro_formats::gnd::Surface, p: [Vec3; 4], normals: [Vec3; 4]) {
+    /// `tile`: the ground tile for top surfaces (continuous lightmap grid); walls pass None.
+    fn ground_quad(&mut self, tex: &[usize], s: &ro_formats::gnd::Surface, p: [Vec3; 4], normals: [Vec3; 4], tile: Option<(u32, u32)>, colors: Option<[[f32; 3]; 4]>) {
         let Some(&t) = usize::try_from(s.texture).ok().and_then(|i| tex.get(i)) else { return };
-        let lm = self.atlas.uvs(Some(s.lightmap));
+        let lm = match tile {
+            Some((x, y)) if self.atlas.grid_y < self.atlas.height => self.atlas.ground_uvs(x, y),
+            _ => self.atlas.uvs(Some(s.lightmap)),
+        };
         let color = [s.color[2] as f32 / 255.0, s.color[1] as f32 / 255.0, s.color[0] as f32 / 255.0];
-        let v = |i: usize| Vertex { pos: p[i].into(), normal: normals[i].into(), uv: [s.u[i], s.v[i]], lightmap_uv: lm[i], color };
+        let v = |i: usize| Vertex { pos: p[i].into(), normal: normals[i].into(), uv: [s.u[i], s.v[i]], lightmap_uv: lm[i], color: colors.map_or(color, |c| c[i]) };
         self.per_tex[t].extend([v(0), v(1), v(3), v(0), v(3), v(2)]);
     }
 
