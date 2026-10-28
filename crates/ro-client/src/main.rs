@@ -63,6 +63,7 @@ fn open_vfs(cfg: &Config) -> anyhow::Result<Option<ro_vfs::Vfs>> {
 
 /// Reads a map's ground and textures from the VFS.
 /// Character appearance, as the char server describes it.
+#[derive(Clone)]
 struct Look {
     /// Job sprite name (Korean, as in the GRF), e.g. 초보자 for Novice.
     job: String,
@@ -224,30 +225,259 @@ async fn headless(cfg: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Sprite name (as in the GRF) for a job id. Covers Novice through the 2-1/2-2 classes.
+fn job_sprite(job: i16) -> &'static str {
+    match job {
+        1 => "검사",
+        2 => "마법사",
+        3 => "궁수",
+        4 => "성직자",
+        5 => "상인",
+        6 => "도둑",
+        7 => "기사",
+        8 => "프리스트",
+        9 => "위저드",
+        10 => "제철공",
+        11 => "헌터",
+        12 => "어세신",
+        14 => "크루세이더",
+        15 => "몽크",
+        16 => "세이지",
+        17 => "로그",
+        18 => "연금술사",
+        19 => "바드",
+        20 => "무희",
+        _ => "초보자",
+    }
+}
+
+const DIRS: [ro_render::Dir; 8] = {
+    use ro_render::Dir::*;
+    [S, SW, W, NW, N, NE, E, SE]
+};
+
+/// The map currently shown: its geometry (for picking/heights) and walkability.
+struct World {
+    name: String,
+    ground: ro_render::SceneMesh,
+    gat: Option<ro_formats::gat::Gat>,
+}
+
+/// The local player.
+struct Player {
+    actor: ro_render::Actor,
+    walker: ro_game::Walker,
+}
+
 struct App {
     backend: String,
     msaa: u32,
     vfs: Option<ro_vfs::Vfs>,
+    /// Offline preview map and cell (ignored once the server places us).
     map: String,
-    /// Cell the camera starts on.
     at: (u16, u16),
     /// `--still`: ignore camera input (for reproducible captures).
     still: bool,
-    /// `--capture file.png [--size WxH]`: render one frame offscreen, save it, exit.
+    /// `--capture file.png [--size WxH] [--capture-after ms]`: render offscreen, save, exit.
+    /// Online, the delay counts from map entry.
     capture: Option<(PathBuf, u32, u32)>,
+    capture_after: f32,
+    /// `--walk x,y`: request a walk right after entering (scripted test).
+    walk_on_enter: Option<(u16, u16)>,
     /// `--distance`: initial camera distance.
     distance: Option<f32>,
-    /// Preview character appearance and pose (`--action n`, `--dir 0..7`).
+    /// Offline preview appearance and pose (`--job`, `--sex`, `--action n`, `--dir 0..7`).
     look: Look,
     action: usize,
-    dir: ro_render::Dir,
-    started: std::time::Instant,
+    dir: usize,
+    net: Option<(tokio::sync::mpsc::UnboundedSender<ro_net::Command>, std::sync::mpsc::Receiver<ro_net::Event>)>,
+    world: Option<World>,
+    player: Option<Player>,
+    /// When the current map became ready (for --capture-after).
+    ready_at: Option<std::time::Instant>,
+    last_tick: std::time::Instant,
     window: Option<Arc<Window>>,
     renderer: Option<ro_render::Renderer>,
     /// Right mouse button held: dragging rotates the camera.
     rotating: bool,
-    last_cursor: Option<(f64, f64)>,
+    cursor: Option<(f64, f64)>,
     fps: FpsCounter,
+}
+
+impl App {
+    /// Loads a map into the renderer and remembers its ground for picking.
+    fn enter_map(&mut self, name: &str) {
+        let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
+        match load_map(vfs, name) {
+            Ok(map) => {
+                r.set_scene(&map.mesh, map.images, map.lighting);
+                if let Some((mesh, images)) = map.water {
+                    r.set_water(&mesh, images);
+                }
+                let gat = vfs
+                    .read(&format!("data\\{name}.gat"))
+                    .ok()
+                    .flatten()
+                    .and_then(|d| ro_formats::gat::Gat::parse(&d).inspect_err(|e| tracing::warn!("{name}.gat: {e:#}")).ok());
+                self.world = Some(World { name: name.to_string(), ground: map.mesh, gat });
+                self.ready_at = Some(std::time::Instant::now());
+            }
+            Err(e) => tracing::error!("map {name}: {e:#}"),
+        }
+    }
+
+    /// Creates (or re-creates) the local player at a cell.
+    fn spawn_player(&mut self, look: &Look, cell: (u16, u16), dir: usize, speed: f32) {
+        let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
+        match load_character(vfs, r, look) {
+            Ok(actor) => {
+                self.player = Some(Player { actor, walker: ro_game::Walker::new((cell.0 as i32, cell.1 as i32), dir, speed) });
+            }
+            Err(e) => tracing::error!("character sprites: {e:#}"),
+        }
+    }
+
+    /// Asks to walk to a cell: through the server online, locally offline.
+    fn request_walk(&mut self, cell: (u16, u16)) {
+        match &self.net {
+            Some((tx, _)) => {
+                let _ = tx.send(ro_net::Command::Move { x: cell.0, y: cell.1 });
+            }
+            None => {
+                let (Some(p), Some(w)) = (self.player.as_mut(), self.world.as_ref()) else { return };
+                if let Some(gat) = &w.gat {
+                    if let Some(path) = ro_game::path::find(gat, p.walker.cell, (cell.0 as i32, cell.1 as i32)) {
+                        p.walker.walk(path);
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle(&mut self, event: ro_net::Event) {
+        use ro_net::Event::*;
+        match event {
+            Entered { map, x, y, dir, character, .. } => {
+                tracing::info!(%map, x, y, name = %character.name, job = character.job, "entered");
+                self.enter_map(&map);
+                let look = Look {
+                    job: job_sprite(character.job).to_string(),
+                    male: character.sex == 1,
+                    hair: character.head.max(1) as u16,
+                    hair_color: character.hair_color as u16,
+                };
+                let speed = if character.speed > 0 { character.speed as f32 } else { 150.0 };
+                self.spawn_player(&look, (x, y), dir as usize, speed);
+                if let Some(cell) = self.walk_on_enter.take() {
+                    self.request_walk(cell);
+                }
+            }
+            Walk { from, to } => {
+                let (Some(p), Some(w)) = (self.player.as_mut(), self.world.as_ref()) else { return };
+                let from = (from.0 as i32, from.1 as i32);
+                // Continue from where we are; the server's start cell is authoritative.
+                p.walker.stop_at(from);
+                let path = w.gat.as_ref().and_then(|g| ro_game::path::find(g, from, (to.0 as i32, to.1 as i32)));
+                tracing::debug!(?from, ?to, steps = path.as_ref().map(Vec::len), "walk");
+                match path {
+                    Some(path) => p.walker.walk(path),
+                    None => p.walker.stop_at((to.0 as i32, to.1 as i32)),
+                }
+            }
+            Stop { x, y, .. } => {
+                if let Some(p) = self.player.as_mut() {
+                    p.walker.stop_at((x as i32, y as i32));
+                }
+            }
+            MapMove { map, x, y } => {
+                if self.world.as_ref().is_none_or(|w| w.name != map) {
+                    self.enter_map(&map);
+                }
+                if let Some(p) = self.player.as_mut() {
+                    p.walker.stop_at((x as i32, y as i32));
+                }
+            }
+            Disconnected(reason) => tracing::error!("disconnected: {reason}"),
+        }
+    }
+
+    /// Ground cell under the cursor, if any.
+    fn pick(&self) -> Option<(u16, u16)> {
+        let (r, w, (cx, cy)) = (self.renderer.as_ref()?, self.world.as_ref()?, self.cursor?);
+        let (origin, dir) = r.ray(cx as f32, cy as f32);
+        // March along the ray until it passes below the ground.
+        let mut t = 0.0;
+        while t < 5000.0 {
+            let p = origin + dir * t;
+            if p.y <= w.ground.height_at(p.x, p.z) {
+                let (x, y) = ((p.x / ro_render::CELL).floor(), (p.z / ro_render::CELL).floor());
+                return (x >= 0.0 && y >= 0.0).then_some((x as u16, y as u16));
+            }
+            t += 1.0;
+        }
+        None
+    }
+
+    /// One frame: network events, movement, camera, render (or capture).
+    fn tick(&mut self, el: &ActiveEventLoop) {
+        let now = std::time::Instant::now();
+        let dt = (now - self.last_tick).as_secs_f32() * 1000.0;
+        self.last_tick = now;
+
+        let events: Vec<_> = self.net.as_ref().map(|(_, rx)| rx.try_iter().collect()).unwrap_or_default();
+        for e in events {
+            self.handle(e);
+        }
+
+        let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
+        r.actors.clear();
+        if let (Some(p), Some(w)) = (self.player.as_mut(), self.world.as_ref()) {
+            let was_walking = p.walker.is_walking();
+            let (fx, fy) = p.walker.update(dt);
+            let walking = p.walker.is_walking();
+            if walking != was_walking {
+                p.actor.time_ms = 0.0; // restart the animation on start/stop
+            }
+            let (x, z) = ((fx + 0.5) * ro_render::CELL, (fy + 0.5) * ro_render::CELL);
+            p.actor.pos = glam::Vec3::new(x, w.ground.height_at(x, z), z);
+            p.actor.action = if walking { 1 } else { self.action };
+            // Facing is drawn relative to the camera's rotation.
+            let octant = (r.camera.yaw / std::f32::consts::FRAC_PI_4).round() as i32;
+            p.actor.dir = DIRS[(p.walker.dir as i32 + octant).rem_euclid(8) as usize];
+            p.actor.time_ms += dt;
+            r.camera.target = p.actor.pos;
+            r.actors.push(p.actor.clone());
+        }
+
+        if let Some((path, w, h)) = &self.capture {
+            let ready = self.ready_at.is_some_and(|t| t.elapsed().as_secs_f32() * 1000.0 >= self.capture_after);
+            if ready {
+                match r.capture(*w, *h) {
+                    Ok(img) => match image::save_buffer(path, &img.pixels, img.width, img.height, image::ColorType::Rgba8) {
+                        Ok(()) => {
+                            let at = self.player.as_ref().map(|p| p.walker.cell);
+                            tracing::info!(path = %path.display(), ?at, "captured");
+                        }
+                        Err(e) => tracing::error!("save capture: {e:#}"),
+                    },
+                    Err(e) => tracing::error!("capture: {e:#}"),
+                }
+                self.capture = None;
+                el.exit();
+            }
+            return;
+        }
+
+        if let Err(e) = r.frame() {
+            tracing::error!("frame: {e:#}");
+        }
+        if let Some(fps) = self.fps.tick() {
+            let (w, h) = r.size();
+            let at = self.player.as_ref().map(|p| p.walker.cell).unwrap_or_default();
+            let map = self.world.as_ref().map_or("-", |w| w.name.as_str());
+            window.set_title(&format!("roclient — {map} {},{} — {w}x{h} — {fps:.0} fps", at.0, at.1));
+        }
+    }
 }
 
 #[derive(Default)]
@@ -287,54 +517,32 @@ impl ApplicationHandler for App {
         let backends = ro_render::parse_backends(&self.backend);
         match pollster::block_on(ro_render::Renderer::new(window.clone(), backends, self.msaa)) {
             Ok(mut r) => {
-                // Preview position until the world is wired to the network session.
                 r.camera.look_at_cell(self.at.0, self.at.1);
                 if let Some(d) = self.distance {
                     r.camera.distance = d;
-                }
-                if let Some(vfs) = &self.vfs {
-                    match load_map(vfs, &self.map) {
-                        Ok(map) => {
-                            r.camera.target.y = map.mesh.height_at(r.camera.target.x, r.camera.target.z);
-                            r.set_scene(&map.mesh, map.images, map.lighting);
-                            if let Some((mesh, images)) = map.water {
-                                r.set_water(&mesh, images);
-                            }
-                        }
-                        Err(e) => tracing::error!("map {}: {e:#}", self.map),
-                    }
-                }
-                if let Some(vfs) = &self.vfs {
-                    match load_character(vfs, &mut r, &self.look) {
-                        Ok(mut actor) => {
-                            actor.pos = r.camera.target;
-                            actor.action = self.action;
-                            actor.dir = self.dir;
-                            r.actors.push(actor);
-                        }
-                        Err(e) => tracing::error!("character sprites: {e:#}"),
-                    }
-                }
-                if let Some((path, w, h)) = &self.capture {
-                    match r.capture(*w, *h) {
-                        Ok(img) => match image::save_buffer(path, &img.pixels, img.width, img.height, image::ColorType::Rgba8) {
-                            Ok(()) => tracing::info!(path = %path.display(), "captured"),
-                            Err(e) => tracing::error!("save capture: {e:#}"),
-                        },
-                        Err(e) => tracing::error!("capture: {e:#}"),
-                    }
-                    el.exit();
-                    return;
                 }
                 self.renderer = Some(r);
             }
             Err(e) => {
                 tracing::error!("renderer init failed: {e:#}");
                 el.exit();
+                return;
             }
         }
-        window.request_redraw();
         self.window = Some(window);
+        el.set_control_flow(winit::event_loop::ControlFlow::Poll);
+
+        // Offline: show the preview map and character right away. Online waits for the server.
+        if self.net.is_none() {
+            let map = self.map.clone();
+            self.enter_map(&map);
+            let look = self.look.clone();
+            self.spawn_player(&look, self.at, self.dir, 150.0);
+        }
+    }
+
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        self.tick(el);
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -357,27 +565,18 @@ impl ApplicationHandler for App {
             WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
                 self.rotating = state == ElementState::Pressed;
             }
+            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
+                if let Some(cell) = self.pick() {
+                    self.request_walk(cell);
+                }
+            }
             WindowEvent::CursorMoved { position, .. } => {
-                if let (true, Some((lx, ly))) = (self.rotating, self.last_cursor) {
+                if let (true, Some((lx, ly))) = (self.rotating, self.cursor) {
                     // Scale by DPI so rotation speed matches across monitors.
                     let s = 0.005 / r.scale_factor as f32;
                     r.camera.rotate((position.x - lx) as f32 * s, (position.y - ly) as f32 * s);
                 }
-                self.last_cursor = Some((position.x, position.y));
-            }
-            WindowEvent::RedrawRequested => {
-                let t = self.started.elapsed().as_secs_f32() * 1000.0;
-                for a in &mut r.actors {
-                    a.time_ms = t;
-                }
-                if let Err(e) = r.frame() {
-                    tracing::error!("frame: {e:#}");
-                }
-                if let Some(fps) = self.fps.tick() {
-                    let (w, h) = r.size();
-                    window.set_title(&format!("roclient — {w}x{h} ({:.2}:1) — {fps:.0} fps", w as f32 / h as f32));
-                }
-                window.request_redraw();
+                self.cursor = Some((position.x, position.y));
             }
             _ => {}
         }
@@ -400,6 +599,16 @@ fn main() -> anyhow::Result<()> {
 
     let event_loop = EventLoop::new()?;
     let vfs = open_vfs(&cfg)?;
+    let cell = |s: String| s.split_once(',').and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)));
+    // Online unless --offline (or no game data to render with).
+    let net = (!args.iter().any(|a| a == "--offline") && vfs.is_some()).then(|| {
+        ro_net::spawn_session(ro_net::SessionConfig {
+            login_addr: cfg.login_addr.clone(),
+            username: cfg.username.clone(),
+            password: cfg.password.clone(),
+            char_slot: cfg.char_slot,
+        })
+    });
     let mut app = App {
         backend: cfg.backend,
         msaa: cfg.msaa,
@@ -409,22 +618,25 @@ fn main() -> anyhow::Result<()> {
         distance: arg("--distance").and_then(|d| d.parse().ok()),
         look: Look { job: arg("--job").unwrap_or_else(|| "초보자".into()), male: arg("--sex").is_none_or(|s| s != "f"), hair: 1, hair_color: 0 },
         action: arg("--action").and_then(|a| a.parse().ok()).unwrap_or(0),
-        dir: {
-            use ro_render::Dir::*;
-            [S, SW, W, NW, N, NE, E, SE][arg("--dir").and_then(|d| d.parse::<usize>().ok()).unwrap_or(0) % 8]
-        },
-        started: std::time::Instant::now(),
+        dir: arg("--dir").and_then(|d| d.parse::<usize>().ok()).unwrap_or(0) % 8,
+        capture_after: arg("--capture-after").and_then(|d| d.parse().ok()).unwrap_or(0.0),
+        walk_on_enter: arg("--walk").and_then(cell),
+        net,
+        world: None,
+        player: None,
+        ready_at: None,
+        last_tick: std::time::Instant::now(),
         capture: arg("--capture").map(|p| {
             let (w, h) = arg("--size")
                 .and_then(|s| s.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))))
                 .unwrap_or((1920, 1080));
             (PathBuf::from(p), w, h)
         }),
-        at: arg("--at").and_then(|s| s.split_once(',').and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))).unwrap_or((156, 191)),
+        at: arg("--at").and_then(cell).unwrap_or((156, 191)),
         window: None,
         renderer: None,
         rotating: false,
-        last_cursor: None,
+        cursor: None,
         fps: FpsCounter::default(),
     };
     event_loop.run_app(&mut app)?;

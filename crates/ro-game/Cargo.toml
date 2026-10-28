@@ -1,0 +1,7 @@
+[package]
+name = "ro-game"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+ro-formats = { path = "../ro-formats" }

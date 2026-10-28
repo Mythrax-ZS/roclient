@@ -234,6 +234,8 @@ pub struct CharInfo {
     pub job: i16,
     pub head: i16,
     pub base_level: i16,
+    /// Milliseconds per cell.
+    pub speed: i16,
     pub name: String,
     pub slot: u8,
     pub hair_color: u8,
@@ -252,7 +254,7 @@ pub fn parse_char_info(mut b: &[u8]) -> CharInfo {
     let max_hp = b.get_i64_le();
     let sp = b.get_i64_le();
     let max_sp = b.get_i64_le();
-    let _speed = b.get_i16_le();
+    let speed = b.get_i16_le();
     let job = b.get_i16_le();
     let head = b.get_i16_le();
     let _body = b.get_i16_le();
@@ -267,7 +269,7 @@ pub fn parse_char_info(mut b: &[u8]) -> CharInfo {
     let map = get_fixed_str(&mut b, 16);
     b.advance(4 * 4);
     let sex = b.get_u8();
-    CharInfo { char_id, base_exp, zeny, job_level, hp, max_hp, sp, max_sp, job, head, base_level, name, slot, hair_color, map, sex }
+    CharInfo { char_id, base_exp, zeny, job_level, hp, max_hp, sp, max_sp, job, head, base_level, speed, name, slot, hair_color, map, sex }
 }
 
 /// 0x006b: 3 + 20 bytes of header data, then characters.
@@ -348,5 +350,57 @@ mod tests {
         data.extend_from_slice(&[5, 5, 0, 0]);
         let a = parse_accept_enter(&data);
         assert_eq!((a.x, a.y, a.dir), (150, 200, 3));
+    }
+}
+
+// ---------------------------------------------------------------- map: movement
+
+/// Unpacks rAthena's 6-byte MoveData (WBUFPOS2): source and destination cells.
+pub fn unpack_move(p: &[u8]) -> ((u16, u16), (u16, u16)) {
+    let p: [u16; 5] = [p[0] as u16, p[1] as u16, p[2] as u16, p[3] as u16, p[4] as u16];
+    let x0 = (p[0] << 2) | (p[1] >> 6);
+    let y0 = ((p[1] & 0x3f) << 4) | (p[2] >> 4);
+    let x1 = ((p[2] & 0x0f) << 6) | (p[3] >> 2);
+    let y1 = ((p[3] & 0x03) << 8) | p[4];
+    ((x0, y0), (x1, y1))
+}
+
+/// ZC_NOTIFY_PLAYERMOVE: our own walk was accepted. Returns (start tick, from, to).
+pub fn parse_player_move(data: &[u8]) -> (u32, (u16, u16), (u16, u16)) {
+    let tick = (&data[2..]).get_u32_le();
+    let (from, to) = unpack_move(&data[6..12]);
+    (tick, from, to)
+}
+
+/// ZC_STOPMOVE: (account/unit id, x, y).
+pub fn parse_stop_move(data: &[u8]) -> (u32, u16, u16) {
+    let mut b = &data[2..];
+    (b.get_u32_le(), b.get_u16_le(), b.get_u16_le())
+}
+
+/// ZC_NPCACK_MAPMOVE: warp to (map, x, y) on the same map server.
+pub fn parse_map_move(data: &[u8]) -> (String, u16, u16) {
+    let mut b = &data[2..];
+    let map = get_fixed_str(&mut b, 16);
+    (map, b.get_u16_le(), b.get_u16_le())
+}
+
+#[cfg(test)]
+mod move_tests {
+    use super::*;
+
+    #[test]
+    fn unpacks_wbufpos2() {
+        // Mirror of rAthena WBUFPOS2 for (156,191) -> (160,185).
+        let (x0, y0, x1, y1) = (156u16, 191u16, 160u16, 185u16);
+        let p = [
+            (x0 >> 2) as u8,
+            ((x0 << 6) | ((y0 >> 4) & 0x3f)) as u8,
+            ((y0 << 4) | ((x1 >> 6) & 0x0f)) as u8,
+            ((x1 << 2) | ((y1 >> 8) & 0x03)) as u8,
+            y1 as u8,
+            0x88,
+        ];
+        assert_eq!(unpack_move(&p), ((156, 191), (160, 185)));
     }
 }

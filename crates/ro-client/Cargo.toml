@@ -8,6 +8,8 @@ ro-net = { path = "../ro-net" }
 ro-render = { path = "../ro-render" }
 ro-formats = { path = "../ro-formats" }
 ro-vfs = { path = "../ro-vfs" }
+ro-game = { path = "../ro-game" }
+glam = "0.34.1"
 anyhow.workspace = true
 pollster.workspace = true
 serde.workspace = true

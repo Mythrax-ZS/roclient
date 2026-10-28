@@ -1694,9 +1694,11 @@ name = "ro-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "glam",
  "image",
  "pollster",
  "ro-formats",
+ "ro-game",
  "ro-net",
  "ro-render",
  "ro-vfs",
@@ -1715,6 +1717,13 @@ dependencies = [
  "anyhow",
  "encoding_rs",
  "image",
+]
+
+[[package]]
+name = "ro-game"
+version = "0.1.0"
+dependencies = [
+ "ro-formats",
 ]
 
 [[package]]

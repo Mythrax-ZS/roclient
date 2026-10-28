@@ -139,7 +139,130 @@ pub async fn enter_map(zone: &ZoneServer, auth: &AcceptLogin) -> anyhow::Result<
     }
 }
 
+/// What the UI hears from a running session.
+#[derive(Debug, Clone)]
+pub enum Event {
+    /// Entered a map with this character.
+    Entered { map: String, x: u16, y: u16, dir: u8, account_id: u32, character: CharInfo },
+    /// Our walk was accepted: walk from -> to.
+    Walk { from: (u16, u16), to: (u16, u16) },
+    /// The server placed a unit; for us this ends or corrects a walk.
+    Stop { id: u32, x: u16, y: u16 },
+    /// Warped within the same map server.
+    MapMove { map: String, x: u16, y: u16 },
+    Disconnected(String),
+}
+
+/// What the UI asks a session to do.
+#[derive(Debug, Clone)]
+pub enum Command {
+    Move { x: u16, y: u16 },
+}
+
+pub struct SessionConfig {
+    pub login_addr: String,
+    pub username: String,
+    pub password: String,
+    pub char_slot: u8,
+}
+
+/// Runs login -> char select -> map on its own thread and runtime. Events arrive on the
+/// returned receiver; commands go in through the sender. Dropping the sender ends it.
+pub fn spawn_session(cfg: SessionConfig) -> (tokio::sync::mpsc::UnboundedSender<Command>, std::sync::mpsc::Receiver<Event>) {
+    let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (ev_tx, ev_rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("net".into())
+        .spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    let _ = ev_tx.send(Event::Disconnected(e.to_string()));
+                    return;
+                }
+            };
+            let result = rt.block_on(async {
+                let auth = login(&cfg.login_addr, &cfg.username, &cfg.password).await?;
+                let server = auth.servers.first().context("no char servers offered")?.clone();
+                let chars = enter_char(&server, &auth).await?;
+                let character = chars
+                    .characters
+                    .iter()
+                    .find(|c| c.slot == cfg.char_slot)
+                    .cloned()
+                    .with_context(|| format!("no character in slot {}", cfg.char_slot))?;
+                let zone = chars.select(cfg.char_slot).await?;
+                let map = enter_map(&zone, &auth).await?;
+                let _ = ev_tx.send(Event::Entered {
+                    map: zone.map.trim_end_matches(".gat").to_string(),
+                    x: map.spawn.x,
+                    y: map.spawn.y,
+                    dir: map.spawn.dir,
+                    account_id: auth.account_id,
+                    character,
+                });
+                map.run(auth.account_id, cmd_rx, &ev_tx).await
+            });
+            let reason = match result {
+                Ok(()) => "closed".to_string(),
+                Err(e) => format!("{e:#}"),
+            };
+            let _ = ev_tx.send(Event::Disconnected(reason));
+        })
+        .expect("spawn net thread");
+    (cmd_tx, ev_rx)
+}
+
 impl MapSession {
+    /// Pumps the map connection: keepalives, UI commands, and the packets the UI cares about.
+    pub async fn run(
+        mut self,
+        account_id: u32,
+        mut commands: tokio::sync::mpsc::UnboundedReceiver<Command>,
+        events: &std::sync::mpsc::Sender<Event>,
+    ) -> anyhow::Result<()> {
+        let mut keepalive = tokio::time::interval(KEEPALIVE);
+        loop {
+            tokio::select! {
+                _ = keepalive.tick() => {
+                    let tick = self.tick();
+                    self.send(CzRequestTime { client_tick: tick }).await?;
+                }
+                cmd = commands.recv() => match cmd {
+                    None => return Ok(()),
+                    Some(Command::Move { x, y }) => self.send(CzRequestMove { x, y, dir: 0 }).await?,
+                },
+                f = self.conn.next() => {
+                    let Some(f) = f else { bail!("map server closed the connection") };
+                    let Frame::Packet { opcode, data } = f? else { continue };
+                    let event = match opcode {
+                        id::ZC_NOTIFY_PLAYERMOVE => {
+                            let (_, from, to) = parse_player_move(&data);
+                            Some(Event::Walk { from, to })
+                        }
+                        id::ZC_STOPMOVE => {
+                            let (id, x, y) = parse_stop_move(&data);
+                            (id == account_id).then_some(Event::Stop { id, x, y })
+                        }
+                        id::ZC_NPCACK_MAPMOVE => {
+                            let (map, x, y) = parse_map_move(&data);
+                            // The server waits for the client to finish loading again.
+                            self.send(CzLoadEndAck).await?;
+                            Some(Event::MapMove { map: map.trim_end_matches(".gat").to_string(), x, y })
+                        }
+                        id::SC_NOTIFY_BAN => bail!("disconnected by map server, code {}", data[2]),
+                        _ => None,
+                    };
+                    if let Some(e) = event {
+                        if events.send(e).is_err() {
+                            return Ok(()); // UI gone
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn tick(&self) -> u32 {
         self.started.elapsed().as_millis() as u32
     }

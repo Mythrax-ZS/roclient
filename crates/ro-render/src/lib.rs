@@ -442,6 +442,16 @@ impl Renderer {
         (self.config.width, self.config.height)
     }
 
+    /// World-space ray (origin, unit direction) through a window pixel.
+    pub fn ray(&self, px: f32, py: f32) -> (glam::Vec3, glam::Vec3) {
+        let (w, h) = (self.config.width as f32, self.config.height as f32);
+        let ndc = glam::Vec2::new(2.0 * px / w - 1.0, 1.0 - 2.0 * py / h);
+        let inv = self.camera.view_proj(self.aspect()).inverse();
+        let near = inv.project_point3(ndc.extend(0.0));
+        let far = inv.project_point3(ndc.extend(1.0));
+        (near, (far - near).normalize())
+    }
+
     pub fn aspect(&self) -> f32 {
         self.config.width as f32 / self.config.height as f32
     }
