@@ -132,6 +132,7 @@ fn load_character(
     if let Some(name) = (g.weapon != 0).then(|| tables.weapon(g.weapon)).flatten() {
         let dir = format!("data\\sprite\\인간족\\{}\\{}_{sex}", look.job, look.job);
         let found = [format!("{dir}{name}"), format!("{dir}{name}{name}")].into_iter().find_map(|base| sheet(&base, None).ok().map(|id| (id, base)));
+        tracing::debug!(%dir, %name, found = found.is_some(), "weapon sprite");
         match found {
             Some((id, base)) => {
                 weapon.push(id);
@@ -416,6 +417,9 @@ struct Mob {
     look: Option<Look>,
     /// Player attack motion: 10, or 11 for weapons drawn only there (katars).
     attack_group: usize,
+    /// Length of the current timed pose, and how fast its animation must play to fit.
+    pose_len: f32,
+    anim_rate: f32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -443,6 +447,8 @@ impl Mob {
             hp: None,
             look: None,
             attack_group: 10,
+            pose_len: 0.0,
+            anim_rate: 1.0,
         }
     }
 
@@ -461,8 +467,23 @@ impl Mob {
         }
     }
 
+    /// Speeds a timed pose's animation up so all its frames show before the pose ends, as
+    /// the original client does (attack motions follow attack speed; katar blades appear
+    /// only in the later frames). Death keeps its own pace.
+    fn fit_pose(&mut self, r: &ro_render::Renderer) {
+        let Some((pose, _)) = self.pose else { return };
+        if pose == Pose::Dead || self.pose_len <= 0.0 {
+            return;
+        }
+        let index = self.action_for(pose) * 8 + self.actor.dir as usize;
+        let full = r.action_ms(self.actor.body, index);
+        self.anim_rate = (full / self.pose_len).clamp(1.0, 8.0);
+    }
+
     fn set_pose(&mut self, pose: Pose, ms: f32) {
         self.pose = Some((pose, ms.max(200.0)));
+        self.pose_len = ms.max(200.0);
+        self.anim_rate = 1.0;
         self.actor.time_ms = 0.0;
     }
 
@@ -536,7 +557,8 @@ impl Mob {
         self.actor.action = action;
         self.actor.once = once;
         self.actor.dir = DIRS[(self.walker.dir as i32 + octant).rem_euclid(8) as usize];
-        self.actor.time_ms += dt;
+        // Timed poses play fast enough to finish in the server's time (attack speed).
+        self.actor.time_ms += if self.pose.is_some() { dt * self.anim_rate } else { dt };
         self.actor.clone()
     }
 }
@@ -2262,6 +2284,7 @@ impl App {
                 // Combat stance (weapon drawn) while attacking something.
                 let idle = if self.attack.is_some() && self.action == 0 { 4 } else { self.action };
                 p.attack_group = attack_group(r, &p.actor);
+                p.fit_pose(r);
                 let a = p.update(dt, w, octant, idle);
                 r.camera.target = a.pos;
                 r.actors.push(a);
@@ -2269,6 +2292,7 @@ impl App {
             for m in self.units.values_mut() {
                 let (action, time) = (m.actor.action, m.actor.time_ms);
                 m.attack_group = attack_group(r, &m.actor);
+                m.fit_pose(r);
                 let a = m.update(dt, w, octant, 0);
                 // Attack, hurt and death frames carry their sounds in the ACT.
                 if let (Some(_), Some(audio), Some(vfs)) = (m.pose, self.audio.as_ref(), self.vfs.as_ref()) {
