@@ -32,7 +32,7 @@ pub use ro_proto::chatroom::{BookingAd, BookingRequest, ChatRoomRequest, IgnoreR
 use ro_proto::chatroom::*;
 use ro_proto::quests::*;
 use ro_proto::menus::*;
-pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
+pub use ro_proto::social::{ClanInfo, Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
 use ro_proto::social::*;
 
 type Conn = Framed<TcpStream, RoCodec<ServerTable>>;
@@ -365,6 +365,11 @@ pub enum Event {
     MailReceiver(u32, String),
     /// Sending a mail: 0 = sent.
     MailSent(u8),
+    /// We are in a clan (sent on login and on joining).
+    ClanInfo(ClanInfo),
+    /// Clan members online, and the clan's maximum.
+    ClanOnline(u16, u16),
+    ClanLeft,
     /// An item attached to the mail being written: (result; 0 = ok, index, amount, item id).
     MailItemAdded { result: u8, index: u16, amount: u16, id: u32 },
     MailItemRemoved { ok: bool, index: u16, amount: u16 },
@@ -715,6 +720,10 @@ impl MapSession {
                         0x00fa => Some(Event::PartyCreated { ok: data[2] == 0 }),
                         0x0109 => Some(Event::Chat { kind: ChatKind::Party, from: None, text: parse_party_chat(&data) }),
                         0x017f => Some(Event::Chat { kind: ChatKind::Guild, from: None, text: parse_guild_chat(&data) }),
+                        0x098e => Some(Event::Chat { kind: ChatKind::Clan, from: None, text: parse_clan_chat(&data) }),
+                        0x098a => parse_clan_info(&data).map(Event::ClanInfo),
+                        0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
+                        0x0989 => Some(Event::ClanLeft),
                         // ZC_UPDATE_GDID: 0x02f7 at this PACKETVER (0x016c is the older form).
                         0x016c | 0x02f7 => {
                             let (id, master, name) = parse_belong(&data);

@@ -549,6 +549,7 @@ pub enum ChatKind {
     System,
     Party,
     Guild,
+    Clan,
 }
 
 /// Text after the fixed header of a variable packet, without trailing NULs.

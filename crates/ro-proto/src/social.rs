@@ -314,6 +314,7 @@ pub enum PartyRequest {
     /// Party chat; `speaker` is our name ("Name : text").
     Chat { speaker: String, text: String },
     GuildChat { speaker: String, text: String },
+    ClanChat { speaker: String, text: String },
 }
 
 impl Encode for PartyRequest {
@@ -337,6 +338,7 @@ impl Encode for PartyRequest {
             PartyRequest::Leave => d.put_u16_le(0x0100),
             PartyRequest::Chat { speaker, text } => put_var(d, 0x0108, &euc(&format!("{speaker} : {text}"))),
             PartyRequest::GuildChat { speaker, text } => put_var(d, 0x017e, &euc(&format!("{speaker} : {text}"))),
+            PartyRequest::ClanChat { speaker, text } => put_var(d, 0x098d, &euc(&format!("{speaker} : {text}"))),
         }
     }
 }
@@ -458,4 +460,38 @@ mod tests {
         let b = encoded(&PartyRequest::Chat { speaker: "A".into(), text: "hi".into() });
         assert_eq!(&b[4..], b"A : hi\0");
     }
+}
+
+// ---------------------------------------------------------------- clans
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ClanInfo {
+    pub id: u32,
+    pub name: String,
+    pub master: String,
+    pub map: String,
+    pub allies: Vec<String>,
+    pub antagonists: Vec<String>,
+}
+
+/// ZC_CLANINFO (0x098a).
+pub fn parse_clan_info(data: &[u8]) -> Option<ClanInfo> {
+    let mut b = data.get(4..)?;
+    if b.len() < 4 + 24 + 24 + 16 + 2 {
+        return None;
+    }
+    let id = b.get_u32_le();
+    let name = get_fixed_str(&mut b, 24);
+    let master = get_fixed_str(&mut b, 24);
+    let map = get_fixed_str(&mut b, 16);
+    let (allies, antagonists) = (b.get_u8() as usize, b.get_u8() as usize);
+    let mut names = |n: usize| (0..n).take_while(|_| b.len() >= 24).map(|_| get_fixed_str(&mut b, 24)).collect::<Vec<_>>();
+    let allies = names(allies);
+    let antagonists = names(antagonists);
+    Some(ClanInfo { id, name, master, map, allies, antagonists })
+}
+
+/// ZC_NOTIFY_CLAN_CHAT (0x098e): "Name : text".
+pub fn parse_clan_chat(data: &[u8]) -> String {
+    text_from(data, 28)
 }

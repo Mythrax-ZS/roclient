@@ -20,6 +20,7 @@ mod refine;
 mod screens;
 mod ai;
 mod booking;
+mod clan;
 mod buffs;
 mod chatrooms;
 mod classic;
@@ -810,6 +811,7 @@ struct App {
     companions: companions::Companions,
     /// RODEX mail.
     mailbox: mail::Mailbox,
+    clan: clan::Clan,
     /// Chat rooms.
     rooms: chatrooms::ChatRooms,
     /// Party booking.
@@ -1486,6 +1488,12 @@ impl App {
                 if let Some(req) = self.mailbox.receiver_found(id, &me) {
                     self.send(ro_net::Command::Mail(req));
                 }
+            }
+            ClanInfo(info) => self.clan.info = Some(info),
+            ClanOnline(on, max) => self.clan.online = Some((on, max)),
+            ClanLeft => {
+                self.clan.left();
+                self.hud.push_chat(ro_net::ChatKind::System, "You left your clan.".into());
             }
             MailItemAdded { result, index, amount, id } => self.mailbox.item_added(result, index, amount, id),
             MailItemRemoved { ok, index, amount } => self.mailbox.item_removed(ok, index, amount),
@@ -2799,6 +2807,7 @@ impl App {
             "b" => self.toggle_bank(),
             "c" => self.toggle_cash_shop(),
             "y" => self.progress.open = !self.progress.open,
+            "clan" => self.clan.open = !self.clan.open,
             "n" => {
                 self.booking.open = !self.booking.open;
                 if self.booking.open {
@@ -3063,6 +3072,7 @@ impl App {
             let cmd = match text.split_once(' ') {
                 Some(("/p", rest)) => Some(ro_net::Command::Party(ro_net::PartyRequest::Chat { speaker, text: rest.to_string() })),
                 Some(("/g", rest)) => Some(ro_net::Command::Party(ro_net::PartyRequest::GuildChat { speaker, text: rest.to_string() })),
+                Some(("/cl", rest)) => Some(ro_net::Command::Party(ro_net::PartyRequest::ClanChat { speaker, text: rest.to_string() })),
                 // /guild "Name": found a guild, as in the original client.
                 Some(("/guild", rest)) => Some(ro_net::Command::Guild(ro_net::GuildRequest::Create { char_id: self.char_id, name: rest.trim().trim_matches('"').to_string() })),
                 // /r text: answer whoever whispered last.
@@ -4308,6 +4318,7 @@ impl App {
                     v.sort_unstable();
                     v
                 };
+                self.clan.show(ui.ctx());
                 for req in self.mailbox.show(ui.ctx(), self.item_db.as_ref(), &self.icons, self.hud.status.zeny, &mailable) {
                     self.queued_commands.push(ro_net::Command::Mail(req));
                 }
@@ -4845,6 +4856,7 @@ fn main() -> anyhow::Result<()> {
         progress: Default::default(),
         companions: Default::default(),
         mailbox: Default::default(),
+        clan: Default::default(),
         rooms: Default::default(),
         booking: Default::default(),
         ignore_pending: None,
