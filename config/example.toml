@@ -7,3 +7,9 @@ char_slot = 0
 backend = "vulkan"
 # --headless: seconds to stay on the map after entering
 soak_secs = 30
+# Installed RO client; its data/ folder and GRFs are read in place.
+client_dir = "C:/Gravity/Ragnarok Online"
+# event.grf is a DES-encrypted seasonal (Christmas) overlay; leave it out.
+grfs = ["data.grf"]
+map = "prontera"
+msaa = 4

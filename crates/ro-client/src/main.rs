@@ -3,7 +3,7 @@
 //!   ro-client --headless   run login -> char select -> map entry and exit
 //!   ro-client              open the renderer window
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Context;
 use serde::Deserialize;
@@ -29,6 +29,71 @@ struct Config {
     /// MSAA sample count (1, 2, 4); falls back to what the GPU supports.
     #[serde(default = "default_msaa")]
     msaa: u32,
+    /// Installed RO client folder; its `data/` is checked before the GRFs.
+    client_dir: Option<PathBuf>,
+    /// GRFs inside `client_dir`, highest priority first.
+    #[serde(default = "default_grfs")]
+    grfs: Vec<String>,
+    /// Map shown in the window until it follows the network session.
+    #[serde(default = "default_map")]
+    map: String,
+}
+
+fn default_grfs() -> Vec<String> {
+    vec!["data.grf".into()]
+}
+
+fn default_map() -> String {
+    "prontera".into()
+}
+
+fn open_vfs(cfg: &Config) -> anyhow::Result<Option<ro_vfs::Vfs>> {
+    let Some(dir) = &cfg.client_dir else { return Ok(None) };
+    let mut vfs = ro_vfs::Vfs { loose: Some(dir.clone()), grfs: vec![] };
+    for name in &cfg.grfs {
+        let path = dir.join(name);
+        if path.is_file() {
+            vfs.grfs.push(ro_vfs::Grf::open(&path)?);
+        } else {
+            tracing::warn!(path = %path.display(), "GRF not found, skipping");
+        }
+    }
+    Ok(Some(vfs))
+}
+
+/// Reads a map's ground and textures from the VFS.
+fn load_map(vfs: &ro_vfs::Vfs, name: &str) -> anyhow::Result<(ro_render::TerrainMesh, Vec<Option<ro_render::Rgba>>)> {
+    let started = std::time::Instant::now();
+    let data = vfs.read(&format!("data\\{name}.gnd"))?.with_context(|| format!("{name}.gnd not found"))?;
+    let gnd = ro_formats::gnd::Gnd::parse(&data)?;
+    let mesh = ro_render::TerrainMesh::build(&gnd);
+    let images = gnd
+        .textures
+        .iter()
+        .map(|t| {
+            let path = format!("data\\texture\\{t}");
+            match vfs.read(&path).and_then(|d| d.map(|d| ro_formats::image::decode(&d)).transpose()) {
+                Ok(Some(img)) => Some(img),
+                Ok(None) => {
+                    tracing::warn!(%path, "texture missing");
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!(%path, "texture unreadable: {e:#}");
+                    None
+                }
+            }
+        })
+        .collect();
+    tracing::info!(
+        map = name,
+        size = format_args!("{}x{}", gnd.width, gnd.height),
+        textures = gnd.textures.len(),
+        triangles = mesh.vertices.len() / 3,
+        ms = started.elapsed().as_millis() as u64,
+        "loaded map"
+    );
+    Ok((mesh, images))
 }
 
 fn default_msaa() -> u32 {
@@ -77,6 +142,8 @@ async fn headless(cfg: &Config) -> anyhow::Result<()> {
 struct App {
     backend: String,
     msaa: u32,
+    vfs: Option<ro_vfs::Vfs>,
+    map: String,
     window: Option<Arc<Window>>,
     renderer: Option<ro_render::Renderer>,
     /// Right mouse button held: dragging rotates the camera.
@@ -123,6 +190,15 @@ impl ApplicationHandler for App {
             Ok(mut r) => {
                 // Prontera spawn until the world is wired to the network session.
                 r.camera.look_at_cell(156, 191);
+                if let Some(vfs) = &self.vfs {
+                    match load_map(vfs, &self.map) {
+                        Ok((mesh, images)) => {
+                            r.camera.target.y = mesh.height_at(r.camera.target.x, r.camera.target.z);
+                            r.set_terrain(&mesh, images);
+                        }
+                        Err(e) => tracing::error!("map {}: {e:#}", self.map),
+                    }
+                }
                 self.renderer = Some(r);
             }
             Err(e) => {
@@ -188,9 +264,12 @@ fn main() -> anyhow::Result<()> {
     }
 
     let event_loop = EventLoop::new()?;
+    let vfs = open_vfs(&cfg)?;
     let mut app = App {
         backend: cfg.backend,
         msaa: cfg.msaa,
+        vfs,
+        map: cfg.map,
         window: None,
         renderer: None,
         rotating: false,

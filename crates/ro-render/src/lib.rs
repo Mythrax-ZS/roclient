@@ -1,10 +1,13 @@
 //! wgpu renderer. Vulkan preferred; DX12 / GL selectable via config.
 
 mod camera;
+mod terrain;
 
 use std::sync::Arc;
 
 pub use camera::{Camera, CELL};
+pub use ro_formats::image::Rgba;
+pub use terrain::TerrainMesh;
 use winit::window::Window;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -36,6 +39,11 @@ pub struct Renderer {
     globals: wgpu::Buffer,
     globals_bind: wgpu::BindGroup,
     grid: wgpu::RenderPipeline,
+    terrain_pipeline: wgpu::RenderPipeline,
+    texture_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    /// The grid is drawn instead while no map is loaded.
+    terrain: Option<terrain::Terrain>,
     pub camera: Camera,
     pub scale_factor: f64,
 }
@@ -113,42 +121,83 @@ impl Renderer {
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() }],
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("grid"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("grid.wgsl").into()),
+        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("texture"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         });
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("grid"),
-            bind_group_layouts: &[Some(&globals_layout)],
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("texture"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 16,
             ..Default::default()
         });
-        let grid = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("grid"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(config.format.into())],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+
+        let pipeline = |label: &str, src: &str, layouts: &[Option<&wgpu::BindGroupLayout>], buffers: &[Option<wgpu::VertexBufferLayout>]| {
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(label),
+                source: wgpu::ShaderSource::Wgsl(src.into()),
+            });
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(label),
+                bind_group_layouts: layouts,
+                ..Default::default()
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers,
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(config.format.into())],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let grid = pipeline("grid", include_str!("grid.wgsl"), &[Some(&globals_layout)], &[]);
+        let terrain_pipeline = pipeline(
+            "terrain",
+            include_str!("terrain.wgsl"),
+            &[Some(&globals_layout), Some(&texture_layout)],
+            &[Some(terrain::Vertex::layout())],
+        );
 
         let targets = Self::make_targets(&device, &config, samples);
         Ok(Self {
@@ -161,9 +210,18 @@ impl Renderer {
             globals,
             globals_bind,
             grid,
+            terrain_pipeline,
+            texture_layout,
+            sampler,
+            terrain: None,
             camera: Camera::default(),
             scale_factor: window.scale_factor(),
         })
+    }
+
+    /// Replaces the ground with a map. `images[i]` is texture i of the GND (None if missing).
+    pub fn set_terrain(&mut self, mesh: &TerrainMesh, images: Vec<Option<Rgba>>) {
+        self.terrain = Some(terrain::Terrain::upload(&self.device, &self.queue, &self.texture_layout, &self.sampler, mesh, images));
     }
 
     fn make_targets(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, samples: u32) -> Targets {
@@ -246,9 +304,23 @@ impl Renderer {
                 }),
                 ..Default::default()
             });
-            pass.set_pipeline(&self.grid);
             pass.set_bind_group(0, &self.globals_bind, &[]);
-            pass.draw(0..6, 0..1);
+            match &self.terrain {
+                Some(t) => {
+                    pass.set_pipeline(&self.terrain_pipeline);
+                    pass.set_vertex_buffer(0, t.vertices.slice(..));
+                    for (range, tex) in t.ranges.iter().zip(&t.textures) {
+                        if !range.is_empty() {
+                            pass.set_bind_group(1, tex, &[]);
+                            pass.draw(range.clone(), 0..1);
+                        }
+                    }
+                }
+                None => {
+                    pass.set_pipeline(&self.grid);
+                    pass.draw(0..6, 0..1);
+                }
+            }
         }
         self.queue.submit([enc.finish()]);
         self.queue.present(tex);

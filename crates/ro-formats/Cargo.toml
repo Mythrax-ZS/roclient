@@ -1,0 +1,9 @@
+[package]
+name = "ro-formats"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+encoding_rs.workspace = true
+image = { version = "0.25", default-features = false, features = ["bmp", "tga", "png", "jpeg"] }

@@ -6,6 +6,8 @@ version.workspace = true
 [dependencies]
 ro-net = { path = "../ro-net" }
 ro-render = { path = "../ro-render" }
+ro-formats = { path = "../ro-formats" }
+ro-vfs = { path = "../ro-vfs" }
 anyhow.workspace = true
 pollster.workspace = true
 serde.workspace = true

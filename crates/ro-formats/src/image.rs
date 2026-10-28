@@ -1,0 +1,57 @@
+//! Texture decoding. RO uses pure magenta as the transparent color in BMPs.
+
+use anyhow::{Context, Result};
+
+pub struct Rgba {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}
+
+/// Decodes BMP/TGA/PNG/JPG. Near-magenta pixels (the RO color key) become transparent.
+pub fn decode(data: &[u8]) -> Result<Rgba> {
+    let img = image::load_from_memory(data).context("decode texture")?.to_rgba8();
+    let (width, height) = img.dimensions();
+    let mut pixels = img.into_raw();
+    for p in pixels.chunks_exact_mut(4) {
+        if p[0] > 0xf0 && p[1] < 0x10 && p[2] > 0xf0 {
+            p.copy_from_slice(&[0, 0, 0, 0]);
+        }
+    }
+    Ok(Rgba { width, height, pixels })
+}
+
+impl Rgba {
+    /// Next mip level by 2x2 box filter, weighting color by alpha so transparent
+    /// texels do not bleed black into edges.
+    pub fn downsample(&self) -> Option<Rgba> {
+        if self.width == 1 && self.height == 1 {
+            return None;
+        }
+        let (w, h) = ((self.width / 2).max(1), (self.height / 2).max(1));
+        let mut out = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = [0u32; 4];
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let sx = (x * 2 + dx).min(self.width - 1);
+                    let sy = (y * 2 + dy).min(self.height - 1);
+                    let i = ((sy * self.width + sx) * 4) as usize;
+                    let a = self.pixels[i + 3] as u32;
+                    for c in 0..3 {
+                        acc[c] += self.pixels[i + c] as u32 * a;
+                    }
+                    acc[3] += a;
+                }
+                let o = ((y * w + x) * 4) as usize;
+                if acc[3] > 0 {
+                    for c in 0..3 {
+                        out[o + c] = (acc[c] / acc[3]) as u8;
+                    }
+                }
+                out[o + 3] = (acc[3] / 4) as u8;
+            }
+        }
+        Some(Rgba { width: w, height: h, pixels: out })
+    }
+}
