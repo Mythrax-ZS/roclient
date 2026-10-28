@@ -19,6 +19,7 @@ mod quests;
 mod refine;
 mod screens;
 mod ai;
+mod booking;
 mod buffs;
 mod chatrooms;
 mod classic;
@@ -811,6 +812,8 @@ struct App {
     mailbox: mail::Mailbox,
     /// Chat rooms.
     rooms: chatrooms::ChatRooms,
+    /// Party booking.
+    booking: booking::Booking,
     /// The last /ex or /in sent: (name, block).
     ignore_pending: Option<(String, bool)>,
     /// A companion window request, handled after the UI pass.
@@ -1475,13 +1478,40 @@ impl App {
                     (0, true) => format!("Whispers from {who} are now blocked."),
                     (0, false) => format!("Whispers from {who} are allowed again."),
                     (2, _) => "Your block list is full.".into(),
-                    _ => format!("Couldn't change whispers from {who}."),
+                    (_, true) => format!("Whispers from {who} were already blocked."),
+                    (_, false) => format!("{who} wasn't blocked."),
                 };
                 self.hud.push_chat(ro_net::ChatKind::System, msg);
             }
             IgnoreList(names) => {
                 let msg = if names.is_empty() { "You aren't blocking anyone's whispers.".into() } else { format!("Blocked: {}", names.join(", ")) };
                 self.hud.push_chat(ro_net::ChatKind::System, msg);
+            }
+            BookingResult { delete, result } => {
+                self.booking.status = match (delete, result) {
+                    (false, 0) => {
+                        self.booking.posted = true;
+                        "Your ad is posted.".into()
+                    }
+                    (false, 2) => {
+                        self.booking.posted = true;
+                        "You already have an ad posted.".into()
+                    }
+                    (false, _) => "Couldn't post the ad.".into(),
+                    (true, 0) => {
+                        self.booking.posted = false;
+                        "Your ad was removed.".into()
+                    }
+                    (true, _) => "Couldn't remove the ad.".into(),
+                };
+                let level = self.hud.status.base_level.clamp(1, 999) as u16;
+                let _ = level;
+                    self.send(ro_net::Command::Booking(ro_net::BookingRequest::Search { level: 0, map: 0, job: 0xffff }));
+            }
+            BookingList(ads) => {
+                let me = self.hud.status.name.clone();
+                self.booking.posted = ads.iter().any(|a| a.leader == me) || self.booking.posted;
+                self.booking.ads = ads;
             }
             RoomSign(room) => {
                 if room.owner == self.account_id {
@@ -2746,6 +2776,12 @@ impl App {
             "b" => self.toggle_bank(),
             "c" => self.toggle_cash_shop(),
             "y" => self.progress.open = !self.progress.open,
+            "n" => {
+                self.booking.open = !self.booking.open;
+                if self.booking.open {
+                    self.send(ro_net::Command::Booking(ro_net::BookingRequest::Search { level: 0, map: 0, job: 0xffff }));
+                }
+            }
             "k" => {
                 let me = self.hud.status.name.clone();
                 self.rooms.open_create(&me);
@@ -3601,6 +3637,12 @@ impl App {
                         }
                         None
                     }
+                    // postad posts a party booking ad at our level minus ten.
+                    Some(("postad", _)) => {
+                        let level = (self.hud.status.base_level.clamp(1, 999) as u16).saturating_sub(10).max(1);
+                        self.send(ro_net::Command::Booking(ro_net::BookingRequest::Register { level, map: 0, jobs: vec![] }));
+                        None
+                    }
                     // altkey:x presses Alt+x.
                     Some(("altkey", k)) => {
                         self.alt_key(k);
@@ -4234,6 +4276,14 @@ impl App {
                 for req in self.rooms.show(ui.ctx(), &me).into_iter().chain(self.rooms.show_signs(ui.ctx(), &room_signs)) {
                     self.queued_commands.push(ro_net::Command::ChatRoom(req));
                 }
+                let my_level = self.hud.status.base_level.clamp(1, 999) as u16;
+                let job_name = |j: u16| jobs::title(j as i16).to_string();
+                for a in self.booking.show(ui.ctx(), my_level, &job_name) {
+                    match a {
+                        booking::BookingAction::Send(r) => self.queued_commands.push(ro_net::Command::Booking(r)),
+                        booking::BookingAction::Whisper(name) => self.hud.set_input(format!("/w \"{name}\" ")),
+                    }
+                }
                 if let Some(req) = self.progress.show(ui.ctx(), self.item_db.as_ref(), &self.icons) {
                     self.queued_commands.push(ro_net::Command::Progress(req));
                 }
@@ -4757,6 +4807,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         rooms: Default::default(),
+        booking: Default::default(),
         ignore_pending: None,
         companion_action: None,
         follow_at: std::time::Instant::now(),

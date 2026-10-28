@@ -142,6 +142,12 @@ fn bar(ui: &mut egui::Ui, label: &str, value: i64, max: i64, color: Color32, sho
 }
 
 impl Hud {
+    /// Puts text in the chat box and focuses it (e.g. a whisper to finish typing).
+    pub fn set_input(&mut self, text: String) {
+        self.input = text;
+        self.want_focus = true;
+    }
+
     pub fn push_chat(&mut self, kind: ChatKind, text: String) {
         self.chat.push_back((kind, text));
         while self.chat.len() > CHAT_LINES {

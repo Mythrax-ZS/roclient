@@ -169,3 +169,64 @@ pub fn parse_ignore_list(data: &[u8]) -> Vec<String> {
     }
     out
 }
+
+/// A party booking (recruitment) ad.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BookingAd {
+    pub index: u32,
+    pub leader: String,
+    pub level: u16,
+    pub map: u16,
+    /// Wanted jobs (0xffff/empty: any).
+    pub jobs: Vec<u16>,
+}
+
+/// ZC_PARTY_BOOKING_ACK_SEARCH (0x0805): (more results, ads).
+pub fn parse_booking_list(data: &[u8]) -> (bool, Vec<BookingAd>) {
+    let more = data.get(4).copied().unwrap_or(0) != 0;
+    let Some(mut b) = data.get(5..) else { return (more, vec![]) };
+    let mut out = vec![];
+    while b.len() >= 48 {
+        let index = b.get_u32_le();
+        let leader = get_fixed_str(&mut b, 24);
+        b.advance(4); // time
+        let (level, map) = (b.get_u16_le(), b.get_u16_le());
+        let jobs = (0..6).map(|_| b.get_u16_le()).filter(|j| *j != 0xffff).collect();
+        out.push(BookingAd { index, leader, level, map, jobs });
+    }
+    (more, out)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BookingRequest {
+    /// CZ_PARTY_BOOKING_REQ_REGISTER: minimum level, map id (0 any), up to six wanted jobs.
+    Register { level: u16, map: u16, jobs: Vec<u16> },
+    /// CZ_PARTY_BOOKING_REQ_SEARCH (job 0xffff = any).
+    Search { level: u16, map: u16, job: u16 },
+    Delete,
+}
+
+impl Encode for BookingRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            BookingRequest::Register { level, map, jobs } => {
+                d.put_u16_le(0x0802);
+                d.put_u16_le(*level);
+                d.put_u16_le(*map);
+                // The server reads each job as a byte, two bytes apart.
+                for i in 0..6 {
+                    d.put_u16_le(jobs.get(i).copied().unwrap_or(0xff));
+                }
+            }
+            BookingRequest::Search { level, map, job } => {
+                d.put_u16_le(0x0804);
+                d.put_u16_le(*level);
+                d.put_u16_le(*map);
+                d.put_u16_le(*job);
+                d.put_u32_le(0);
+                d.put_u16_le(10);
+            }
+            BookingRequest::Delete => d.put_u16_le(0x0806),
+        }
+    }
+}
