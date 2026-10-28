@@ -17,6 +17,8 @@ use ro_proto::items::*;
 pub use ro_proto::guild::{GuildInfo, GuildMember, GuildRequest, GuildSkill, Position};
 use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
+pub use ro_proto::quests::{Objective, Quest};
+use ro_proto::quests::*;
 use ro_proto::menus::*;
 pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
 use ro_proto::social::*;
@@ -278,6 +280,15 @@ pub enum Event {
     WhisperResult(u8),
     /// ZC_SKILL_POSTDELAY: a skill can't be used again for this long.
     SkillCooldown { skill: u16, ms: u32 },
+    /// The whole quest log (on entering the map).
+    Quests(Vec<Quest>),
+    QuestAdded(Quest),
+    QuestRemoved(u32),
+    /// Hunting progress: (quest, hunt id, total, count).
+    QuestProgress(Vec<(u32, u32, u16, u16)>),
+    QuestActiveChanged { quest: u32, active: bool },
+    /// A marker over an NPC (9999: none).
+    QuestMark { npc: u32, mark: u16, color: u16 },
     /// A pick-one menu from a skill or item.
     Menu(Menu),
     /// ZC_ACK_REQMAKINGITEM: making an item (ok, item id).
@@ -340,6 +351,8 @@ pub enum Command {
     Emotion(u8),
     /// Answer a skill or item menu.
     Menu(MenuReply),
+    /// Show (true) or hide a quest in the active list.
+    QuestActive { quest: u32, active: bool },
     /// Login screen.
     Login { user: String, pass: String },
     SelectServer(usize),
@@ -466,6 +479,7 @@ impl MapSession {
                     Some(Command::Whisper { to, text }) => self.send(CzWhisper { to: &to, text: &text }).await?,
                     Some(Command::Emotion(e)) => self.send(CzEmotion(e)).await?,
                     Some(Command::Menu(reply)) => self.send(reply).await?,
+                    Some(Command::QuestActive { quest, active }) => self.send(CzActiveQuest { quest, active }).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
@@ -673,6 +687,12 @@ impl MapSession {
                         }
                         0x00c0 if data.len() >= 7 => Some(Event::Emotion { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), kind: data[6] }),
                         0x09df if data.len() >= 3 => Some(Event::WhisperResult(data[2])),
+                        0x09f8 => Some(Event::Quests(parse_quest_list(&data))),
+                        0x09f9 => parse_quest_add(&data).map(Event::QuestAdded),
+                        0x02b4 if data.len() >= 6 => Some(Event::QuestRemoved(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x09fa => Some(Event::QuestProgress(parse_hunt_update(&data))),
+                        0x02b7 if data.len() >= 7 => Some(Event::QuestActiveChanged { quest: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), active: data[6] != 0 }),
+                        0x0446 => parse_quest_mark(&data).map(|(npc, mark, color)| Event::QuestMark { npc, mark, color }),
                         0x043d if data.len() >= 8 => Some(Event::SkillCooldown { skill: u16::from_le_bytes([data[2], data[3]]), ms: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
                         0x01ad | 0x018d | 0x025a | 0x0abe | 0x0afb | 0x0177 | 0x0442 | 0x01a6 => parse_menu(opcode, &data).map(Event::Menu),
                         0x018f => parse_make_result(&data).map(|(ok, item)| Event::MakeResult { ok, item }),

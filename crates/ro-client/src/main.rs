@@ -10,6 +10,7 @@ mod guild;
 mod hud;
 mod jobs;
 mod preview;
+mod quests;
 mod screens;
 mod buffs;
 mod emotes;
@@ -787,6 +788,8 @@ struct App {
     queued_chat: Vec<String>,
     /// Our buffs and debuffs (the icon column).
     buffs: buffs::Buffs,
+    /// The quest log and NPC quest marks.
+    quests: quests::QuestLog,
     /// Skills cooling down: id -> ready again at.
     cooldowns: std::collections::HashMap<u16, std::time::Instant>,
     /// When a paused (`wait:`) test script carries on.
@@ -1228,6 +1231,27 @@ impl App {
                 let name = self.item_db.as_ref().map_or_else(|| format!("item {item}"), |d| d.name(item, true));
                 let msg = if ok { format!("You made {name}.") } else { format!("Making {name} failed.") };
                 self.hud.push_chat(ro_net::ChatKind::System, msg);
+            }
+            Quests(list) => self.quests.quests = list.into_iter().map(|q| (q.id, q)).collect(),
+            QuestAdded(q) => {
+                self.hud.push_chat(ro_net::ChatKind::System, format!("Quest accepted: {}", self.quests.title(q.id)));
+                self.quests.quests.insert(q.id, q);
+            }
+            QuestRemoved(id) => {
+                self.quests.quests.remove(&id);
+            }
+            QuestProgress(updates) => self.quests.progress(&updates),
+            QuestActiveChanged { quest, active } => {
+                if let Some(q) = self.quests.quests.get_mut(&quest) {
+                    q.active = active;
+                }
+            }
+            QuestMark { npc, mark, color } => {
+                if mark == 9999 {
+                    self.quests.marks.remove(&npc);
+                } else {
+                    self.quests.marks.insert(npc, (mark, color));
+                }
             }
             SkillCooldown { skill, ms } => {
                 self.cooldowns.insert(skill, std::time::Instant::now() + std::time::Duration::from_millis(ms as u64));
@@ -2850,6 +2874,7 @@ impl App {
         }
         if std::mem::take(&mut self.open_windows) {
             let args: Vec<String> = std::env::args().collect();
+            self.quests.open = args.iter().any(|a| a == "--quest-win");
             if args.iter().any(|a| a == "--skills-win") { self.windows.skills = true; self.windows.skill_list = args.iter().any(|a| a == "--skill-list"); self.windows.skill_tab = args.iter().skip_while(|a| *a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()); } else { self.windows.guild = true; }
             self.guild.start_tab = std::env::args().skip_while(|a| a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()).unwrap_or(0);
         }
@@ -3087,6 +3112,13 @@ impl App {
         // The controller's target, marked over its head.
         let pad_marker = self.pad_target.filter(|_| self.pad.in_use()).and_then(|t| self.units.get(&t)).and_then(|m| r.project(m.actor.pos, size));
         // Cast bars over whoever is chanting.
+        // Quest marks over NPC heads (screen pixels).
+        let quest_marks: Vec<(glam::Vec2, u16, u16)> = self
+            .quests
+            .marks
+            .iter()
+            .filter_map(|(id, &(mark, color))| Some((r.project(self.units.get(id)?.actor.pos + glam::Vec3::Y * ro_render::CELL * 3.0, size)?, mark, color)))
+            .collect();
         let cast_bars: Vec<_> = self
             .casts
             .iter()
@@ -3189,6 +3221,19 @@ impl App {
                 }
                 if let Some(vfs) = self.vfs.as_ref() {
                     self.buffs.show(ui.ctx(), vfs, if self.settings.minimap && self.minimap.is_some() { 270.0 } else { 60.0 });
+                }
+                if let Some(vfs) = self.vfs.as_ref() {
+                    let ppp = ui.ctx().pixels_per_point();
+                    let painter = ui.ctx().layer_painter(egui::LayerId::background());
+                    for (p, mark, color) in &quest_marks {
+                        if let Some(tex) = self.quests.mark_icon(ui.ctx(), vfs, *mark, *color) {
+                            let rect = egui::Rect::from_center_size(egui::pos2(p.x / ppp, p.y / ppp), tex.size_vec2() * 2.0);
+                            painter.image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                        }
+                    }
+                }
+                if let Some((quest, active)) = self.quests.show(ui.ctx()) {
+                    self.queued_commands.push(ro_net::Command::QuestActive { quest, active });
                 }
                 if self.esc_menu {
                     match hud::esc_menu(ui.ctx()) {
@@ -3513,6 +3558,7 @@ impl ApplicationHandler for App {
                             self.settings.save();
                         }
                         "o" => self.windows.settings = !self.windows.settings,
+                        "u" => self.quests.open = !self.quests.open,
                         // Alt+1..Alt+0: the emote shortcuts.
                         d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => {
                             if let Some((tx, _)) = self.net.as_ref() {
@@ -3712,6 +3758,7 @@ fn main() -> anyhow::Result<()> {
         last_whisper_from: None,
         queued_chat: vec![],
         buffs: Default::default(),
+        quests: Default::default(),
         cooldowns: Default::default(),
         script_resume: None,
         pad: gamepad::Pad::new(),
@@ -3786,6 +3833,7 @@ fn main() -> anyhow::Result<()> {
         let read = |p: &str| vfs.read(p).ok().flatten();
         app.fx.index(vfs);
         app.buffs = buffs::Buffs::load(vfs);
+        app.quests = quests::QuestLog::load(vfs);
         // Achievement titles, for the "achievement complete" notice.
         if let Some(d) = read(r"System\achievement_list.lub") {
             match ro_formats::lub::eval(&d) {
