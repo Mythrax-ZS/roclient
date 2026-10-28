@@ -22,6 +22,7 @@ mod ai;
 mod booking;
 mod battle;
 mod clan;
+mod stylist;
 mod reform;
 mod enchant;
 mod market;
@@ -826,6 +827,7 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    stylist: stylist::Stylist,
     reform: reform::Reform,
     enchant: enchant::Enchant,
     market: market::Market,
@@ -1794,6 +1796,10 @@ impl App {
                 }
                 self.progress.attendance = Some(data);
             }
+            UiOpen { kind: 1, .. } => {
+                let (hair, color) = self.player.as_ref().and_then(|p| p.look.as_ref()).map_or((1, 0), |l| (l.hair, l.hair_color));
+                self.stylist.open(hair, color, 0);
+            }
             UiOpen { kind: 8, .. } => {
                 self.grade.open = true;
             }
@@ -2532,6 +2538,7 @@ impl App {
             }
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
+            StyleResult(failed) => self.stylist.result(failed),
             ReformOpen(tool) => self.reform.open(self.vfs.as_ref(), tool),
             ReformResult { result, .. } => self.reform.result(result == 0),
             UiOpenV3 { kind: 10, data } => self.enchant.open(self.vfs.as_ref(), data),
@@ -3964,6 +3971,11 @@ impl App {
                         }
                         None
                     }
+                    Some(("style", h)) => {
+                        let o = self.stylist.test_order(h.parse().unwrap_or(1));
+                        self.queued_commands.push(ro_net::Command::Style(ro_net::StyleRequest::Buy { hair_color: o.hair_color, hair: o.hair, clothes_color: o.clothes_color }));
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -4376,7 +4388,7 @@ impl App {
         if let Some(key) = self.hud.menu_click.take().or_else(|| self.windows.menu_key.take()) {
             self.alt_key(key);
         }
-        if self.windows.equipment {
+        if self.windows.equipment || self.stylist.open {
             self.refresh_portrait();
         }
         if let (Some(w), Some(p)) = (self.world.as_ref(), self.player.as_ref()) {
@@ -4776,6 +4788,14 @@ impl App {
                     v
                 };
                 self.clan.show(ui.ctx());
+                {
+                    let base = self.portrait.as_ref().map(|p| p.0.clone());
+                    match self.stylist.show(ui.ctx(), self.vfs.as_ref(), base) {
+                        Some(Some(o)) => self.queued_commands.push(ro_net::Command::Style(ro_net::StyleRequest::Buy { hair_color: o.hair_color, hair: o.hair, clothes_color: o.clothes_color })),
+                        Some(None) => self.queued_commands.push(ro_net::Command::Style(ro_net::StyleRequest::Close)),
+                        None => {}
+                    }
+                }
                 {
                     let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
                     if let Some(a) = self.reform.show(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons) {
@@ -5367,6 +5387,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        stylist: Default::default(),
         reform: Default::default(),
         enchant: Default::default(),
         market: Default::default(),

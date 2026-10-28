@@ -34,7 +34,7 @@ pub use ro_proto::chatroom::{BookingAd, BookingRequest, ChatRoomRequest, IgnoreR
 use ro_proto::chatroom::*;
 use ro_proto::quests::*;
 use ro_proto::menus::*;
-pub use ro_proto::social::{ClanInfo, Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
+pub use ro_proto::social::{ClanInfo, StyleRequest, Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
 use ro_proto::social::*;
 
 type Conn = Framed<TcpStream, RoCodec<ServerTable>>;
@@ -372,6 +372,8 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_STYLE_CHANGE_RES: true when the stylist refused.
+    StyleResult(bool),
     /// ZC_OPEN_REFORM_UI (the tool item) / ZC_ITEM_REFORM_ACK (index, result: 0 ok).
     ReformOpen(u32),
     ReformResult { index: u16, result: u8 },
@@ -547,6 +549,7 @@ pub enum Command {
     Reform(ReformRequest),
     Bg(BgRequest),
     Castle(CastleRequest),
+    Style(StyleRequest),
     Market(MarketRequest),
     Bank(BankRequest),
     BuyingStore(BuyingStoreRequest),
@@ -696,6 +699,7 @@ impl MapSession {
                     Some(Command::Reform(r)) => self.send(r).await?,
                     Some(Command::Bg(r)) => self.send(r).await?,
                     Some(Command::Castle(r)) => self.send(r).await?,
+                    Some(Command::Style(r)) => self.send(r).await?,
                     Some(Command::Market(r)) => self.send(r).await?,
                     Some(Command::Bank(r)) => self.send(r).await?,
                     Some(Command::BuyingStore(r)) => self.send(r).await?,
@@ -803,6 +807,7 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0a47 if data.len() >= 3 => Some(Event::StyleResult(data[2] != 0)),
                         0x0b8f if data.len() >= 6 => Some(Event::ReformOpen(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x0b92 if data.len() >= 5 => Some(Event::ReformResult { index: u16::from_le_bytes([data[2], data[3]]), result: data[4] }),
                         0x0b9a if data.len() >= 11 => Some(Event::UiOpenV3 { kind: data[2], data: u64::from_le_bytes(data[3..11].try_into().unwrap()) }),

@@ -511,3 +511,24 @@ pub fn parse_name_all(data: &[u8]) -> Option<(u32, String, String, String, Strin
     let id = b.get_u32_le();
     Some((id, get_fixed_str(&mut b, 24), get_fixed_str(&mut b, 24), get_fixed_str(&mut b, 24), get_fixed_str(&mut b, 24)))
 }
+
+/// CZ_REQ_STYLE_CHANGE2 (indices; 0 unchanged) / CZ_REQ_STYLE_CLOSE.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StyleRequest {
+    Buy { hair_color: i16, hair: i16, clothes_color: i16 },
+    Close,
+}
+
+impl Encode for StyleRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            StyleRequest::Buy { hair_color, hair, clothes_color } => {
+                d.put_u16_le(0x0afc);
+                for v in [*hair_color, *hair, *clothes_color, 0, 0, 0, 0] {
+                    d.put_i16_le(v);
+                }
+            }
+            StyleRequest::Close => d.put_u16_le(0x0a48),
+        }
+    }
+}

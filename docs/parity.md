@@ -15,7 +15,8 @@ Ticked items are handled and tested in game against the local server.
 - [ ] ZC_NOTIFY_EFFECT3, ZC_REMOVE_EFFECT, ZC_EQUIPMENT_EFFECT (hat effects)
 - [x] ZC_NPC_MARKET_OPEN / PURCHASE_RESULT (market shops)
 - [x] ZC_NPC_BARTER_MARKET_ITEMINFO / EXPANDED_BARTER (barter shops)
-- [ ] ZC_STYLE_CHANGE_RES (stylist), ZC_DRESSROOM_OPEN
+- [x] Stylist (openstylist: hair, hair colour, clothes colour, live preview)
+- [ ] ZC_DRESSROOM_OPEN
 - [ ] ZC_ADD_SKILL, ZC_SKILLINFO_UPDATE2, ZC_SKILLINFO_DELETE (`skill` / `bonus_script` skills)
 - [x] Random enchant (ZC_UI_OPEN_V3 + ZC_RESPONSE_ENCHANT) from the official enchantlist.lub (32-bit bytecode widened and run)
 - [x] Item reform (ZC_OPEN_REFORM_UI / ITEM_REFORM_ACK) from itemreformsystem.lub
