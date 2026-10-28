@@ -55,6 +55,11 @@ impl ItemDb {
         Ok(Self { items })
     }
 
+    /// Adds or replaces entries (a server's custom itemInfo over the stock table).
+    pub fn extend(&mut self, items: impl IntoIterator<Item = (u32, ItemInfo)>) {
+        self.items.extend(items);
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }

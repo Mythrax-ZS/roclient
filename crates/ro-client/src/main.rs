@@ -22,6 +22,7 @@ mod ai;
 mod booking;
 mod battle;
 mod clan;
+mod customdata;
 mod navigation;
 mod grade;
 mod buffs;
@@ -893,6 +894,8 @@ struct App {
     auto_pickup: bool,
     /// `--talk name`: talk to the first NPC with this name once in view (scripted test).
     talk_to: Option<String>,
+    /// Test hook (--npc-answers): replies to NPC dialog steps, in order.
+    npc_answers: std::collections::VecDeque<String>,
     /// `--attack`: attack the nearest monster once one is in view (scripted test).
     auto_attack: bool,
     /// Other units in view, by id.
@@ -4632,6 +4635,30 @@ impl App {
                 Some(screens::Action::Quit) => self.quit = true,
                 None => {}
             }
+            if answer.is_none() {
+                if let Some(d) = self.dialog.as_mut().filter(|d| !matches!(d.mode, hud::DialogMode::Reading)) {
+                    if let Some(a) = self.npc_answers.pop_front() {
+                        tracing::info!(answer = %a, "npc answer");
+                        let reply = match a.split_once(':') {
+                            Some(("menu", n)) => ro_net::NpcReply::Menu(n.parse().unwrap_or(1)),
+                            Some(("num", n)) => ro_net::NpcReply::Number(n.parse().unwrap_or(0)),
+                            Some(("text", t)) => ro_net::NpcReply::Text(t.to_string()),
+                            _ if a == "close" => ro_net::NpcReply::Close,
+                            _ => ro_net::NpcReply::Next,
+                        };
+                        let npc = d.npc;
+                        match reply {
+                            ro_net::NpcReply::Close => self.dialog = None,
+                            ro_net::NpcReply::Next | ro_net::NpcReply::Menu(_) => {
+                                d.mode = hud::DialogMode::Reading;
+                                d.lines.clear();
+                            }
+                            _ => d.mode = hud::DialogMode::Reading,
+                        }
+                        answer = Some((npc, reply));
+                    }
+                }
+            }
             if let (Some((npc, reply)), Some((tx, _))) = (answer, self.net.as_ref()) {
                 if reply == ro_net::NpcReply::Close {
                     self.cutin = None;
@@ -5077,6 +5104,7 @@ fn main() -> anyhow::Result<()> {
         auto_pickup: false,
         script: arg("--do").map(|s| s.split(",").map(str::to_string).collect()).unwrap_or_default(),
         talk_to: arg("--talk"),
+        npc_answers: arg("--npc-answers").map(|s| s.split(',').map(str::to_string).collect()).unwrap_or_default(),
         auto_attack: args.iter().any(|a| a == "--attack"),
         units: Default::default(),
         warps: Default::default(),
@@ -5131,7 +5159,12 @@ fn main() -> anyhow::Result<()> {
         msgstr::load(vfs);
         app.item_info = iteminfo::ItemInfo::load(vfs);
         match read(r"System\iteminfo.lub").map(|d| ro_game::items::ItemDb::from_lub(&d)) {
-            Some(Ok(db)) => {
+            Some(Ok(mut db)) => {
+                for p in customdata::ITEMINFO_SOURCES {
+                    if let Some(src) = read(p) {
+                        db.extend(customdata::iteminfo(&src, p));
+                    }
+                }
                 tracing::info!(items = db.len(), "loaded item info");
                 app.item_db = Some(db);
             }

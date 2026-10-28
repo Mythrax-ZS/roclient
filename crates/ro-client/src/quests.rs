@@ -22,16 +22,23 @@ pub struct QuestLog {
 impl QuestLog {
     pub fn load(vfs: &ro_vfs::Vfs) -> Self {
         let mut q = Self::default();
-        let Some(c) = vfs.read(r"System\OngoingQuestInfoList_True.lub").ok().flatten().and_then(|d| ro_formats::lub::eval(&d).ok()) else {
+        let chunk = vfs.read(r"System\OngoingQuestInfoList_True.lub").ok().flatten().and_then(|d| ro_formats::lub::eval(&d).ok());
+        if chunk.is_none() {
             tracing::warn!("OngoingQuestInfoList_True.lub not found; quests show by id");
-            return q;
-        };
+        }
+        if let Some(c) = &chunk {
         for (_, table) in c.globals.iter().filter(|(n, _)| *n == "QuestInfoList") {
             for (id, entry) in c.entries(table) {
                 let Some(id) = id.as_number() else { continue };
                 let s = |k: &str| c.field(entry, k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
                 let desc = c.field(entry, "Description").map(|d| c.entries(d).iter().filter_map(|(_, l)| l.as_str().map(str::to_string)).collect()).unwrap_or_default();
                 q.info.insert(id as u32, (s("Title"), s("Summary"), desc));
+            }
+        }
+        }
+        for p in crate::customdata::QUESTINFO_SOURCES {
+            if let Some(src) = vfs.read(p).ok().flatten() {
+                q.info.extend(crate::customdata::questinfo(&src, p));
             }
         }
         tracing::info!(quests = q.info.len(), "quest descriptions");

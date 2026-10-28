@@ -53,3 +53,39 @@ packetgen compiles a small program against rAthena's real headers (`map/packets.
 length, opcode and field offset is the one the server itself uses, with no re-implemented
 `#if PACKETVER` logic. Client packets are encoded from the handler's most recent
 registration (`client_packet("WalkToXY")`), so shuffled opcodes follow the table.
+
+## Custom items and quests
+
+The server's databases (`db/import/item_db.yml`, `quest_db.yml`) decide what an item or
+quest does; the client's data files only give it a name, icon and description. Like the
+original client, roclient reads the stock compiled tables and then, from the client
+folder, any plain-text Lua with the same layout, whose entries override the stock ones:
+
+| What | Stock (compiled) | Text overrides, read in this order |
+|---|---|---|
+| Items | `System/iteminfo.lub` | `System/itemInfo.lua`, `System/iteminfo_custom.lua` |
+| Quests | `System/OngoingQuestInfoList_True.lub` | `System/OngoingQuestInfoList_True.lua`, `System/questinfo_custom.lua` |
+
+Write them in CP949 (EUC-KR), like the originals:
+
+```lua
+tbl = {
+	[990001] = {
+		unidentifiedDisplayName = [=[Dagger]=],
+		unidentifiedResourceName = [=[나이프]=],   -- icon/sprite name under data\texture\...\item\
+		unidentifiedDescriptionName = { [=[An unknown item.]=] },
+		identifiedDisplayName = [=[Custom Test Blade]=],
+		identifiedResourceName = [=[나이프]=],
+		identifiedDescriptionName = { [=[A blade added by this server.]=] },
+		slotCount = 2,
+		ClassNum = 1,                                -- weapon/headgear view
+	},
+}
+
+QuestInfoList = {
+	[990100] = { Title = "Client Test Hunt", Summary = "Hunt 3 Porings", Description = { "..." } },
+}
+```
+
+An item or quest the client has no entry for still works; it shows as `Item #id` /
+`Quest id` with no icon.
