@@ -1,0 +1,602 @@
+//! The screens before the game, laid out like the original client: login (with account
+//! registration), server select, character select (three slots per page, preview and
+//! details, delete with the 24 hour timer) and character creation (name, gender, hair
+//! style and colour with a live preview).
+
+use std::collections::HashMap;
+
+use egui::{Align2, Color32, RichText, Vec2};
+use ro_net::{CharInfo, CharRequest, Command};
+
+use crate::preview;
+
+/// Hair choices offered when creating a character.
+const HAIR_STYLES: std::ops::RangeInclusive<u16> = 1..=27;
+const HAIR_COLORS: std::ops::RangeInclusive<u16> = 0..=8;
+/// Doram have fewer hair styles.
+const DORAM_HAIR: u16 = 10;
+const SLOTS_PER_PAGE: u8 = 3;
+
+pub enum Screen {
+    Login,
+    Register,
+    Servers(Vec<(String, u16)>),
+    Select,
+    Create { slot: u8 },
+    /// Waiting for the map server after picking a character.
+    Loading,
+}
+
+pub struct Front {
+    pub screen: Screen,
+    user: String,
+    pass: String,
+    pub remember: bool,
+    reg_user: String,
+    reg_pass: String,
+    reg_pass2: String,
+    reg_male: bool,
+    message: Option<(String, bool)>,
+    busy: bool,
+    chars: Vec<CharInfo>,
+    slots: u8,
+    selected: u8,
+    page: u8,
+    /// Pending deletions: char id -> when it can be confirmed.
+    deleting: HashMap<u32, std::time::Instant>,
+    birthdate: String,
+    // Character creation.
+    name: String,
+    male: bool,
+    hair: u16,
+    hair_color: u16,
+    summoner: bool,
+    /// Preview textures by look.
+    previews: HashMap<String, Option<egui::TextureHandle>>,
+}
+
+/// What the screens need from the client.
+pub struct Ctx<'a> {
+    pub vfs: Option<&'a ro_vfs::Vfs>,
+    pub job_title: &'a dyn Fn(i16) -> &'static str,
+    pub job_sprite: &'a dyn Fn(i16) -> &'static str,
+    pub accessory: &'a dyn Fn(u16) -> Option<String>,
+}
+
+/// What the player chose.
+pub enum Action {
+    Send(Command),
+    /// Back to the login screen (the session restarts).
+    Logout,
+    Quit,
+}
+
+impl Front {
+    pub fn new(user: String, remember: bool) -> Self {
+        Self {
+            screen: Screen::Login,
+            user,
+            pass: String::new(),
+            remember,
+            reg_user: String::new(),
+            reg_pass: String::new(),
+            reg_pass2: String::new(),
+            reg_male: true,
+            message: None,
+            busy: false,
+            chars: vec![],
+            slots: 9,
+            selected: 0,
+            page: 0,
+            deleting: HashMap::new(),
+            birthdate: String::new(),
+            name: String::new(),
+            male: true,
+            hair: 1,
+            hair_color: 0,
+            summoner: false,
+            previews: HashMap::new(),
+        }
+    }
+
+    /// Test hook: open character creation on the first empty slot.
+    pub fn open_create(&mut self) {
+        let slot = (0..self.slots).find(|s| !self.chars.iter().any(|c| c.slot == *s)).unwrap_or(0);
+        (self.male, self.hair, self.hair_color) = (false, 9, 4);
+        self.start_create(slot);
+    }
+
+    pub fn user(&self) -> &str {
+        &self.user
+    }
+
+    /// Network events for these screens. Returns true if it was one of theirs.
+    pub fn event(&mut self, e: &ro_net::Event) -> bool {
+        use ro_net::Event::*;
+        match e {
+            LoginFailed(msg) => {
+                self.busy = false;
+                self.message = Some((msg.clone(), true));
+                if !matches!(self.screen, Screen::Register) {
+                    self.screen = Screen::Login;
+                }
+            }
+            Servers(list) => {
+                self.busy = false;
+                self.screen = Screen::Servers(list.clone());
+            }
+            Characters { chars, slots } => {
+                self.busy = false;
+                self.message = None;
+                self.chars = chars.clone();
+                self.slots = (*slots).max(SLOTS_PER_PAGE);
+                self.deleting = chars
+                    .iter()
+                    .filter(|c| c.delete_date > 0)
+                    .map(|c| (c.char_id, std::time::Instant::now() + std::time::Duration::from_secs(c.delete_date as u64)))
+                    .collect();
+                self.selected = self.chars.first().map_or(0, |c| c.slot);
+                self.page = self.selected / SLOTS_PER_PAGE;
+                self.screen = Screen::Select;
+            }
+            // (Characters arrive above; a test hook may ask for the create screen.)
+            CharCreated(c) => {
+                self.busy = false;
+                self.selected = c.slot;
+                self.chars.retain(|x| x.slot != c.slot);
+                self.chars.push(c.clone());
+                self.message = Some((format!("{} was created.", c.name), false));
+                self.screen = Screen::Select;
+            }
+            CharCreateFailed(code) => {
+                self.busy = false;
+                let why = match code {
+                    0 => "That name is already taken.",
+                    1 => "You are not old enough to create a character.",
+                    2 => "Symbols are not allowed in the name.",
+                    3 => "This slot cannot be used.",
+                    11 => "This slot is for premium accounts.",
+                    _ => "The character could not be created.",
+                };
+                self.message = Some((why.into(), true));
+            }
+            CharDeleteStarted { char_id, result, seconds } => {
+                self.busy = false;
+                if *result == 1 {
+                    self.deleting.insert(*char_id, std::time::Instant::now() + std::time::Duration::from_secs(*seconds as u64));
+                    self.message = Some(("Deletion reserved. Confirm it once the timer ends.".into(), false));
+                } else {
+                    let why = match result {
+                        4 => "Leave your guild before deleting this character.",
+                        5 => "Leave your party before deleting this character.",
+                        _ => "The character could not be deleted.",
+                    };
+                    self.message = Some((why.into(), true));
+                }
+            }
+            CharDeleted { char_id, result } => {
+                self.busy = false;
+                if *result == 1 {
+                    self.chars.retain(|c| c.char_id != *char_id);
+                    self.deleting.remove(char_id);
+                    self.message = Some(("Character deleted.".into(), false));
+                } else {
+                    let why = match result {
+                        5 => "Incorrect birthdate.",
+                        4 => "The deletion time has not been reached yet.",
+                        _ => "The character could not be deleted.",
+                    };
+                    self.message = Some((why.into(), true));
+                }
+            }
+            CharDeleteCanceled { char_id, result } => {
+                self.busy = false;
+                if *result == 1 {
+                    self.deleting.remove(char_id);
+                    self.message = Some(("Deletion cancelled.".into(), false));
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn preview(&mut self, ctx: &egui::Context, c: &Ctx, look: preview::Look) -> Option<egui::TextureHandle> {
+        let key = format!("{look:?}");
+        if let Some(t) = self.previews.get(&key) {
+            return t.clone();
+        }
+        let tex = c.vfs.and_then(|v| preview::compose(v, &look)).map(|img| ctx.load_texture(format!("preview {key}"), img, egui::TextureOptions::NEAREST));
+        self.previews.insert(key, tex.clone());
+        tex
+    }
+
+    fn char_look(c: &Ctx, ch: &CharInfo) -> preview::Look {
+        let mut headgear = vec![];
+        for v in [ch.look.head_bottom, ch.look.head_mid, ch.look.head_top] {
+            if let Some(n) = (v != 0).then(|| (c.accessory)(v)).flatten() {
+                if !headgear.contains(&n) {
+                    headgear.push(n);
+                }
+            }
+        }
+        preview::Look { job: (c.job_sprite)(ch.job).to_string(), male: ch.sex == 1, hair: ch.head.max(1) as u16, hair_color: ch.hair_color as u16, headgear }
+    }
+
+    /// Draws the current screen.
+    pub fn show(&mut self, ctx: &egui::Context, c: &Ctx) -> Option<Action> {
+        let mut action = None;
+        let window = |title: &str| egui::Window::new(title).collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 40.0));
+        match &self.screen {
+            Screen::Login => {
+                window("Login").show(ctx, |ui| {
+                    ui.set_width(300.0);
+                    egui::Grid::new("login").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+                        ui.label("ID");
+                        let id = ui.add(egui::TextEdit::singleline(&mut self.user).desired_width(200.0));
+                        if self.user.is_empty() {
+                            id.request_focus();
+                        }
+                        ui.end_row();
+                        ui.label("Password");
+                        let pw = ui.add(egui::TextEdit::singleline(&mut self.pass).password(true).desired_width(200.0));
+                        if !self.user.is_empty() && self.pass.is_empty() && !ui.ctx().memory(|m| m.focused().is_some()) {
+                            pw.request_focus();
+                        }
+                        ui.end_row();
+                    });
+                    ui.checkbox(&mut self.remember, "Remember ID");
+                    self.message_line(ui);
+                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    ui.horizontal(|ui| {
+                        let ok = !self.busy && !self.user.trim().is_empty() && !self.pass.is_empty();
+                        if ui.add_enabled(ok, egui::Button::new("Login")).clicked() || (ok && enter) {
+                            self.busy = true;
+                            self.message = Some(("Connecting...".into(), false));
+                            action = Some(Action::Send(Command::Login { user: self.user.trim().to_string(), pass: self.pass.clone() }));
+                        }
+                        if ui.button("Register").clicked() {
+                            self.message = None;
+                            self.screen = Screen::Register;
+                        }
+                        if ui.button("Exit").clicked() {
+                            action = Some(Action::Quit);
+                        }
+                    });
+                });
+            }
+            Screen::Register => {
+                window("Create Account").show(ctx, |ui| {
+                    ui.set_width(300.0);
+                    egui::Grid::new("register").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+                        ui.label("ID");
+                        ui.add(egui::TextEdit::singleline(&mut self.reg_user).desired_width(200.0).char_limit(21));
+                        ui.end_row();
+                        ui.label("Password");
+                        ui.add(egui::TextEdit::singleline(&mut self.reg_pass).password(true).desired_width(200.0));
+                        ui.end_row();
+                        ui.label("Confirm");
+                        ui.add(egui::TextEdit::singleline(&mut self.reg_pass2).password(true).desired_width(200.0));
+                        ui.end_row();
+                        ui.label("Gender");
+                        ui.horizontal(|ui| {
+                            ui.radio_value(&mut self.reg_male, true, "Male");
+                            ui.radio_value(&mut self.reg_male, false, "Female");
+                        });
+                        ui.end_row();
+                    });
+                    let problem = if self.reg_user.trim().len() < 4 {
+                        Some("The ID needs at least 4 characters.")
+                    } else if self.reg_pass.len() < 4 {
+                        Some("The password needs at least 4 characters.")
+                    } else if self.reg_pass != self.reg_pass2 {
+                        Some("The passwords do not match.")
+                    } else {
+                        None
+                    };
+                    if let Some(p) = problem {
+                        ui.label(RichText::new(p).color(Color32::GRAY).size(12.0));
+                    }
+                    self.message_line(ui);
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(problem.is_none() && !self.busy, egui::Button::new("Create account")).clicked() {
+                            // rAthena creates the account when an unknown ID logs in with
+                            // a _M / _F suffix (login_athena.conf: new_account: yes).
+                            let suffix = if self.reg_male { "_M" } else { "_F" };
+                            self.user = self.reg_user.trim().to_string();
+                            self.pass = self.reg_pass.clone();
+                            self.busy = true;
+                            self.message = Some(("Creating account...".into(), false));
+                            action = Some(Action::Send(Command::Login { user: format!("{}{suffix}", self.user), pass: self.pass.clone() }));
+                        }
+                        if ui.button("Back").clicked() {
+                            self.message = None;
+                            self.screen = Screen::Login;
+                        }
+                    });
+                });
+            }
+            Screen::Servers(list) => {
+                let list = list.clone();
+                window("Select Server").show(ctx, |ui| {
+                    ui.set_width(300.0);
+                    for (i, (name, users)) in list.iter().enumerate() {
+                        if ui.add(egui::Button::new(format!("{name}   ({users} online)")).min_size(Vec2::new(290.0, 28.0))).clicked() {
+                            self.busy = true;
+                            action = Some(Action::Send(Command::SelectServer(i)));
+                        }
+                    }
+                    if ui.button("Back").clicked() {
+                        action = Some(Action::Logout);
+                    }
+                });
+            }
+            Screen::Select => action = self.select(ctx, c),
+            Screen::Create { slot } => {
+                let slot = *slot;
+                action = self.create(ctx, c, slot);
+            }
+            Screen::Loading => {
+                egui::Area::new(egui::Id::unique("loading")).anchor(Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
+                    ui.label(RichText::new("Loading...").size(22.0).color(Color32::WHITE));
+                });
+            }
+        }
+        action
+    }
+
+    fn message_line(&self, ui: &mut egui::Ui) {
+        if let Some((msg, error)) = &self.message {
+            let color = if *error { Color32::from_rgb(235, 120, 100) } else { Color32::from_rgb(170, 210, 255) };
+            ui.label(RichText::new(msg).color(color));
+        }
+    }
+
+    fn select(&mut self, ctx: &egui::Context, c: &Ctx) -> Option<Action> {
+        let mut action = None;
+        let pages = self.slots.div_ceil(SLOTS_PER_PAGE).max(1);
+        egui::Window::new("Select Character").collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 30.0)).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.add_enabled(self.page > 0, egui::Button::new("<")).clicked() {
+                    self.page -= 1;
+                }
+                for i in 0..SLOTS_PER_PAGE {
+                    let slot = self.page * SLOTS_PER_PAGE + i;
+                    let ch = self.chars.iter().find(|ch| ch.slot == slot).cloned();
+                    let tex = ch.as_ref().and_then(|ch| self.preview(ctx, c, Self::char_look(c, ch)));
+                    let selected = self.selected == slot;
+                    let frame = egui::Frame::new()
+                        .fill(if selected { Color32::from_rgba_unmultiplied(90, 140, 220, 60) } else { Color32::from_black_alpha(80) })
+                        .stroke(egui::Stroke::new(1.0, if selected { Color32::from_rgb(140, 190, 255) } else { Color32::from_gray(70) }))
+                        .corner_radius(6)
+                        .inner_margin(6);
+                    let resp = frame
+                        .show(ui, |ui| {
+                            ui.set_width(150.0);
+                            ui.set_height(190.0);
+                            ui.vertical_centered(|ui| match (&ch, &tex) {
+                                (Some(ch), _) => {
+                                    match &tex {
+                                        Some(t) => {
+                                            ui.image((t.id(), Vec2::splat(140.0)));
+                                        }
+                                        None => {
+                                            ui.add_space(140.0);
+                                        }
+                                    }
+                                    ui.label(RichText::new(&ch.name).strong());
+                                    if self.deleting.contains_key(&ch.char_id) {
+                                        ui.label(RichText::new("deleting").color(Color32::from_rgb(235, 120, 100)).size(11.0));
+                                    }
+                                }
+                                (None, _) => {
+                                    ui.add_space(80.0);
+                                    ui.label(RichText::new("Empty slot").color(Color32::GRAY));
+                                }
+                            });
+                        })
+                        .response
+                        .interact(egui::Sense::click());
+                    if resp.clicked() {
+                        self.selected = slot;
+                        self.message = None;
+                    }
+                    if resp.double_clicked() {
+                        match &ch {
+                            Some(ch) if !self.deleting.contains_key(&ch.char_id) => {
+                                self.screen = Screen::Loading;
+                                action = Some(Action::Send(Command::SelectChar(slot)));
+                            }
+                            Some(_) => {}
+                            None => self.start_create(slot),
+                        }
+                    }
+                }
+                if ui.add_enabled(self.page + 1 < pages, egui::Button::new(">")).clicked() {
+                    self.page += 1;
+                }
+            });
+            ui.label(RichText::new(format!("Page {} / {}", self.page + 1, pages)).color(Color32::GRAY).size(11.5));
+            ui.separator();
+            // Details and actions for the selected slot.
+            let ch = self.chars.iter().find(|ch| ch.slot == self.selected).cloned();
+            match ch {
+                Some(ch) => {
+                    egui::Grid::new("char details").num_columns(4).spacing([16.0, 4.0]).show(ui, |ui| {
+                        let k = |ui: &mut egui::Ui, s: &str| {
+                            ui.label(RichText::new(s).color(Color32::GRAY));
+                        };
+                        k(ui, "Name");
+                        ui.label(&ch.name);
+                        k(ui, "Job");
+                        ui.label((c.job_title)(ch.job));
+                        ui.end_row();
+                        k(ui, "Base Lv");
+                        ui.label(ch.base_level.to_string());
+                        k(ui, "Job Lv");
+                        ui.label(ch.job_level.to_string());
+                        ui.end_row();
+                        k(ui, "HP");
+                        ui.label(format!("{} / {}", ch.hp, ch.max_hp));
+                        k(ui, "SP");
+                        ui.label(format!("{} / {}", ch.sp, ch.max_sp));
+                        ui.end_row();
+                        k(ui, "Zeny");
+                        ui.label(ch.zeny.to_string());
+                        k(ui, "Map");
+                        ui.label(ch.map.trim_end_matches(".gat"));
+                        ui.end_row();
+                    });
+                    ui.add_space(4.0);
+                    self.message_line(ui);
+                    match self.deleting.get(&ch.char_id).copied() {
+                        Some(when) => {
+                            let left = when.saturating_duration_since(std::time::Instant::now()).as_secs();
+                            if left > 0 {
+                                ui.label(format!("Can be deleted in {}h {:02}m {:02}s.", left / 3600, left / 60 % 60, left % 60));
+                                ctx.request_repaint_after(std::time::Duration::from_secs(1));
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.label("Birthdate (YYMMDD)");
+                                    ui.add(egui::TextEdit::singleline(&mut self.birthdate).desired_width(80.0).char_limit(6));
+                                    if ui.add_enabled(self.birthdate.len() == 6 && !self.busy, egui::Button::new("Delete now")).clicked() {
+                                        self.busy = true;
+                                        action = Some(Action::Send(Command::Char(CharRequest::Delete { char_id: ch.char_id, birthdate: self.birthdate.clone() })));
+                                    }
+                                });
+                            }
+                            if ui.button("Cancel deletion").clicked() {
+                                action = Some(Action::Send(Command::Char(CharRequest::CancelDelete(ch.char_id))));
+                            }
+                        }
+                        None => {
+                            ui.horizontal(|ui| {
+                                if ui.add(egui::Button::new(RichText::new("Start").strong()).min_size(Vec2::new(100.0, 28.0))).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    self.screen = Screen::Loading;
+                                    action = Some(Action::Send(Command::SelectChar(ch.slot)));
+                                }
+                                if ui.button("Delete").clicked() && !self.busy {
+                                    self.busy = true;
+                                    action = Some(Action::Send(Command::Char(CharRequest::ReserveDelete(ch.char_id))));
+                                }
+                                if ui.button("Logout").clicked() {
+                                    action = Some(Action::Logout);
+                                }
+                            });
+                        }
+                    }
+                }
+                None => {
+                    self.message_line(ui);
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Button::new(RichText::new("Make Character").strong()).min_size(Vec2::new(140.0, 28.0))).clicked() {
+                            self.start_create(self.selected);
+                        }
+                        if ui.button("Logout").clicked() {
+                            action = Some(Action::Logout);
+                        }
+                    });
+                }
+            }
+        });
+        action
+    }
+
+    fn start_create(&mut self, slot: u8) {
+        self.name.clear();
+        self.message = None;
+        self.screen = Screen::Create { slot };
+    }
+
+    fn create(&mut self, ctx: &egui::Context, c: &Ctx, slot: u8) -> Option<Action> {
+        let mut action = None;
+        let job = if self.summoner { "summoner" } else { "초보자" };
+        let look = preview::Look { job: job.into(), male: self.male, hair: self.hair, hair_color: self.hair_color, headgear: vec![] };
+        let tex = self.preview(ctx, c, look);
+        egui::Window::new("Make Character").collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 30.0)).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                egui::Frame::new().fill(Color32::from_black_alpha(80)).corner_radius(6).inner_margin(8).show(ui, |ui| {
+                    ui.set_width(160.0);
+                    match &tex {
+                        Some(t) => {
+                            ui.image((t.id(), Vec2::splat(160.0)));
+                        }
+                        None => {
+                            ui.add_space(160.0);
+                        }
+                    }
+                });
+                ui.vertical(|ui| {
+                    egui::Grid::new("make char").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
+                        ui.label("Name");
+                        ui.add(egui::TextEdit::singleline(&mut self.name).desired_width(170.0).char_limit(23));
+                        ui.end_row();
+                        ui.label("Gender");
+                        ui.horizontal(|ui| {
+                            ui.radio_value(&mut self.male, true, "Male");
+                            ui.radio_value(&mut self.male, false, "Female");
+                        });
+                        ui.end_row();
+                        ui.label("Race");
+                        ui.horizontal(|ui| {
+                            ui.radio_value(&mut self.summoner, false, "Human");
+                            ui.radio_value(&mut self.summoner, true, "Doram");
+                            if self.summoner {
+                                self.hair = self.hair.min(DORAM_HAIR);
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("Hair style");
+                        ui.horizontal(|ui| {
+                            if ui.button("<").clicked() {
+                                let max = if self.summoner { DORAM_HAIR } else { *HAIR_STYLES.end() };
+                                self.hair = if self.hair <= *HAIR_STYLES.start() { max } else { self.hair - 1 };
+                            }
+                            ui.label(format!("{:>2}", self.hair));
+                            if ui.button(">").clicked() {
+                                let max = if self.summoner { DORAM_HAIR } else { *HAIR_STYLES.end() };
+                                self.hair = if self.hair >= max { *HAIR_STYLES.start() } else { self.hair + 1 };
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("Hair color");
+                        ui.horizontal(|ui| {
+                            if ui.button("<").clicked() {
+                                self.hair_color = if self.hair_color <= *HAIR_COLORS.start() { *HAIR_COLORS.end() } else { self.hair_color - 1 };
+                            }
+                            ui.label(format!("{:>2}", self.hair_color));
+                            if ui.button(">").clicked() {
+                                self.hair_color = if self.hair_color >= *HAIR_COLORS.end() { *HAIR_COLORS.start() } else { self.hair_color + 1 };
+                            }
+                        });
+                        ui.end_row();
+                    });
+                    ui.add_space(6.0);
+                    self.message_line(ui);
+                    ui.horizontal(|ui| {
+                        let ok = self.name.trim().chars().count() >= 4 && !self.busy;
+                        if ui.add_enabled(ok, egui::Button::new(RichText::new("Create").strong())).clicked() {
+                            self.busy = true;
+                            action = Some(Action::Send(Command::Char(CharRequest::Make {
+                                name: self.name.trim().to_string(),
+                                slot,
+                                hair_color: self.hair_color,
+                                hair_style: self.hair,
+                                job: if self.summoner { 4218 } else { 0 },
+                                sex: self.male as u8,
+                            })));
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.message = None;
+                            self.screen = Screen::Select;
+                        }
+                    });
+                    if self.name.trim().chars().count() < 4 {
+                        ui.label(RichText::new("Names need at least 4 characters.").color(Color32::GRAY).size(11.5));
+                    }
+                });
+            });
+        });
+        action
+    }
+}

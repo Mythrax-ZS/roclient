@@ -12,13 +12,15 @@ pub struct Settings {
     pub sfx_volume: f32,
     pub ui_scale: f32,
     pub minimap: bool,
+    /// Login screen: the last ID used ("Remember ID"), empty when not remembered.
+    pub last_id: String,
     /// The HD-2D look (lighting, shadows, post-processing).
     pub visual: Visual,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, visual: Visual::default() }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, last_id: String::new(), visual: Visual::default() }
     }
 }
 

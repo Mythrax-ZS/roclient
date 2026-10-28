@@ -20,3 +20,6 @@ msaa = 4
 # Starting volumes (0..1). In-game changes (Alt+O) are saved to settings.toml beside this file.
 bgm_volume = 0.5
 sfx_volume = 0.7
+# Skip the login and character screens: log straight in with username / password /
+# char_slot (scripted runs and --capture do this automatically).
+auto_login = false

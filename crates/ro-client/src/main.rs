@@ -8,6 +8,8 @@ mod fx;
 mod gamepad;
 mod guild;
 mod hud;
+mod preview;
+mod screens;
 mod settings;
 mod social;
 mod windows;
@@ -39,6 +41,9 @@ struct Config {
     /// UI size multiplier on top of the display's DPI scale.
     #[serde(default = "default_ui_scale")]
     ui_scale: f32,
+    /// Skip the login screen and log in with username / password / char_slot.
+    #[serde(default)]
+    auto_login: bool,
     /// MSAA sample count (1, 2, 4); falls back to what the GPU supports.
     #[serde(default = "default_msaa")]
     msaa: u32,
@@ -687,6 +692,11 @@ fn is_player_class(job: i16) -> bool {
 struct App {
     backend: String,
     msaa: u32,
+    /// How to (re)start the network session, and the login / character screens while they show.
+    session: ro_net::SessionConfig,
+    front: Option<screens::Front>,
+    /// Exit requested from the login screen.
+    quit: bool,
     vfs: Option<ro_vfs::Vfs>,
     /// Offline preview map and cell (ignored once the server places us).
     map: String,
@@ -1044,6 +1054,44 @@ impl App {
 
     fn handle(&mut self, event: ro_net::Event) {
         use ro_net::Event::*;
+        // Login and character-select replies belong to those screens.
+        if let Some(front) = self.front.as_mut() {
+            if front.event(&event) {
+                if let (Characters { chars, .. }, true) = (&event, std::env::args().any(|a| a == "--front-start")) {
+                    if let Some(c) = chars.first() {
+                        self.queued_commands.push(ro_net::Command::SelectChar(c.slot));
+                    }
+                }
+                if let (Characters { chars, .. }, true) = (&event, std::env::args().any(|a| a == "--front-make")) {
+                    if !chars.iter().any(|c| c.name == "Preview") {
+                        let slot = (0..9u8).find(|s| !chars.iter().any(|c| c.slot == *s)).unwrap_or(1);
+                        self.queued_commands.push(ro_net::Command::Char(ro_net::CharRequest::Make { name: "Preview".into(), slot, hair_color: 4, hair_style: 9, job: 0, sex: 0 }));
+                    }
+                }
+                if matches!(event, Characters { .. }) && std::env::args().any(|a| a == "--front-create") {
+                    front.open_create();
+                }
+                return;
+            }
+            match &event {
+                Entered { .. } => {
+                    // Remember the ID for next time (Remember ID).
+                    self.settings.last_id = if front.remember { front.user().to_string() } else { String::new() };
+                    self.settings.save();
+                    self.front = None;
+                }
+                Disconnected(reason) => {
+                    // Back to a fresh login screen with the reason.
+                    let user = front.user().to_string();
+                    let mut f = screens::Front::new(user, front.remember);
+                    f.event(&LoginFailed(format!("Disconnected: {reason}")));
+                    self.front = Some(f);
+                    self.net = Some(ro_net::spawn_session(self.session.clone()));
+                    return;
+                }
+                _ => {}
+            }
+        }
         match event {
             Entered { map, x, y, dir, character, account_id } => {
                 tracing::info!(%map, x, y, name = %character.name, job = character.job, "entered");
@@ -1608,6 +1656,8 @@ impl App {
                     p.walker.stop_at((x as i32, y as i32));
                 }
             }
+            // Login and character-select replies (handled by the screens above).
+            LoginFailed(_) | Servers(_) | Characters { .. } | CharCreated(_) | CharCreateFailed(_) | CharDeleteStarted { .. } | CharDeleted { .. } | CharDeleteCanceled { .. } => {}
             Disconnected(reason) => {
                 tracing::error!("disconnected: {reason}");
                 self.status = Some(format!("disconnected: {reason}"));
@@ -2380,7 +2430,12 @@ impl App {
         let now = std::time::Instant::now();
         let dt = (now - self.last_tick).as_secs_f32() * 1000.0;
         self.last_tick = now;
-        self.pad_tick(dt);
+        if self.front.is_none() {
+            self.pad_tick(dt);
+        } else if let (Some(r), false) = (self.renderer.as_mut(), self.still) {
+            // Behind the login screens the backdrop slowly turns.
+            r.camera.rotate(dt * 0.00004, 0.0);
+        }
         self.cursor_action = self.hover_cursor();
         self.steer_to_cursor(dt);
 
@@ -2753,6 +2808,7 @@ impl App {
                 my_name: &my_name,
             };
             let mut social_cmds = vec![];
+            let mut front_action = None;
             let mut player_cmd = None;
             let party: std::collections::HashSet<&str> = self.social.party.iter().flat_map(|p| p.members.iter().map(|m| m.name.as_str())).collect();
             let dots: Vec<_> = self
@@ -2773,6 +2829,14 @@ impl App {
             let me = self.player.as_ref().map(|p| (p.walker.cell.0 as f32, p.walker.cell.1 as f32));
             let map_name = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
             let out = self.egui_ctx.run_ui(input, |ui| {
+                // Login and character screens replace the game UI until a character is picked.
+                if let Some(front) = self.front.as_mut() {
+                    let tables = &self.look_tables;
+                    let accessory = |v: u16| tables.accessory(v as u32).map(str::to_string);
+                    let fctx = screens::Ctx { vfs: self.vfs.as_ref(), job_title: &job_title, job_sprite: &job_sprite, accessory: &accessory };
+                    front_action = front.show(ui.ctx(), &fctx);
+                    return;
+                }
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars);
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
                     hud::show_minimap(ui.ctx(), map, &map_name, me, &dots);
@@ -2863,6 +2927,18 @@ impl App {
                 social_cmds.push(cmd);
             }
             self.queued_commands.extend(social_cmds);
+            match front_action {
+                Some(screens::Action::Send(cmd)) => self.queued_commands.push(cmd),
+                Some(screens::Action::Logout) => {
+                    // A fresh session back at the login screen.
+                    let remember = self.front.as_ref().is_some_and(|f| f.remember);
+                    let user = self.front.as_ref().map(|f| f.user().to_string()).unwrap_or_default();
+                    self.front = Some(screens::Front::new(user, remember));
+                    self.net = Some(ro_net::spawn_session(self.session.clone()));
+                }
+                Some(screens::Action::Quit) => self.quit = true,
+                None => {}
+            }
             if let (Some((npc, reply)), Some((tx, _))) = (answer, self.net.as_ref()) {
                 if reply == ro_net::NpcReply::Close {
                     self.cutin = None;
@@ -3001,12 +3077,20 @@ impl ApplicationHandler for App {
         self.window = Some(window);
         el.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
-        // Offline: show the preview map and character right away. Online waits for the server.
-        if self.net.is_none() {
+        // Offline: show the preview map and character right away. Online waits for the server,
+        // with the map as the login screen's backdrop.
+        if self.net.is_none() || self.front.is_some() {
             let map = self.map.clone();
             self.enter_map(&map);
+        }
+        if self.net.is_none() {
             let look = self.look.clone();
             self.spawn_player(&look, self.at, self.dir, 150);
+        } else if let (Some(r), Some(w)) = (self.renderer.as_mut(), self.world.as_ref()) {
+            // Backdrop: look at the map centre from a little further out.
+            let c = w.gat.as_ref().map_or((100, 100), |g| ((g.width / 2) as u16, (g.height / 2) as u16));
+            r.camera.look_at_cell(c.0, c.1);
+            r.camera.distance = 420.0;
         }
     }
 
@@ -3024,11 +3108,14 @@ impl ApplicationHandler for App {
                 self.cursor = Some((position.x, position.y));
             }
         }
-        if ui_used && !matches!(event, WindowEvent::Resized(_) | WindowEvent::CloseRequested | WindowEvent::ScaleFactorChanged { .. }) {
+        // Login / character screens: the world takes no input.
+        let front_blocks = self.front.is_some() && matches!(event, WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::KeyboardInput { .. });
+        if (ui_used || front_blocks) && !matches!(event, WindowEvent::Resized(_) | WindowEvent::CloseRequested | WindowEvent::ScaleFactorChanged { .. }) {
             return;
         }
         match event {
             WindowEvent::CloseRequested => el.exit(),
+            _ if self.quit => el.exit(),
             WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key, state: ElementState::Pressed, .. }, .. }
                 if logical_key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter) =>
             {
@@ -3167,14 +3254,22 @@ fn main() -> anyhow::Result<()> {
     let vfs = open_vfs(&cfg)?;
     let cell = |s: String| s.split_once(',').and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)));
     // Online unless --offline (or no game data to render with).
-    let net = (!args.iter().any(|a| a == "--offline") && vfs.is_some()).then(|| {
-        ro_net::spawn_session(ro_net::SessionConfig {
-            login_addr: cfg.login_addr.clone(),
-            username: cfg.username.clone(),
-            password: cfg.password.clone(),
-            char_slot: cfg.char_slot,
-        })
-    });
+    // Scripted and test runs (or `auto_login = true`) log straight in with the configured
+    // account; otherwise the login and character screens drive the session.
+    const SCRIPTED: [&str; 10] = ["--capture", "--do", "--say", "--attack", "--talk", "--walk", "--windows", "--deal", "--accept", "--auto-trade"];
+    // `--front` keeps the screens for captures; `--front-login` also submits the configured login.
+    let front_test = args.iter().any(|a| matches!(a.as_str(), "--front" | "--front-login" | "--front-create" | "--front-make" | "--front-start"));
+    let auto = !front_test && (cfg.auto_login || args.iter().any(|a| SCRIPTED.contains(&a.as_str())));
+    let (cfg_user, cfg_pass) = (cfg.username.clone(), cfg.password.clone());
+    let session = ro_net::SessionConfig {
+        login_addr: cfg.login_addr.clone(),
+        username: cfg.username.clone(),
+        password: cfg.password.clone(),
+        char_slot: cfg.char_slot,
+        auto,
+    };
+    let online = !args.iter().any(|a| a == "--offline") && vfs.is_some();
+    let net = online.then(|| ro_net::spawn_session(session.clone()));
     let mut app = App {
         backend: cfg.backend,
         msaa: cfg.msaa,
@@ -3190,6 +3285,9 @@ fn main() -> anyhow::Result<()> {
         walk_on_enter: arg("--walk").and_then(cell),
         say_on_enter: arg("--say"),
         net,
+        session: session.clone(),
+        quit: false,
+        front: (online && !auto).then(|| screens::Front::new(settings::Settings::load(Default::default()).last_id.clone(), true)),
         world: None,
         player: None,
         account_id: 0,
@@ -3206,6 +3304,7 @@ fn main() -> anyhow::Result<()> {
             ui_scale: cfg.ui_scale,
             minimap: true,
             visual: Default::default(),
+            last_id: String::new(),
         }),
         audio: None,
         pending_npc: None,
@@ -3284,6 +3383,9 @@ fn main() -> anyhow::Result<()> {
     };
     app.class_names = app.vfs.as_ref().map(load_class_names).unwrap_or_default();
     app.ui_scale = app.settings.ui_scale;
+    if args.iter().any(|a| matches!(a.as_str(), "--front-login" | "--front-create" | "--front-make" | "--front-start")) {
+        app.queued_commands.push(ro_net::Command::Login { user: cfg_user.clone(), pass: cfg_pass.clone() });
+    }
     app.cursor_sprite = app.vfs.as_ref().and_then(|v| hud::CursorSprite::load(&app.egui_ctx, v));
     // Captures and headless runs stay silent.
     if app.capture.is_none() {

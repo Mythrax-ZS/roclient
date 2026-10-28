@@ -11,7 +11,7 @@ use ro_proto::{id, packets::*, Frame, RoCodec, ServerTable};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-pub use ro_proto::packets::{sp, Act, CharInfo, ChatKind, Look, NpcDialog, NpcReply, UnitInfo, UnitPos};
+pub use ro_proto::packets::{sp, Act, CharInfo, CharRequest, ChatKind, Look, NpcDialog, NpcReply, UnitInfo, UnitPos};
 pub use ro_proto::items::{Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
 pub use ro_proto::guild::{GuildInfo, GuildMember, GuildRequest, GuildSkill, Position};
@@ -60,6 +60,8 @@ pub async fn login(addr: &str, user: &str, pass: &str) -> anyhow::Result<AcceptL
 pub struct CharSession {
     conn: Conn,
     pub characters: Vec<CharInfo>,
+    /// Character slots on the account (shown on the select screen).
+    pub slots: u8,
     account_id: u32,
 }
 
@@ -76,12 +78,17 @@ pub async fn enter_char(server: &CharServerInfo, auth: &AcceptLogin) -> anyhow::
     conn.codec_mut().expect_raw(4);
 
     let mut characters = Vec::new();
+    let mut slots = 9;
     loop {
         match next(&mut conn).await? {
             Frame::Raw(_) => {}
             Frame::Packet { opcode: id::HC_REFUSE_ENTER, data } => bail!("char server refused, error {}", data[2]),
             Frame::Packet { opcode: id::HC_ACCEPT_ENTER, data } => characters.extend(parse_hc_accept_enter(&data)),
-            Frame::Packet { opcode: id::HC_CHARLIST_NOTIFY, .. } => conn.send(ChCharlistReq).await?,
+            Frame::Packet { opcode: id::HC_CHARLIST_NOTIFY, data } => {
+                // Pages of three slots.
+                slots = (u32::from_le_bytes(data[2..6].try_into()?) * 3).clamp(3, 15) as u8;
+                conn.send(ChCharlistReq).await?;
+            }
             Frame::Packet { opcode: id::HC_ACK_CHARINFO_PER_PAGE, data } => {
                 let page = parse_charinfo_page(&data);
                 let done = page.len() != 3; // the client-side end-of-list rule rAthena follows
@@ -101,7 +108,7 @@ pub async fn enter_char(server: &CharServerInfo, auth: &AcceptLogin) -> anyhow::
     }
     characters.sort_by_key(|c| c.slot);
     characters.dedup_by_key(|c| c.char_id);
-    Ok(CharSession { conn, characters, account_id: auth.account_id })
+    Ok(CharSession { conn, characters, slots, account_id: auth.account_id })
 }
 
 impl CharSession {
@@ -268,6 +275,19 @@ pub enum Event {
     Resurrected(u32),
     /// A misc effect on a unit (0 base level up, 1 job level up, ...).
     UnitEffect { id: u32, effect: u32 },
+    /// Login screen: refused (message for the player).
+    LoginFailed(String),
+    /// More than one server: (name, users) to pick from.
+    Servers(Vec<(String, u16)>),
+    /// The character select screen: characters and how many slots the account has.
+    Characters { chars: Vec<CharInfo>, slots: u8 },
+    CharCreated(CharInfo),
+    /// 0 name taken, 1 under age, 2 symbols not allowed, 3 not eligible slot, 11 premium only.
+    CharCreateFailed(u8),
+    /// Deletion replies: (char id, result: 1 ok, seconds until confirmable).
+    CharDeleteStarted { char_id: u32, result: i32, seconds: u32 },
+    CharDeleted { char_id: u32, result: i32 },
+    CharDeleteCanceled { char_id: u32, result: i32 },
     Disconnected(String),
 }
 
@@ -293,13 +313,23 @@ pub enum Command {
     Npc { npc: u32, reply: NpcReply },
     /// Say something in public chat.
     Chat(String),
+    /// Login screen.
+    Login { user: String, pass: String },
+    SelectServer(usize),
+    /// Character select screen: create / delete / cancel deletion.
+    Char(CharRequest),
+    SelectChar(u8),
 }
 
+#[derive(Clone)]
 pub struct SessionConfig {
     pub login_addr: String,
     pub username: String,
     pub password: String,
     pub char_slot: u8,
+    /// Log straight in with these credentials and slot (headless and scripted runs).
+    /// Otherwise the session waits for Login / SelectChar commands from the UI.
+    pub auto: bool,
 }
 
 /// Runs login -> char select -> map on its own thread and runtime. Events arrive on the
@@ -318,18 +348,27 @@ pub fn spawn_session(cfg: SessionConfig) -> (tokio::sync::mpsc::UnboundedSender<
                 }
             };
             let result: anyhow::Result<()> = rt.block_on(async {
-                let auth = login(&cfg.login_addr, &cfg.username, &cfg.password).await?;
-                let server = auth.servers.first().context("no char servers offered")?.clone();
-                let chars = enter_char(&server, &auth).await?;
-                let character = chars
-                    .characters
-                    .iter()
-                    .find(|c| c.slot == cfg.char_slot)
-                    .cloned()
-                    .with_context(|| format!("no character in slot {}", cfg.char_slot))?;
-                let mut zone = chars.select(cfg.char_slot).await?;
-                let char_id = zone.char_id;
                 let mut cmd_rx = cmd_rx;
+                let (auth, character, mut zone) = if cfg.auto {
+                    // Scripted / headless runs: straight in with the configured account and slot.
+                    let auth = login(&cfg.login_addr, &cfg.username, &cfg.password).await?;
+                    let server = auth.servers.first().context("no char servers offered")?.clone();
+                    let chars = enter_char(&server, &auth).await?;
+                    let character = chars
+                        .characters
+                        .iter()
+                        .find(|c| c.slot == cfg.char_slot)
+                        .cloned()
+                        .with_context(|| format!("no character in slot {}", cfg.char_slot))?;
+                    let zone = chars.select(cfg.char_slot).await?;
+                    (auth, character, zone)
+                } else {
+                    match front_end(&cfg.login_addr, &mut cmd_rx, &ev_tx).await? {
+                        Some(picked) => picked,
+                        None => return Ok(()),
+                    }
+                };
+                let char_id = zone.char_id;
                 let mut first = true;
                 loop {
                     let map = enter_map(&zone, &auth).await?;
@@ -390,6 +429,8 @@ impl MapSession {
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
+                    // Login and character-select screen commands mean nothing once in game.
+                    Some(Command::Login { .. } | Command::SelectServer(_) | Command::Char(_) | Command::SelectChar(_)) => {}
                     Some(Command::Npc { npc, reply }) => self.send(CzNpc { npc, reply: &reply }).await?,
                     Some(Command::Item(r)) => self.send(r).await?,
                     Some(Command::Shop(r)) => self.send(r).await?,
@@ -689,6 +730,128 @@ impl MapSession {
                     Some(Ok(Frame::Raw(_))) => {}
                 },
             }
+        }
+    }
+}
+
+/// Why the login server refused us, in the player's words (AC_REFUSE_LOGIN codes).
+fn login_error(code: u32) -> String {
+    match code {
+        0 => "Unregistered ID.".into(),
+        1 => "Incorrect password.".into(),
+        2 => "This ID has expired.".into(),
+        3 => "Rejected by the server.".into(),
+        4 => "This account has been blocked.".into(),
+        5 => "Your client is out of date.".into(),
+        6 => "This account is temporarily banned.".into(),
+        7 => "The server is full.".into(),
+        8 => "This account is already logged in.".into(),
+        99 => "This ID has been deleted.".into(),
+        c => format!("Login refused (error {c})."),
+    }
+}
+
+/// The login and character-select screens: waits for the UI's Login, SelectServer and
+/// character commands, and returns once a character is picked (None if the UI closed).
+async fn front_end(
+    addr: &str,
+    cmds: &mut tokio::sync::mpsc::UnboundedReceiver<Command>,
+    events: &std::sync::mpsc::Sender<Event>,
+) -> anyhow::Result<Option<(AcceptLogin, CharInfo, ZoneServer)>> {
+    'login: loop {
+        // Login screen.
+        let auth = loop {
+            let Some(cmd) = cmds.recv().await else { return Ok(None) };
+            let Command::Login { user, pass } = cmd else { continue };
+            match login_once(addr, &user, &pass).await {
+                Ok(auth) => break auth,
+                Err(e) => {
+                    let _ = events.send(Event::LoginFailed(e));
+                }
+            }
+        };
+        let server = match auth.servers.len() {
+            0 => {
+                let _ = events.send(Event::LoginFailed("No servers are online.".into()));
+                continue 'login;
+            }
+            1 => auth.servers[0].clone(),
+            _ => {
+                let _ = events.send(Event::Servers(auth.servers.iter().map(|s| (s.name.clone(), s.users)).collect()));
+                loop {
+                    match cmds.recv().await {
+                        None => return Ok(None),
+                        Some(Command::SelectServer(i)) if i < auth.servers.len() => break auth.servers[i].clone(),
+                        Some(Command::Login { .. }) => continue 'login,
+                        _ => {}
+                    }
+                }
+            }
+        };
+        let mut chars = match enter_char(&server, &auth).await {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = events.send(Event::LoginFailed(format!("{e:#}")));
+                continue 'login;
+            }
+        };
+        let _ = events.send(Event::Characters { chars: chars.characters.clone(), slots: chars.slots });
+        // Character select screen.
+        let mut keepalive = tokio::time::interval(Duration::from_secs(10));
+        loop {
+            tokio::select! {
+                _ = keepalive.tick() => chars.ping().await?,
+                cmd = cmds.recv() => match cmd {
+                    None => return Ok(None),
+                    Some(Command::Char(req)) => chars.conn.send(req).await?,
+                    Some(Command::SelectChar(slot)) => {
+                        let Some(character) = chars.characters.iter().find(|c| c.slot == slot).cloned() else { continue };
+                        let zone = chars.select(slot).await?;
+                        return Ok(Some((auth, character, zone)));
+                    }
+                    _ => {}
+                },
+                frame = next(&mut chars.conn) => match frame? {
+                    Frame::Packet { opcode: 0x0b6f, data } => {
+                        let c = parse_char_info(&data[2..]);
+                        chars.characters.push(c.clone());
+                        let _ = events.send(Event::CharCreated(c));
+                    }
+                    Frame::Packet { opcode: 0x006e, data } => {
+                        let _ = events.send(Event::CharCreateFailed(data[2]));
+                    }
+                    Frame::Packet { opcode: 0x0828, data } => {
+                        let (char_id, result, seconds) = parse_delete_reply(&data);
+                        let _ = events.send(Event::CharDeleteStarted { char_id, result, seconds });
+                    }
+                    Frame::Packet { opcode: 0x082a, data } => {
+                        let (char_id, result, _) = parse_delete_reply(&data);
+                        if result == 1 {
+                            chars.characters.retain(|c| c.char_id != char_id);
+                        }
+                        let _ = events.send(Event::CharDeleted { char_id, result });
+                    }
+                    Frame::Packet { opcode: 0x082c, data } => {
+                        let (char_id, result, _) = parse_delete_reply(&data);
+                        let _ = events.send(Event::CharDeleteCanceled { char_id, result });
+                    }
+                    f => ignored("char select", &f),
+                },
+            }
+        }
+    }
+}
+
+/// One login attempt, with the refusal turned into a message.
+async fn login_once(addr: &str, user: &str, pass: &str) -> Result<AcceptLogin, String> {
+    let mut conn = connect(addr).await.map_err(|e| format!("Cannot reach the login server ({addr}): {e}"))?;
+    conn.send(CaLogin { version: 55, username: user, password: pass, clienttype: 0 }).await.map_err(|e| e.to_string())?;
+    loop {
+        match next(&mut conn).await.map_err(|e| e.to_string())? {
+            Frame::Packet { opcode: id::AC_ACCEPT_LOGIN, data } => return Ok(parse_accept_login(&data)),
+            Frame::Packet { opcode: id::AC_REFUSE_LOGIN, data } => return Err(login_error(parse_refuse_login(&data))),
+            Frame::Packet { opcode: id::SC_NOTIFY_BAN, data } => return Err(login_error(data[2] as u32)),
+            f => ignored("login", &f),
         }
     }
 }

@@ -242,6 +242,8 @@ pub struct CharInfo {
     pub hair_color: u8,
     pub map: String,
     pub sex: u8,
+    /// Seconds until a pending deletion can be confirmed; 0 when none is pending.
+    pub delete_date: u32,
 }
 
 pub fn parse_char_info(mut b: &[u8]) -> CharInfo {
@@ -274,9 +276,10 @@ pub fn parse_char_info(mut b: &[u8]) -> CharInfo {
     let hair_color = b.get_u8();
     b.advance(2);
     let map = get_fixed_str(&mut b, 16);
-    b.advance(4 * 4);
+    let delete_date = b.get_u32_le();
+    b.advance(4 * 3);
     let sex = b.get_u8();
-    CharInfo { char_id, base_exp, zeny, job_level, hp, max_hp, sp, max_sp, job, head, base_level, speed, look, name, slot, hair_color, map, sex }
+    CharInfo { char_id, base_exp, zeny, job_level, hp, max_hp, sp, max_sp, job, head, base_level, speed, look, name, slot, hair_color, map, sex, delete_date }
 }
 
 /// 0x006b: 3 + 20 bytes of header data, then characters.
@@ -845,4 +848,59 @@ impl Encode for CzRestart {
     fn encode(&self, d: &mut BytesMut) {
         put_db_packet(d, "Restart", &[&[self.kind]]);
     }
+}
+
+/// Character-select screen requests at PACKETVER 20250402.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CharRequest {
+    /// CH_MAKE_CHAR (0x0a39). `sex`: 0 female, 1 male; `job` 0 Novice, 4218 Summoner.
+    Make { name: String, slot: u8, hair_color: u16, hair_style: u16, job: u32, sex: u8 },
+    /// CH_DELETE_CHAR3_RESERVED (0x0827): start the deletion timer.
+    ReserveDelete(u32),
+    /// CH_DELETE_CHAR3 (0x0829): delete after the timer, confirming with the birthdate (YYMMDD).
+    Delete { char_id: u32, birthdate: String },
+    /// CH_DELETE_CHAR3_CANCEL (0x082b).
+    CancelDelete(u32),
+}
+
+impl Encode for CharRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            CharRequest::Make { name, slot, hair_color, hair_style, job, sex } => {
+                d.put_u16_le(0x0a39);
+                put_fixed_str(d, name, 24);
+                d.put_u8(*slot);
+                d.put_u16_le(*hair_color);
+                d.put_u16_le(*hair_style);
+                d.put_u32_le(*job);
+                d.put_u8(*sex);
+            }
+            CharRequest::ReserveDelete(id) => {
+                d.put_u16_le(0x0827);
+                d.put_u32_le(*id);
+            }
+            CharRequest::Delete { char_id, birthdate } => {
+                d.put_u16_le(0x0829);
+                d.put_u32_le(*char_id);
+                let mut b = [b'0'; 6];
+                for (dst, src) in b.iter_mut().zip(birthdate.bytes().filter(u8::is_ascii_digit)) {
+                    *dst = src;
+                }
+                d.put_slice(&b);
+            }
+            CharRequest::CancelDelete(id) => {
+                d.put_u16_le(0x082b);
+                d.put_u32_le(*id);
+            }
+        }
+    }
+}
+
+/// HC_DELETE_CHAR3_RESERVED / HC_DELETE_CHAR3 / HC_DELETE_CHAR3_CANCEL: (char id, result
+/// (1 ok), seconds until the deletion can be confirmed, 0 if not sent).
+pub fn parse_delete_reply(data: &[u8]) -> (u32, i32, u32) {
+    let mut b = &data[2..];
+    let id = b.get_u32_le();
+    let result = b.get_i32_le();
+    (id, result, if b.remaining() >= 4 { b.get_u32_le() } else { 0 })
 }
