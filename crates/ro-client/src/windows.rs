@@ -44,6 +44,9 @@ pub struct Windows {
     /// The cash shop is open (it lives in `stores`), and its menu button was clicked.
     pub cash_shown: bool,
     pub cash_toggle: bool,
+    /// The top-right menu bar is folded down to its toggle; `menu_toggled` asks the app to save it.
+    pub menu_collapsed: bool,
+    pub menu_toggled: bool,
     /// A menu-bar button standing for an Alt+key shortcut, handled by the app.
     pub menu_key: Option<&'static str>,
     pub inventory: bool,
@@ -552,6 +555,14 @@ impl Windows {
                         ui.style_mut().visuals = egui::Visuals::dark();
                     }
                     ui.horizontal(|ui| {
+                        let (icon, tip) = if self.menu_collapsed { ("«", "Show the menu") } else { ("»", "Hide the menu") };
+                        if ui.selectable_label(false, icon).on_hover_text(tip).clicked() {
+                            self.menu_collapsed = !self.menu_collapsed;
+                            self.menu_toggled = true;
+                        }
+                        if self.menu_collapsed {
+                            return;
+                        }
                         for (label, key, open) in [
                             ("Inventory", "Alt+E", &mut self.inventory),
                             ("Equipment", "Alt+Q", &mut self.equipment),

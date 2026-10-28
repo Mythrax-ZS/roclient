@@ -3757,6 +3757,12 @@ impl App {
                     self.queued_commands.push(ro_net::Command::CashShop(req));
                 }
                 self.windows.cash_shown = self.stores.cash.is_some();
+                if std::mem::take(&mut self.windows.menu_toggled) {
+                    self.settings.menu_collapsed = self.windows.menu_collapsed;
+                    self.settings.save();
+                } else {
+                    self.windows.menu_collapsed = self.settings.menu_collapsed;
+                }
                 if let Some(req) = self.progress.show(ui.ctx(), self.item_db.as_ref(), &self.icons) {
                     self.queued_commands.push(ro_net::Command::Progress(req));
                 }
@@ -4239,6 +4245,7 @@ fn main() -> anyhow::Result<()> {
             sfx_volume: cfg.sfx_volume,
             ui_scale: cfg.ui_scale,
             minimap: true,
+            menu_collapsed: false,
             classic_ui: true,
             visual: Default::default(),
             last_id: String::new(),
