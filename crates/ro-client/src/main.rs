@@ -62,6 +62,43 @@ fn open_vfs(cfg: &Config) -> anyhow::Result<Option<ro_vfs::Vfs>> {
 }
 
 /// Reads a map's ground and textures from the VFS.
+/// Character appearance, as the char server describes it.
+struct Look {
+    /// Job sprite name (Korean, as in the GRF), e.g. 초보자 for Novice.
+    job: String,
+    male: bool,
+    hair: u16,
+    hair_color: u16,
+}
+
+/// Loads body, head (with hair dye) and shadow sheets for a player character.
+fn load_character(vfs: &ro_vfs::Vfs, r: &mut ro_render::Renderer, look: &Look) -> anyhow::Result<ro_render::Actor> {
+    let sex = if look.male { "남" } else { "여" };
+    let mut sheet = |base: &str, palette: Option<String>| -> anyhow::Result<ro_render::SheetId> {
+        let read = |p: String| vfs.read(&p)?.with_context(|| format!("{p} not found"));
+        let spr = ro_formats::spr::Spr::parse(&read(format!("{base}.spr"))?)?;
+        let act = ro_formats::act::Act::parse(&read(format!("{base}.act"))?)?;
+        // A missing dye palette falls back to the sprite's own colors.
+        let pal = palette.and_then(|p| vfs.read(&p).ok().flatten()).and_then(|d| ro_formats::spr::parse_palette(&d).ok());
+        Ok(r.add_sheet(&spr, act, pal.as_ref()))
+    };
+    let body = sheet(&format!("data\\sprite\\인간족\\몸통\\{sex}\\{}_{sex}", look.job), None)?;
+    let head = sheet(
+        &format!("data\\sprite\\인간족\\머리통\\{sex}\\{}_{sex}", look.hair),
+        (look.hair_color > 0).then(|| format!("data\\palette\\머리\\머리{}_{sex}_{}.pal", look.hair, look.hair_color)),
+    )?;
+    let shadow = sheet("data\\sprite\\shadow", None).inspect_err(|e| tracing::warn!("shadow sprite: {e:#}")).ok();
+    Ok(ro_render::Actor {
+        pos: Default::default(),
+        body,
+        head: Some(head),
+        shadow,
+        action: 0,
+        dir: ro_render::Dir::S,
+        time_ms: 0.0,
+    })
+}
+
 struct LoadedMap {
     mesh: ro_render::SceneMesh,
     images: Vec<Option<ro_render::Rgba>>,
@@ -200,6 +237,11 @@ struct App {
     capture: Option<(PathBuf, u32, u32)>,
     /// `--distance`: initial camera distance.
     distance: Option<f32>,
+    /// Preview character appearance and pose (`--action n`, `--dir 0..7`).
+    look: Look,
+    action: usize,
+    dir: ro_render::Dir,
+    started: std::time::Instant,
     window: Option<Arc<Window>>,
     renderer: Option<ro_render::Renderer>,
     /// Right mouse button held: dragging rotates the camera.
@@ -262,6 +304,17 @@ impl ApplicationHandler for App {
                         Err(e) => tracing::error!("map {}: {e:#}", self.map),
                     }
                 }
+                if let Some(vfs) = &self.vfs {
+                    match load_character(vfs, &mut r, &self.look) {
+                        Ok(mut actor) => {
+                            actor.pos = r.camera.target;
+                            actor.action = self.action;
+                            actor.dir = self.dir;
+                            r.actors.push(actor);
+                        }
+                        Err(e) => tracing::error!("character sprites: {e:#}"),
+                    }
+                }
                 if let Some((path, w, h)) = &self.capture {
                     match r.capture(*w, *h) {
                         Ok(img) => match image::save_buffer(path, &img.pixels, img.width, img.height, image::ColorType::Rgba8) {
@@ -313,6 +366,10 @@ impl ApplicationHandler for App {
                 self.last_cursor = Some((position.x, position.y));
             }
             WindowEvent::RedrawRequested => {
+                let t = self.started.elapsed().as_secs_f32() * 1000.0;
+                for a in &mut r.actors {
+                    a.time_ms = t;
+                }
                 if let Err(e) = r.frame() {
                     tracing::error!("frame: {e:#}");
                 }
@@ -350,6 +407,13 @@ fn main() -> anyhow::Result<()> {
         map: arg("--map").unwrap_or(cfg.map),
         still: args.iter().any(|a| a == "--still"),
         distance: arg("--distance").and_then(|d| d.parse().ok()),
+        look: Look { job: arg("--job").unwrap_or_else(|| "초보자".into()), male: arg("--sex").is_none_or(|s| s != "f"), hair: 1, hair_color: 0 },
+        action: arg("--action").and_then(|a| a.parse().ok()).unwrap_or(0),
+        dir: {
+            use ro_render::Dir::*;
+            [S, SW, W, NW, N, NE, E, SE][arg("--dir").and_then(|d| d.parse::<usize>().ok()).unwrap_or(0) % 8]
+        },
+        started: std::time::Instant::now(),
         capture: arg("--capture").map(|p| {
             let (w, h) = arg("--size")
                 .and_then(|s| s.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))))

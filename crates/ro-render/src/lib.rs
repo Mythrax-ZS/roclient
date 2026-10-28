@@ -2,6 +2,7 @@
 
 mod camera;
 mod scene;
+mod sprite;
 mod water;
 
 use std::sync::Arc;
@@ -10,6 +11,7 @@ pub use camera::{Camera, CELL};
 pub use ro_formats::image::Rgba;
 pub use scene::{SceneBuilder, SceneMesh};
 pub use water::WaterMesh;
+pub use sprite::{Actor, Dir, SheetId};
 use winit::window::Window;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -76,6 +78,11 @@ pub struct Renderer {
     water_layout: wgpu::BindGroupLayout,
     repeat_sampler: wgpu::Sampler,
     water: Option<water::Water>,
+    sprite_pipeline: wgpu::RenderPipeline,
+    sprite_layout: wgpu::BindGroupLayout,
+    sheets: Vec<sprite::Sheet>,
+    /// Actors drawn each frame; the caller updates positions, actions and times.
+    pub actors: Vec<Actor>,
     started: std::time::Instant,
     /// The grid is drawn instead while no map is loaded.
     scene: Option<scene::Scene>,
@@ -315,6 +322,34 @@ impl Renderer {
             &[Some(water::Vertex::layout())],
             Some(wgpu::BlendState::ALPHA_BLENDING),
         );
+        let sprite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("sprite"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let sprite_pipeline = pipeline(
+            "sprite",
+            include_str!("sprite.wgsl"),
+            &[Some(&globals_layout), Some(&sprite_layout)],
+            &[Some(sprite::Vertex::layout())],
+            Some(wgpu::BlendState::ALPHA_BLENDING),
+        );
 
         let targets = Self::make_targets(&device, &config, samples);
         Ok(Self {
@@ -336,6 +371,10 @@ impl Renderer {
             water_layout,
             repeat_sampler,
             water: None,
+            sprite_pipeline,
+            sprite_layout,
+            sheets: vec![],
+            actors: vec![],
             started: std::time::Instant::now(),
             lighting: Lighting::default(),
             camera: Camera::default(),
@@ -356,6 +395,13 @@ impl Renderer {
         ));
         self.lighting = lighting;
         self.water = None;
+    }
+
+    /// Uploads a sprite sheet. `palette` overrides the SPR's own (hair / body dyes).
+    pub fn add_sheet(&mut self, spr: &ro_formats::spr::Spr, act: ro_formats::act::Act, palette: Option<&[[u8; 4]; 256]>) -> SheetId {
+        let sheet = sprite::Sheet::upload(&self.device, &self.queue, &self.sprite_layout, &self.sampler, spr, act, palette);
+        self.sheets.push(sheet);
+        SheetId(self.sheets.len() - 1)
     }
 
     /// Adds the map's water. `images[i]` is `mesh.textures[i]`.
@@ -486,7 +532,12 @@ impl Renderer {
             light_dir: glam::Vec3::from(self.lighting.direction).normalize_or_zero().extend(0.0).to_array(),
             ambient: glam::Vec3::from(self.lighting.ambient).extend(0.0).to_array(),
             diffuse: glam::Vec3::from(self.lighting.diffuse).extend(0.0).to_array(),
-            params: [self.started.elapsed().as_secs_f32(), 0.0, 0.0, 0.0],
+            params: {
+                // Clip units per sprite pixel at w = 1 (horizontal, vertical).
+                let f = 1.0 / (cam.fovy / 2.0).tan();
+                let s = CELL / sprite::PIXELS_PER_CELL;
+                [self.started.elapsed().as_secs_f32(), s * f / aspect, s * f, 0.0]
+            },
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
@@ -534,6 +585,30 @@ impl Renderer {
                 pass.set_bind_group(1, &w.frames[w.frame(globals.params[0])], &[]);
                 pass.set_vertex_buffer(0, w.vertices.slice(..));
                 pass.draw(0..w.count, 0..1);
+            }
+            // Actors back to front (by distance from the eye) so blended edges composite.
+            if !self.actors.is_empty() {
+                let eye = cam.eye();
+                let mut order: Vec<&Actor> = self.actors.iter().collect();
+                order.sort_by(|a, b| b.pos.distance_squared(eye).total_cmp(&a.pos.distance_squared(eye)));
+                let mut vertices = vec![];
+                let mut draws = vec![];
+                for a in order {
+                    for (sheet, v) in sprite::actor_quads(&self.sheets, a) {
+                        let start = vertices.len() as u32;
+                        vertices.extend(v);
+                        draws.push((sheet, start..vertices.len() as u32));
+                    }
+                }
+                if !vertices.is_empty() {
+                    let buffer = sprite::vertex_buffer(&self.device, &vertices);
+                    pass.set_pipeline(&self.sprite_pipeline);
+                    pass.set_vertex_buffer(0, buffer.slice(..));
+                    for (sheet, range) in draws {
+                        pass.set_bind_group(1, &self.sheets[sheet].bind, &[]);
+                        pass.draw(range, 0..1);
+                    }
+                }
             }
         }
         enc.finish()

@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 
+#[derive(Clone)]
 pub struct Rgba {
     pub width: u32,
     pub height: u32,
@@ -25,6 +26,12 @@ pub fn decode(data: &[u8], name: &str) -> Result<Rgba> {
         }
     }
     Ok(Rgba { width, height, pixels })
+}
+
+impl std::fmt::Debug for Rgba {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Rgba({}x{})", self.width, self.height)
+    }
 }
 
 impl Rgba {
