@@ -18,6 +18,7 @@ mod refine;
 mod screens;
 mod buffs;
 mod classic;
+mod companions;
 mod emotes;
 mod settings;
 mod skilltree;
@@ -800,6 +801,10 @@ struct App {
     stores: stores::Stores,
     /// Achievements, titles and attendance.
     progress: progress::Progress,
+    /// Pet, homunculus and mercenary.
+    companions: companions::Companions,
+    /// A companion window request, handled after the UI pass.
+    companion_action: Option<companions::CompanionAction>,
     /// The Classic interface art, loaded once the GRF is open.
     skin: Option<classic::Skin>,
     /// The item information / card illustration window.
@@ -949,17 +954,21 @@ impl App {
             return a.clone();
         }
         let (r, vfs) = (self.renderer.as_mut()?, self.vfs.as_ref()?);
-        let found = ["npc", "몬스터"].iter().find_map(|folder| {
-            let base = format!("data\\sprite\\{folder}\\{name}");
+        let read = |base: &str| -> Option<(ro_formats::spr::Spr, ro_formats::act::Act)> {
             let spr = vfs.read(&format!("{base}.spr")).ok().flatten()?;
             let act = vfs.read(&format!("{base}.act")).ok().flatten()?;
             Some((ro_formats::spr::Spr::parse(&spr).ok()?, ro_formats::act::Act::parse(&act).ok()?))
-        });
+        };
+        // Homunculi are in homun\; mercenaries name a human body (e.g. 여\활용병) and carry
+        // a weapon from 인간족\용병\.
+        let found = ["npc", "몬스터", "homun", "인간족\\몸통"].iter().find_map(|folder| read(&format!("data\\sprite\\{folder}\\{name}")));
+        let merc_weapon = name.rsplit('\\').next().and_then(|n| ["활", "창", "검"].iter().find_map(|w| read(&format!("data\\sprite\\인간족\\용병\\{n}_{w}"))));
         let actor = match found {
             Some((spr, act)) => {
                 let body = r.add_sheet(&spr, act, None);
+                let weapon = merc_weapon.map(|(s, a)| vec![r.add_sheet(&s, a, None)]).unwrap_or_default();
                 let shadow = self.sprites.get("shadow").cloned().flatten().and_then(|a| a.shadow);
-                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: vec![], shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
+                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
             }
             None => {
                 tracing::debug!(job, %name, "no sprite for class");
@@ -1378,6 +1387,51 @@ impl App {
                     self.stores.mine = None;
                 }
                 self.hud.push_chat(ro_net::ChatKind::System, msg);
+            }
+            Pet(info) => self.companions.pet = Some(info),
+            CompanionState { homun, state, id, value } => {
+                if homun {
+                    if state == 0 {
+                        self.companions.homun_id = id;
+                    } else if let Some(h) = self.companions.homun.as_mut() {
+                        match state {
+                            1 => h.intimacy = value as u16,
+                            2 => h.hunger = value as u16,
+                            _ => {}
+                        }
+                    }
+                } else if state == 0 {
+                    self.companions.pet_id = id;
+                    // The server sends the pet's details only when asked.
+                    self.send(ro_net::Command::Companion(ro_net::CompanionRequest::PetMenu(0)));
+                } else if let Some(p) = self.companions.pet.as_mut() {
+                    match state {
+                        1 => p.intimacy = value as u16,
+                        2 => p.hunger = value as u16,
+                        3 => p.accessory = value as u16,
+                        _ => {}
+                    }
+                }
+            }
+            Homun(info) => self.companions.homun = Some(info),
+            CompanionSkills { merc, skills } => {
+                if merc {
+                    self.companions.merc_skills = skills;
+                } else {
+                    self.companions.homun_skills = skills;
+                }
+            }
+            Merc(info) => self.companions.merc = Some(info),
+            MercParam(k, v) => {
+                if let Some(m) = self.companions.merc.as_mut() {
+                    match k {
+                        5 => m.hp = v.max(0) as u32,
+                        6 => m.max_hp = v.max(0) as u32,
+                        7 => m.sp = v.max(0) as u32,
+                        8 => m.max_sp = v.max(0) as u32,
+                        _ => {}
+                    }
+                }
             }
             Achievements { rank, list } => {
                 self.progress.set_all(rank, list);
@@ -2518,6 +2572,12 @@ impl App {
             "b" => self.toggle_bank(),
             "c" => self.toggle_cash_shop(),
             "y" => self.progress.open = !self.progress.open,
+            "r" => {
+                self.companions.open = !self.companions.open;
+                if self.companions.open {
+                    self.send(ro_net::Command::Companion(ro_net::CompanionRequest::PetMenu(0)));
+                }
+            }
             "j" => {
                 tracing::info!(open = self.progress.attendance.is_some(), "attendance");
                 if self.progress.attendance.take().is_none() {
@@ -3224,7 +3284,7 @@ impl App {
                                 Menu::AutoSpell(s) => s.contains(&id).then_some(MenuReply::AutoSpell(id)),
                                 Menu::Skill { flag, skills } => skills.contains(&(id as u16)).then_some(MenuReply::Skill { flag, skill: id as u16 }),
                                 Menu::Identify(_) => Some(MenuReply::Identify(id as u16)),
-                                Menu::Egg(_) => Some(MenuReply::Egg(id as u16)),
+                                Menu::Egg(_) => Some(MenuReply::Egg(self.inventory.items.values().find(|i| i.id == id).map_or(id as u16, |i| i.index))),
                                 Menu::Warp { skill, maps } => maps.get(id as usize).map(|m| MenuReply::Warp { skill, map: m.clone() }),
                             };
                             reply.map(windows::UiAction::Menu)
@@ -3426,6 +3486,13 @@ impl App {
         }
 
         self.update_room();
+        if let Some(a) = self.companion_action.take() {
+            match a {
+                companions::CompanionAction::Send(r) => self.send(ro_net::Command::Companion(r)),
+                companions::CompanionAction::Skill { id, level, on } => self.use_skill_on(id, level, on),
+                companions::CompanionAction::SkillUp(id) => self.send(ro_net::Command::Stat(ro_net::StatRequest::SkillUp(id))),
+            }
+        }
         if let Some(key) = self.hud.menu_click.take().or_else(|| self.windows.menu_key.take()) {
             self.alt_key(key);
         }
@@ -3762,6 +3829,10 @@ impl App {
                     self.settings.save();
                 } else {
                     self.windows.menu_collapsed = self.settings.menu_collapsed;
+                }
+                let target = self.attack.map(|a| a.0).or_else(|| { let me = self.player.as_ref()?.walker.cell; self.units.iter().filter(|(_, m)| m.kind == 5).filter(|(_, m)| (m.walker.cell.0 - me.0).abs().max((m.walker.cell.1 - me.1).abs()) <= 14).min_by_key(|(_, m)| (m.walker.cell.0 - me.0).pow(2) + (m.walker.cell.1 - me.1).pow(2)).map(|(id, _)| *id) });
+                if let Some(a) = self.companions.show(ui.ctx(), target) {
+                    self.companion_action = Some(a);
                 }
                 if let Some(req) = self.progress.show(ui.ctx(), self.item_db.as_ref(), &self.icons) {
                     self.queued_commands.push(ro_net::Command::Progress(req));
@@ -4283,6 +4354,8 @@ fn main() -> anyhow::Result<()> {
         merchant: Default::default(),
         stores: Default::default(),
         progress: Default::default(),
+        companions: Default::default(),
+        companion_action: None,
         skin: None,
         item_info: Default::default(),
         refine: Default::default(),

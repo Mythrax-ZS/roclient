@@ -4,6 +4,7 @@
 //! src/common/packets.hpp, src/map/packets.hpp and src/map/clif_shuffle.hpp.
 
 pub mod codec;
+pub mod companions;
 pub mod generated;
 pub mod guild;
 pub mod items;

@@ -24,6 +24,8 @@ use ro_proto::refine::*;
 use ro_proto::merchant::*;
 pub use ro_proto::progress::{AchRank, Achievement, ProgressRequest};
 use ro_proto::progress::*;
+pub use ro_proto::companions::{CompanionRequest, CompanionSkill, HomunInfo, MercInfo, PetInfo};
+use ro_proto::companions::*;
 use ro_proto::quests::*;
 use ro_proto::menus::*;
 pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
@@ -329,6 +331,16 @@ pub enum Event {
     SoldToStore { index: u16, amount: u16, price: u32 },
     /// A buying store message (failure or closure).
     BuyStoreNotice(String),
+    /// Our pet's details.
+    Pet(PetInfo),
+    /// Pet (0x01a4) or homunculus (0x0230) state: (homunculus?, state, unit id, value).
+    CompanionState { homun: bool, state: u8, id: u32, value: i32 },
+    Homun(HomunInfo),
+    /// Homunculus (false) or mercenary (true) skills.
+    CompanionSkills { merc: bool, skills: Vec<CompanionSkill> },
+    Merc(MercInfo),
+    /// A mercenary stat changed: (status id, value).
+    MercParam(u16, i32),
     /// Every achievement with its progress.
     Achievements { rank: AchRank, list: Vec<Achievement> },
     /// One achievement changed.
@@ -424,6 +436,7 @@ pub enum Command {
     BuyingStore(BuyingStoreRequest),
     CashShop(CashShopRequest),
     Progress(ProgressRequest),
+    Companion(CompanionRequest),
     /// Look at a player's equipment.
     ViewEquip(u32),
     /// Let others look at ours.
@@ -561,6 +574,7 @@ impl MapSession {
                     Some(Command::BuyingStore(r)) => self.send(r).await?,
                     Some(Command::CashShop(r)) => self.send(r).await?,
                     Some(Command::Progress(r)) => self.send(r).await?,
+                    Some(Command::Companion(r)) => self.send(r).await?,
                     Some(Command::ViewEquip(aid)) => self.send(CzViewEquip(aid)).await?,
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
@@ -740,6 +754,12 @@ impl MapSession {
                             7 => "The buyer can't pay for that.".into(),
                             _ => "The deal failed.".into(),
                         })),
+                        0x01a2 => parse_pet(&data).map(Event::Pet),
+                        0x01a4 | 0x0230 => parse_changestate(opcode, &data).map(|(state, id, value)| Event::CompanionState { homun: opcode == 0x0230, state, id, value }),
+                        0x0ba4 => parse_homun(&data).map(Event::Homun),
+                        0x0235 | 0x029d => Some(Event::CompanionSkills { merc: opcode == 0x029d, skills: parse_companion_skills(opcode, &data) }),
+                        0x029b => parse_merc(&data).map(Event::Merc),
+                        0x02a2 => parse_merc_param(&data).map(|(k, v)| Event::MercParam(k, v)),
                         0x0a23 => parse_achievements(&data).map(|(rank, list)| Event::Achievements { rank, list }),
                         0x0a24 => parse_achievement_update(&data).map(|(rank, ach)| Event::AchievementUpdate { rank, ach }),
                         0x0a26 => parse_reward_ack(&data).map(|(failed, id)| Event::AchievementReward { failed, id }),
