@@ -597,3 +597,116 @@ mod chat_tests {
         assert_eq!(parse_chat(0x008e, &p), Some((ChatKind::Public, None, "Tester : hi".into())));
     }
 }
+
+// ---------------------------------------------------------------- map: NPC dialogs
+
+/// What an NPC script asks the client to show.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NpcDialog {
+    /// Append a line of text (may contain ^RRGGBB colour codes).
+    Say { npc: u32, text: String },
+    /// Show a Next button.
+    Next { npc: u32 },
+    /// Show a Close button.
+    Close { npc: u32 },
+    /// Choose one option; reply with its 1-based index (255 cancels).
+    Menu { npc: u32, options: Vec<String> },
+    InputNumber { npc: u32 },
+    InputText { npc: u32 },
+    /// Clear the text so far (`clear` in scripts).
+    Clear { npc: u32 },
+    /// Show (or with `kind` 255, hide) an illustration from texture\유저인터페이스\illust.
+    Cutin { image: String, kind: u8 },
+}
+
+pub fn parse_npc_dialog(opcode: u16, data: &[u8]) -> Option<NpcDialog> {
+    let npc_at = |o: usize| u32::from_le_bytes(data[o..o + 4].try_into().unwrap());
+    Some(match opcode {
+        0x00b4 => NpcDialog::Say { npc: npc_at(4), text: tail_text(data, 8) },
+        0x00b5 => NpcDialog::Next { npc: npc_at(2) },
+        0x00b6 => NpcDialog::Close { npc: npc_at(2) },
+        0x00b7 => NpcDialog::Menu { npc: npc_at(4), options: tail_text(data, 8).split(':').map(str::to_string).collect() },
+        0x0142 => NpcDialog::InputNumber { npc: npc_at(2) },
+        0x01d4 => NpcDialog::InputText { npc: npc_at(2) },
+        0x08d6 => NpcDialog::Clear { npc: npc_at(2) },
+        0x01b3 => {
+            let mut b = &data[2..];
+            let image = get_fixed_str(&mut b, 64);
+            NpcDialog::Cutin { image, kind: data[66] }
+        }
+        _ => return None,
+    })
+}
+
+/// Replies to an NPC dialog.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NpcReply {
+    /// Talk to (click) an NPC.
+    Contact,
+    Next,
+    Close,
+    /// 1-based option, or 255 to cancel.
+    Menu(u8),
+    Number(i32),
+    Text(String),
+}
+
+pub struct CzNpc<'a> {
+    pub npc: u32,
+    pub reply: &'a NpcReply,
+}
+
+impl Encode for CzNpc<'_> {
+    fn encode(&self, d: &mut BytesMut) {
+        let id = self.npc.to_le_bytes();
+        match self.reply {
+            NpcReply::Contact => {
+                d.put_u16_le(0x0090); // CZ_CONTACTNPC
+                d.put_u32_le(self.npc);
+                d.put_u8(1);
+            }
+            NpcReply::Next => put_db_packet(d, "NpcNextClicked", &[&id]),
+            NpcReply::Menu(choice) => put_db_packet(d, "NpcSelectMenu", &[&id, &[*choice]]),
+            NpcReply::Close => {
+                d.put_u16_le(0x0146); // CZ_CLOSE_DIALOG
+                d.put_u32_le(self.npc);
+            }
+            NpcReply::Number(value) => {
+                d.put_u16_le(0x0143); // CZ_INPUT_EDITDLG
+                d.put_u32_le(self.npc);
+                d.put_i32_le(*value);
+            }
+            NpcReply::Text(text) => {
+                let (bytes, _, _) = EUC_KR.encode(text);
+                d.put_u16_le(0x01d5); // CZ_INPUT_EDITDLGSTR
+                d.put_u16_le((8 + bytes.len() + 1) as u16);
+                d.put_u32_le(self.npc);
+                d.put_slice(&bytes);
+                d.put_u8(0);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod npc_tests {
+    use super::*;
+
+    #[test]
+    fn menu_and_replies() {
+        let mut p = vec![0xb7, 0x00, 0, 0, 7, 0, 0, 0];
+        p.extend_from_slice(b"Save:Storage:Cancel\0");
+        let n = p.len() as u16;
+        p[2..4].copy_from_slice(&n.to_le_bytes());
+        assert_eq!(
+            parse_npc_dialog(0x00b7, &p),
+            Some(NpcDialog::Menu { npc: 7, options: vec!["Save".into(), "Storage".into(), "Cancel".into()] })
+        );
+        let mut b = BytesMut::new();
+        CzNpc { npc: 7, reply: &NpcReply::Contact }.encode(&mut b);
+        assert_eq!(&b[..], &[0x90, 0x00, 7, 0, 0, 0, 1]);
+        b.clear();
+        CzNpc { npc: 7, reply: &NpcReply::Menu(2) }.encode(&mut b);
+        assert_eq!(b.len(), client_packet("NpcSelectMenu").len as usize);
+    }
+}

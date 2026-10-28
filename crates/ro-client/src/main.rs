@@ -423,6 +423,13 @@ struct App {
     /// Connection problem shown in the title bar.
     status: Option<String>,
     walk_goal: Option<WalkGoal>,
+    /// The NPC conversation in progress, and its illustration.
+    dialog: Option<hud::Dialog>,
+    cutin: Option<hud::Cutin>,
+    /// NPC to talk to once we have walked into range.
+    pending_npc: Option<u32>,
+    /// `--talk name`: talk to the first NPC with this name once in view (scripted test).
+    talk_to: Option<String>,
     /// Other units in view, by id.
     units: std::collections::HashMap<u32, Mob>,
     class_names: std::collections::HashMap<i16, String>,
@@ -651,6 +658,7 @@ impl App {
             Unit(info) => self.unit(info),
             Stat { id, value } => self.hud.status.set(id, value),
             Chat { kind, text, .. } => self.hud.push_chat(kind, text),
+            Npc(d) => self.npc_dialog(d),
             Vanish { id, .. } => {
                 self.units.remove(&id);
             }
@@ -668,6 +676,100 @@ impl App {
                 self.status = Some(format!("disconnected: {reason}"));
             }
         }
+    }
+
+    /// Applies an NPC script step to the dialog window.
+    fn npc_dialog(&mut self, d: ro_net::NpcDialog) {
+        use hud::DialogMode;
+        use ro_net::NpcDialog::*;
+        let title = |units: &std::collections::HashMap<u32, Mob>, npc: u32| units.get(&npc).map(|m| m.name.clone()).unwrap_or_default();
+        let open = |dialog: &mut Option<hud::Dialog>, units: &std::collections::HashMap<u32, Mob>, npc: u32| {
+            if dialog.as_ref().is_none_or(|d| d.npc != npc) {
+                *dialog = Some(hud::Dialog { npc, title: title(units, npc), lines: vec![], mode: DialogMode::Reading });
+            }
+        };
+        match d {
+            Say { npc, text } => {
+                open(&mut self.dialog, &self.units, npc);
+                self.dialog.as_mut().unwrap().lines.push(text);
+            }
+            Next { npc } | Close { npc } | Menu { npc, .. } | InputNumber { npc } | InputText { npc } => {
+                open(&mut self.dialog, &self.units, npc);
+                self.dialog.as_mut().unwrap().mode = match d {
+                    Next { .. } => DialogMode::Next,
+                    Close { .. } => DialogMode::Close,
+                    Menu { options, .. } => DialogMode::Menu(options),
+                    InputNumber { .. } => DialogMode::Number(String::new()),
+                    _ => DialogMode::Text(String::new()),
+                };
+            }
+            Clear { npc } => {
+                if let Some(d) = self.dialog.as_mut().filter(|d| d.npc == npc) {
+                    d.lines.clear();
+                }
+            }
+            Cutin { image, kind } => {
+                self.cutin = if kind == 255 { None } else { self.load_cutin(&image, kind) };
+            }
+        }
+    }
+
+    /// Loads an NPC illustration into an egui texture.
+    fn load_cutin(&self, image: &str, position: u8) -> Option<hud::Cutin> {
+        let vfs = self.vfs.as_ref()?;
+        let name = if image.contains('.') { image.to_string() } else { format!("{image}.bmp") };
+        let path = format!("data\\texture\\유저인터페이스\\illust\\{name}");
+        let data = vfs.read(&path).ok().flatten().or_else(|| {
+            tracing::warn!(%path, "cutin not found");
+            None
+        })?;
+        let img = ro_formats::image::decode(&data, &path).inspect_err(|e| tracing::warn!(%path, "cutin: {e:#}")).ok()?;
+        let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
+        let texture = self.egui_ctx.load_texture(format!("cutin:{name}"), color, egui::TextureOptions::LINEAR);
+        Some(hud::Cutin { texture, position })
+    }
+
+    /// Talks to an NPC, walking next to it first when it is out of reach.
+    fn talk(&mut self, npc: u32) {
+        let (Some(p), Some(m)) = (self.player.as_ref(), self.units.get(&npc)) else { return };
+        let (a, b) = (p.walker.cell, m.walker.cell);
+        // rAthena lets you talk within a few cells (npc_checknear).
+        if (a.0 - b.0).abs().max((a.1 - b.1).abs()) <= 3 {
+            if let Some((tx, _)) = self.net.as_ref() {
+                let _ = tx.send(ro_net::Command::Npc { npc, reply: ro_net::NpcReply::Contact });
+            }
+            return;
+        }
+        // Walk to the nearest walkable cell beside the NPC, then talk.
+        let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
+        let target = (-2..=2)
+            .flat_map(|dy| (-2..=2).map(move |dx| (b.0 + dx, b.1 + dy)))
+            .filter(|&(x, y)| gat.is_some_and(|g| g.walkable(x, y)))
+            .min_by_key(|&(x, y)| (x - a.0).abs().max((y - a.1).abs()));
+        if let Some((x, y)) = target {
+            self.pending_npc = Some(npc);
+            self.request_walk((x as u16, y as u16));
+        }
+    }
+
+    /// The NPC or monster under the cursor, nearest to the camera first.
+    fn pick_unit(&self) -> Option<u32> {
+        let (r, (cx, cy)) = (self.renderer.as_ref()?, self.cursor?);
+        let size = r.size();
+        let eye = r.camera.eye();
+        self.units
+            .iter()
+            .filter_map(|(&id, m)| {
+                let feet = r.project(m.actor.pos, size)?;
+                // Rough sprite box: about two cells tall, a little over one wide.
+                let top = r.project(m.actor.pos + glam::Vec3::Y * 2.2 * ro_render::CELL, size)?;
+                let h = (feet.y - top.y).max(8.0);
+                let w = h * 0.55;
+                let inside = (cx as f32 - feet.x).abs() <= w / 2.0 && (cy as f32) <= feet.y + h * 0.1 && (cy as f32) >= top.y;
+                inside.then(|| (id, m.actor.pos.distance_squared(eye)))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(id, _)| id)
     }
 
     /// Ground cell under the cursor, if any.
@@ -696,6 +798,20 @@ impl App {
         let events: Vec<_> = self.net.as_ref().map(|(_, rx)| rx.try_iter().collect()).unwrap_or_default();
         for e in events {
             self.handle(e);
+        }
+
+        if let Some(name) = self.talk_to.clone() {
+            if let Some(id) = self.units.iter().find(|(_, m)| m.name.eq_ignore_ascii_case(&name)).map(|(id, _)| *id) {
+                self.talk_to = None;
+                self.talk(id);
+            }
+        }
+
+        // Talk to the NPC we were walking to once we have arrived.
+        if self.pending_npc.is_some() && self.walk_goal.is_none() && self.player.as_ref().is_some_and(|p| !p.walker.is_walking()) {
+            if let Some(npc) = self.pending_npc.take() {
+                self.talk(npc);
+            }
         }
 
         // Continue a long walk once the current hop has finished (or the server ignored it).
@@ -732,7 +848,17 @@ impl App {
             input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size.0 as f32, size.1 as f32) / ppp));
             self.egui_ctx.set_pixels_per_point(ppp);
             let mut sent = None;
-            let out = self.egui_ctx.run_ui(input, |ui| sent = self.hud.show(ui.ctx(), &labels));
+            let mut answer = None;
+            let out = self.egui_ctx.run_ui(input, |ui| {
+                sent = self.hud.show(ui.ctx(), &labels);
+                answer = self.hud.show_dialog(ui.ctx(), &mut self.dialog, self.cutin.as_ref());
+            });
+            if let (Some((npc, reply)), Some((tx, _))) = (answer, self.net.as_ref()) {
+                if reply == ro_net::NpcReply::Close {
+                    self.cutin = None;
+                }
+                let _ = tx.send(ro_net::Command::Npc { npc, reply });
+            }
             state.handle_platform_output(window, out.platform_output);
             let primitives = self.egui_ctx.tessellate(out.shapes, out.pixels_per_point);
             r.set_ui(ro_render::UiFrame { primitives, textures: out.textures_delta, pixels_per_point: out.pixels_per_point });
@@ -890,8 +1016,19 @@ impl ApplicationHandler for App {
                 self.rotating = state == ElementState::Pressed;
             }
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
-                if let Some(cell) = self.pick() {
-                    self.request_walk(cell);
+                let unit = self.pick_unit().and_then(|id| self.units.get(&id).map(|m| (id, m.kind)));
+                match unit {
+                    // NPCs: talk (walking over first if needed).
+                    Some((id, 1 | 6)) => {
+                        self.walk_goal = None;
+                        self.talk(id);
+                    }
+                    _ => {
+                        if let Some(cell) = self.pick() {
+                            self.pending_npc = None;
+                            self.request_walk(cell);
+                        }
+                    }
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -953,6 +1090,10 @@ fn main() -> anyhow::Result<()> {
         account_id: 0,
         status: None,
         walk_goal: None,
+        dialog: None,
+        cutin: None,
+        pending_npc: None,
+        talk_to: arg("--talk"),
         units: Default::default(),
         class_names: Default::default(),
         sprites: Default::default(),

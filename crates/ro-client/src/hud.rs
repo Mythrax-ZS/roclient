@@ -193,3 +193,160 @@ impl Hud {
         sent
     }
 }
+
+// ---------------------------------------------------------------- NPC dialog
+
+/// What the dialog window currently offers.
+#[derive(Clone, PartialEq)]
+pub enum DialogMode {
+    /// Text is still arriving.
+    Reading,
+    Next,
+    Close,
+    Menu(Vec<String>),
+    Number(String),
+    Text(String),
+}
+
+pub struct Dialog {
+    pub npc: u32,
+    pub title: String,
+    pub lines: Vec<String>,
+    pub mode: DialogMode,
+}
+
+/// An NPC illustration ("cutin") and where the script wants it.
+pub struct Cutin {
+    pub texture: egui::TextureHandle,
+    /// 0 bottom-left, 1 bottom-centre, 2 bottom-right, 3 middle-right, 4 middle-centre.
+    pub position: u8,
+}
+
+/// NPC text with ^RRGGBB colour codes. ^000000 means "default colour".
+fn npc_text(text: &str, size: f32) -> egui::text::LayoutJob {
+    let default = Color32::from_rgb(230, 230, 230);
+    let mut job = egui::text::LayoutJob::default();
+    let mut color = default;
+    let mut rest = text;
+    while let Some(i) = rest.find('^') {
+        let code = rest.get(i + 1..i + 7).filter(|c| c.chars().all(|ch| ch.is_ascii_hexdigit()));
+        let Some(code) = code else {
+            job.append(&rest[..i + 1], 0.0, egui::TextFormat::simple(FontId::proportional(size), color));
+            rest = &rest[i + 1..];
+            continue;
+        };
+        job.append(&rest[..i], 0.0, egui::TextFormat::simple(FontId::proportional(size), color));
+        let v = u32::from_str_radix(code, 16).unwrap_or(0);
+        color = if v == 0 { default } else { Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8) };
+        rest = &rest[i + 7..];
+    }
+    job.append(rest, 0.0, egui::TextFormat::simple(FontId::proportional(size), color));
+    job
+}
+
+impl Hud {
+    /// Shows the NPC dialog and cutin; returns the player's answer.
+    pub fn show_dialog(&mut self, ctx: &egui::Context, dialog: &mut Option<Dialog>, cutin: Option<&Cutin>) -> Option<(u32, ro_net::NpcReply)> {
+        use ro_net::NpcReply;
+
+        if let Some(c) = cutin {
+            let size = c.texture.size_vec2();
+            let (align, offset) = match c.position {
+                0 => (Align2::LEFT_BOTTOM, Vec2::new(20.0, -220.0)),
+                1 => (Align2::CENTER_BOTTOM, Vec2::new(0.0, -220.0)),
+                3 => (Align2::RIGHT_CENTER, Vec2::new(-20.0, 0.0)),
+                4 => (Align2::CENTER_CENTER, Vec2::ZERO),
+                _ => (Align2::RIGHT_BOTTOM, Vec2::new(-20.0, -20.0)),
+            };
+            egui::Area::new(egui::Id::unique("cutin")).anchor(align, offset).interactable(false).show(ctx, |ui| {
+                ui.image((c.texture.id(), size));
+            });
+        }
+
+        let d = dialog.as_mut()?;
+        let mut reply = None;
+        egui::Window::new("npc dialog")
+            .title_bar(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 60.0))
+            .frame(panel())
+            .show(ctx, |ui| {
+                ui.set_width(440.0);
+                if !d.title.is_empty() {
+                    ui.label(RichText::new(&d.title).strong().size(14.0).color(Color32::from_rgb(160, 225, 255)));
+                    ui.add_space(4.0);
+                }
+                egui::ScrollArea::vertical().max_height(220.0).stick_to_bottom(true).show(ui, |ui| {
+                    for line in &d.lines {
+                        ui.label(npc_text(line, 14.0));
+                    }
+                });
+                ui.add_space(8.0);
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                match &mut d.mode {
+                    DialogMode::Reading => {}
+                    DialogMode::Next => {
+                        ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 28.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Next").clicked() || enter {
+                                reply = Some(NpcReply::Next);
+                            }
+                        });
+                    }
+                    DialogMode::Close => {
+                        ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 28.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Close").clicked() || enter {
+                                reply = Some(NpcReply::Close);
+                            }
+                        });
+                    }
+                    DialogMode::Menu(options) => {
+                        // Empty options are hidden but keep their index.
+                        for (i, opt) in options.iter().enumerate() {
+                            if opt.is_empty() {
+                                continue;
+                            }
+                            let button = egui::Button::new(npc_text(opt, 13.5)).min_size(Vec2::new(ui.available_width(), 24.0));
+                            if ui.add(button).clicked() {
+                                reply = Some(NpcReply::Menu((i + 1).min(254) as u8));
+                            }
+                        }
+                        if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            reply = Some(NpcReply::Menu(255));
+                        }
+                    }
+                    DialogMode::Number(value) => {
+                        ui.horizontal(|ui| {
+                            let edit = ui.add(egui::TextEdit::singleline(value).desired_width(200.0));
+                            edit.request_focus();
+                            if ui.button("OK").clicked() || (edit.lost_focus() && enter) {
+                                reply = Some(NpcReply::Number(value.trim().parse().unwrap_or(0)));
+                            }
+                        });
+                    }
+                    DialogMode::Text(value) => {
+                        ui.horizontal(|ui| {
+                            let edit = ui.add(egui::TextEdit::singleline(value).desired_width(300.0));
+                            edit.request_focus();
+                            if ui.button("OK").clicked() || (edit.lost_focus() && enter) {
+                                reply = Some(NpcReply::Text(value.clone()));
+                            }
+                        });
+                    }
+                }
+            });
+
+        let reply = reply?;
+        let npc = d.npc;
+        match reply {
+            // Close ends the conversation; other answers wait for the script's next step.
+            NpcReply::Close => *dialog = None,
+            NpcReply::Menu(255) => *dialog = None,
+            NpcReply::Next | NpcReply::Menu(_) => {
+                d.mode = DialogMode::Reading;
+                d.lines.clear();
+            }
+            _ => d.mode = DialogMode::Reading,
+        }
+        Some((npc, reply))
+    }
+}
