@@ -2548,7 +2548,7 @@ impl App {
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
             AttackRange(r) => self.attack_range = r.max(1) as i32,
-            MapProperty { kind, flags } => {
+            MapProperty { flags, .. } => {
                 self.map_flags = flags;
             }
             OverweightPercent(p) => self.hud.status.overweight_pct = p,
