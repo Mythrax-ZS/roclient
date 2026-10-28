@@ -58,6 +58,8 @@ pub struct Label {
     pub feet: glam::Vec2,
     pub text: String,
     pub color: Color32,
+    /// Guild emblem drawn left of the name.
+    pub emblem: Option<egui::TextureId>,
 }
 
 #[derive(Default)]
@@ -181,6 +183,11 @@ impl Hud {
             let font = FontId::proportional(12.0);
             for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
                 painter.text(pos + Vec2::new(dx, dy), Align2::CENTER_TOP, &l.text, font.clone(), Color32::BLACK);
+            }
+            if let Some(e) = l.emblem {
+                let w = ctx.fonts_mut(|f| f.layout_no_wrap(l.text.clone(), FontId::proportional(12.0), Color32::WHITE).size().x);
+                let r = egui::Rect::from_min_size(egui::pos2(pos.x - w / 2.0 - 22.0, pos.y - 2.0), Vec2::splat(18.0));
+                painter.image(e, r, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
             }
             painter.text(pos, Align2::CENTER_TOP, &l.text, font, l.color);
         }

@@ -434,3 +434,13 @@ impl Guild {
         self.emblem_status.clear();
     }
 }
+
+/// Decodes an emblem (zlib-compressed BMP) into a texture.
+pub fn decode_emblem(ctx: &egui::Context, guild: u32, version: u32, data: &[u8]) -> Option<egui::TextureHandle> {
+    use std::io::Read;
+    let mut raw = vec![];
+    flate2::read::ZlibDecoder::new(data).read_to_end(&mut raw).ok()?;
+    let img = ro_formats::image::decode(&raw, "emblem.bmp").ok()?;
+    let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
+    Some(ctx.load_texture(format!("emblem {guild} {version}"), color, egui::TextureOptions::NEAREST))
+}

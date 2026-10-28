@@ -518,6 +518,8 @@ struct Mob {
     look: Option<Look>,
     /// Players: (party, guild, guild rank) from ZC_ACK_REQNAMEALL, shown under the name.
     titles: Option<(String, String, String)>,
+    /// Guild id (0: none), for the emblem beside the name.
+    guild: u32,
     /// Drawn position (cells), eased toward the walker's.
     smooth: Option<(f32, f32)>,
     /// Player attack motion: 10, or 11 for weapons drawn only there (katars).
@@ -552,6 +554,7 @@ impl Mob {
             hp: None,
             look: None,
             titles: None,
+            guild: 0,
             smooth: None,
             attack_group: 10,
             pose_len: 0.0,
@@ -908,6 +911,8 @@ struct App {
     /// Hat effect files by id (hateffectinfo), and the ones playing: (unit, effect) -> fx tag.
     hat_files: std::collections::HashMap<u16, &'static str>,
     hat_fx: std::collections::HashMap<(u32, u16), u32>,
+    /// Guild emblems by guild id (None while being fetched).
+    emblems: std::collections::HashMap<u32, Option<egui::TextureHandle>>,
     /// Test hook (--npc-answers): replies to NPC dialog steps, in order.
     npc_answers: std::collections::VecDeque<String>,
     /// `--attack`: attack the nearest monster once one is in view (scripted test).
@@ -1166,6 +1171,11 @@ impl App {
         // Players: ask for their party and guild names, shown under the name.
         if info.object_type == 0 {
             self.send(ro_net::Command::ReqName(info.id));
+        }
+        mob.guild = info.guild;
+        if info.guild != 0 && !self.emblems.contains_key(&info.guild) {
+            self.emblems.insert(info.guild, None);
+            self.send(ro_net::Command::Guild(ro_net::GuildRequest::Emblem(info.guild)));
         }
         tracing::debug!(id = info.id, job = info.job, name = %info.name, ?cell, "unit");
         self.units.insert(info.id, mob);
@@ -2125,6 +2135,9 @@ impl App {
             }
             GuildInfo(info) => {
                 self.guild.name = info.name.clone();
+                if let Some(p) = self.player.as_mut() {
+                    p.guild = info.id;
+                }
                 // Fetch the emblem when it is new or changed.
                 if info.emblem != 0 && self.guild.emblem.as_ref().is_none_or(|e| e.0 != info.emblem) {
                     self.send(ro_net::Command::Guild(ro_net::GuildRequest::Emblem(info.id)));
@@ -2133,6 +2146,7 @@ impl App {
             }
             GuildEmblem { guild, version, data } => {
                 let ctx = self.egui_ctx.clone();
+                self.emblems.insert(guild, guild::decode_emblem(&ctx, guild, version, &data));
                 self.guild.set_emblem(&ctx, guild, version, &data);
             }
             GuildMembers(m) => self.guild.members = m,
@@ -2489,6 +2503,8 @@ impl App {
                         sex: 0,
                         name: m.name.clone(),
                         pos: ro_net::UnitPos::At { x, y, dir: m.walker.dir as u8 },
+                        guild: m.guild,
+                        emblem: 0,
                     };
                     self.unit(info);
                 }
@@ -4481,7 +4497,8 @@ impl App {
 {guild} [{rank}]") };
                     }
                 }
-                labels.push(hud::Label { feet, text, color });
+                let emblem = (m.guild != 0).then(|| self.emblems.get(&m.guild).cloned().flatten()).flatten().map(|t| t.id());
+                labels.push(hud::Label { feet, text, color, emblem });
             }
         }
         let floaters: Vec<_> = self.floaters.iter().filter_map(|(pos, text, color, age)| Some((r.project(*pos, size)?, text.clone(), *color, *age))).collect();
@@ -5358,6 +5375,7 @@ fn main() -> anyhow::Result<()> {
         member_pos: Default::default(),
         hat_files: Default::default(),
         hat_fx: Default::default(),
+        emblems: Default::default(),
         npc_answers: arg("--npc-answers").map(|s| s.split(',').map(str::to_string).collect()).unwrap_or_default(),
         auto_attack: args.iter().any(|a| a == "--attack"),
         units: Default::default(),

@@ -441,6 +441,9 @@ pub struct UnitInfo {
     pub sex: u8,
     pub name: String,
     pub pos: UnitPos,
+    /// Guild id (0 none) and its emblem version.
+    pub guild: u32,
+    pub emblem: u16,
 }
 
 /// ZC packets packet_idle_unit (0x09ff), packet_spawn_unit (0x09fe) and
@@ -488,6 +491,8 @@ pub fn parse_unit(opcode: u16, data: &[u8]) -> Option<UnitInfo> {
         sex: data[sex_at],
         name,
         pos,
+        guild: if data.len() >= palette_at + 14 { u32_at(palette_at + 8) } else { 0 },
+        emblem: if data.len() >= palette_at + 14 { u16_at(palette_at + 12) } else { 0 },
     })
 }
 
