@@ -3660,7 +3660,8 @@ impl App {
                 if let Some(req) = self.stores.show_buying(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons, zeny) {
                     self.queued_commands.push(ro_net::Command::BuyingStore(req));
                 }
-                if let Some(req) = self.stores.show_cash(ui.ctx(), self.item_db.as_ref(), &self.icons) {
+                let shown = if self.settings.classic_ui { self.stores.show_cash_classic(ui.ctx(), self.item_db.as_ref(), &self.icons) } else { self.stores.show_cash_modern(ui.ctx(), self.item_db.as_ref(), &self.icons) };
+                if let Some(req) = shown {
                     self.queued_commands.push(ro_net::Command::CashShop(req));
                 }
                 if std::mem::take(&mut self.windows.cash_toggle) {
@@ -4168,6 +4169,7 @@ fn main() -> anyhow::Result<()> {
             sfx_volume: cfg.sfx_volume,
             ui_scale: cfg.ui_scale,
             minimap: true,
+            classic_ui: true,
             visual: Default::default(),
             last_id: String::new(),
         }),

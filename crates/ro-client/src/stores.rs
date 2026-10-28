@@ -226,8 +226,8 @@ impl Stores {
         tracing::info!(images = self.cash_art.len(), "cash shop art");
     }
 
-    /// The cash shop window, drawn with the original's art.
-    pub fn show_cash(&mut self, ctx: &egui::Context, db: Option<&ItemDb>, icons: &HashMap<u32, egui::TextureHandle>) -> Option<CashShopRequest> {
+    /// The cash shop window in the classic style, drawn with the original's art.
+    pub fn show_cash_classic(&mut self, ctx: &egui::Context, db: Option<&ItemDb>, icons: &HashMap<u32, egui::TextureHandle>) -> Option<CashShopRequest> {
         let (cash, kafra) = self.cash?;
         let mut out = None;
         let mut close = false;
@@ -419,6 +419,94 @@ impl Stores {
             p.text(clear.center(), egui::Align2::CENTER_CENTER, "Empty cart", font(12.0), dark);
         });
         if close {
+            self.cash = None;
+            out = Some(CashShopRequest::Close);
+        }
+        out
+    }
+}
+
+impl Stores {
+    /// The cash shop window in the modern (plain egui) style.
+    pub fn show_cash_modern(&mut self, ctx: &egui::Context, db: Option<&ItemDb>, icons: &HashMap<u32, egui::TextureHandle>) -> Option<CashShopRequest> {
+        let (cash, kafra) = self.cash?;
+        let mut out = None;
+        let mut open = true;
+        if !self.cash_tabs.contains_key(&self.cash_tab) {
+            if let Some(first) = self.cash_tabs.keys().next() {
+                self.cash_tab = *first;
+            }
+        }
+        egui::Window::new("Cash Shop").open(&mut open).collapsible(false).default_width(560.0).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(gold(format!("Cash points: {cash}")));
+                ui.separator();
+                ui.label(gold(format!("Kafra points: {kafra}")));
+            });
+            ui.horizontal_wrapped(|ui| {
+                for tab in self.cash_tabs.keys() {
+                    let label = CASH_TABS.get(*tab as usize).copied().unwrap_or("Tab");
+                    if ui.selectable_label(self.cash_tab == *tab, label).clicked() {
+                        self.cash_tab = *tab;
+                    }
+                }
+            });
+            ui.separator();
+            if self.cash_tabs.is_empty() {
+                ui.label(RichText::new("The shop has nothing for sale.").color(Color32::GRAY));
+                return;
+            }
+            ui.columns(2, |cols| {
+                let ui = &mut cols[0];
+                egui::ScrollArea::vertical().id_salt("cash_items").max_height(320.0).show(ui, |ui| {
+                    for (id, price) in self.cash_tabs.get(&self.cash_tab).into_iter().flatten() {
+                        ui.horizontal(|ui| {
+                            icon(ui, icons, *id);
+                            ui.vertical(|ui| {
+                                ui.label(name(db, *id));
+                                ui.label(gold(format!("{price} points")));
+                            });
+                            if ui.small_button("Add").clicked() {
+                                *self.basket.entry((*id, self.cash_tab)).or_insert(0) += 1;
+                            }
+                        });
+                    }
+                });
+                let ui = &mut cols[1];
+                ui.label(RichText::new("Basket").strong());
+                let price_of = |id: u32, tab: u16| self.cash_tabs.get(&tab).and_then(|t| t.iter().find(|(i, _)| *i == id)).map_or(0, |(_, p)| *p);
+                let mut remove = None;
+                egui::ScrollArea::vertical().id_salt("cash_basket").max_height(240.0).show(ui, |ui| {
+                    for ((id, tab), n) in self.basket.iter_mut() {
+                        ui.horizontal(|ui| {
+                            icon(ui, icons, *id);
+                            ui.label(name(db, *id));
+                            ui.add(egui::DragValue::new(n).range(1..=99).prefix("x"));
+                            if ui.small_button("✖").clicked() {
+                                remove = Some((*id, *tab));
+                            }
+                        });
+                    }
+                });
+                if let Some(k) = remove {
+                    self.basket.remove(&k);
+                }
+                let total: u64 = self.basket.iter().map(|((id, tab), n)| price_of(*id, *tab) as u64 * *n as u64).sum();
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Pay with Kafra points");
+                    ui.add(egui::DragValue::new(&mut self.use_kafra).range(0..=kafra.min(total as u32)));
+                });
+                ui.label(format!("Total: {total} points"));
+                let ok = total > 0 && total <= cash as u64 + self.use_kafra as u64;
+                if ui.add_enabled(ok, egui::Button::new("Buy")).clicked() {
+                    out = Some(CashShopRequest::Buy { kafra: self.use_kafra, items: self.basket.iter().map(|((id, tab), n)| (*id, *n, *tab)).collect() });
+                    self.basket.clear();
+                    self.use_kafra = 0;
+                }
+            });
+        });
+        if !open {
             self.cash = None;
             out = Some(CashShopRequest::Close);
         }

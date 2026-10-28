@@ -12,6 +12,8 @@ pub struct Settings {
     pub sfx_volume: f32,
     pub ui_scale: f32,
     pub minimap: bool,
+    /// Classic: windows drawn with the original client's art where available; Modern: plain egui.
+    pub classic_ui: bool,
     /// Login screen: the last ID used ("Remember ID"), empty when not remembered.
     pub last_id: String,
     /// The HD-2D look (lighting, shadows, post-processing).
@@ -20,7 +22,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, last_id: String::new(), visual: Visual::default() }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, classic_ui: true, last_id: String::new(), visual: Visual::default() }
     }
 }
 
@@ -134,6 +136,12 @@ impl Settings {
                 if r.drag_stopped() || (r.changed() && !r.dragged()) {
                     self.ui_scale = scale;
                 }
+                ui.end_row();
+                ui.label("Interface");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.classic_ui, true, "Classic");
+                    ui.selectable_value(&mut self.classic_ui, false, "Modern");
+                });
                 ui.end_row();
                 ui.label("Minimap");
                 ui.checkbox(&mut self.minimap, "Show (Alt+M)");
