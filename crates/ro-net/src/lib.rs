@@ -235,6 +235,9 @@ pub enum Event {
     SkillAt { skill: u16, src: u32, cell: (u16, u16) },
     /// A unit's status option bits changed (hidden, cloaked, ...).
     UnitOption { id: u32, option: u32 },
+    /// A lasting ground effect (Sanctuary, Fire Wall, traps...) appeared or ended.
+    GroundEffect { id: u32, cell: (u16, u16), kind: u32 },
+    GroundEffectGone(u32),
     /// A misc effect on a unit (0 base level up, 1 job level up, ...).
     UnitEffect { id: u32, effect: u32 },
     Disconnected(String),
@@ -518,6 +521,11 @@ impl MapSession {
                             let (id, option) = parse_state_change(&data);
                             Some(Event::UnitOption { id, option })
                         }
+                        0x09ca => {
+                            let (id, _, cell, kind) = parse_skill_entry(&data);
+                            Some(Event::GroundEffect { id, cell, kind })
+                        }
+                        0x0120 => Some(Event::GroundEffectGone(parse_skill_disappear(&data))),
                         0x019b => {
                             let (id, effect) = parse_notify_effect(&data);
                             Some(Event::UnitEffect { id, effect })

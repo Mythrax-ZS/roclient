@@ -1,4 +1,4 @@
-// Additive effect geometry (warp portals).
+// Additive effect geometry (warp portals, light columns, ground circles), tinted per vertex.
 
 struct Globals {
     view_proj: mat4x4<f32>,
@@ -17,15 +17,15 @@ struct Globals {
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) uv: vec2<f32>,
-    @location(1) alpha: f32,
+    @location(1) color: vec4<f32>,
 };
 
 @vertex
-fn vs_main(@location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) alpha: f32) -> VsOut {
+fn vs_main(@location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) color: vec4<f32>) -> VsOut {
     var o: VsOut;
     o.pos = g.view_proj * vec4(pos, 1.0);
     o.uv = uv;
-    o.alpha = alpha;
+    o.color = color;
     return o;
 }
 
@@ -37,5 +37,5 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let t = textureSample(tex, samp, in.uv);
     // Additive: brightness carries the effect; alpha only scales it.
-    return vec4(srgb_to_linear(t.rgb) * t.a * in.alpha, 1.0);
+    return vec4(srgb_to_linear(t.rgb) * in.color.rgb * t.a * in.color.a, 1.0);
 }

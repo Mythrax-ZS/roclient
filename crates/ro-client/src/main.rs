@@ -620,6 +620,8 @@ struct App {
     /// Casts in progress: caster -> (elapsed ms, total ms).
     casts: std::collections::HashMap<u32, (f32, f32)>,
     fx: fx::FxLib,
+    /// Sprite effects playing once: (actor, ms left).
+    sprite_fx: Vec<(ro_render::Actor, f32)>,
     /// `--fx name`: loop one STR effect on the player (effect previews).
     fx_test: Option<&'static str>,
     alt: bool,
@@ -1222,6 +1224,13 @@ impl App {
                 }
                 if c.ms > 0 {
                     self.casts.insert(c.src, (0.0, c.ms as f32));
+                    // The magic circle under the caster while chanting.
+                    if let (Some(pos), Some(r), Some(vfs)) = (self.unit_pos(c.src), self.renderer.as_mut(), self.vfs.as_ref()) {
+                        if let Some(tex) = self.fx.texture(r, vfs, "magic_target.tga") {
+                            let shape = ro_render::Shape::Disc { radius: 1.6, spin: 0.25 };
+                            r.procs.push(ro_render::ProcFx { tex, shape, pos, color: [1.0, 1.0, 1.0], time_ms: 0.0, duration_ms: c.ms as f32 });
+                        }
+                    }
                 }
             }
             SkillFailed { skill, cause } => {
@@ -1275,6 +1284,16 @@ impl App {
                     m.actor.alpha = if option & (0x2 | 0x4 | 0x4000) != 0 { 0.35 } else { 1.0 };
                 }
             }
+            GroundEffect { id, cell, kind } => {
+                tracing::debug!(id, ?cell, kind = format_args!("{kind:#x}"), "ground effect");
+                if let (Some(name), Some(pos)) = (fx::ground_str(kind), self.cell_pos(cell)) {
+                    self.stop_fx(id);
+                    self.play_fx_tagged(name, pos, id);
+                } else {
+                    tracing::debug!(kind = format_args!("{kind:#x}"), "no visual for ground effect");
+                }
+            }
+            GroundEffectGone(id) => self.stop_fx(id),
             UnitEffect { id, effect } => {
                 if let (Some(name), Some(pos)) = (fx::misc_effect(effect), self.unit_pos(id)) {
                     self.play_fx(name, pos);
@@ -1523,17 +1542,58 @@ impl App {
 
     /// Plays a skill's effect at `pos`, if it has one.
     fn skill_fx(&mut self, skill: u16, pos: Option<glam::Vec3>) {
-        match (fx::skill_effect(skill), pos) {
-            (Some(name), Some(pos)) => self.play_fx(name, pos),
-            (None, _) => tracing::debug!(skill, "no effect for skill"),
-            _ => {}
+        let Some(pos) = pos else { return };
+        let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
+        match fx::skill_visual(skill) {
+            Some(fx::Visual::Str(name)) => {
+                if let Some(asset) = self.fx.get(r, vfs, name) {
+                    r.effects.push(ro_render::Fx { asset, pos, time_ms: 0.0, looping: false, tag: 0 });
+                }
+            }
+            Some(fx::Visual::Column(tex, color)) => {
+                if let Some(tex) = self.fx.texture(r, vfs, tex) {
+                    let shape = ro_render::Shape::Column { radius: 0.9, height: 3.5 };
+                    r.procs.push(ro_render::ProcFx { tex, shape, pos, color, time_ms: 0.0, duration_ms: 1200.0 });
+                }
+            }
+            Some(fx::Visual::Sprite(name)) => {
+                if let Some(body) = self.fx.sprite(r, vfs, name) {
+                    let actor = ro_render::Actor {
+                        pos,
+                        body,
+                        head: None,
+                        headgear: vec![],
+                        weapon: None,
+                        shadow: None,
+                        action: 0,
+                        dir: ro_render::Dir::S,
+                        time_ms: 0.0,
+                        once: true,
+                        alpha: 1.0,
+                    };
+                    let ms = r.action_ms(body, 0).max(200.0);
+                    self.sprite_fx.push((actor, ms));
+                }
+            }
+            None => tracing::debug!(skill, "no effect for skill"),
         }
     }
 
     fn play_fx(&mut self, name: &'static str, pos: glam::Vec3) {
+        self.play_fx_tagged(name, pos, 0);
+    }
+
+    /// Plays an STR effect; a non-zero `tag` loops it until `stop_fx(tag)`.
+    fn play_fx_tagged(&mut self, name: &'static str, pos: glam::Vec3, tag: u32) {
         let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
         if let Some(asset) = self.fx.get(r, vfs, name) {
-            r.effects.push(ro_render::Fx { asset, pos, time_ms: 0.0 });
+            r.effects.push(ro_render::Fx { asset, pos, time_ms: 0.0, looping: tag != 0, tag });
+        }
+    }
+
+    fn stop_fx(&mut self, tag: u32) {
+        if let Some(r) = self.renderer.as_mut() {
+            r.effects.retain(|e| e.tag != tag);
         }
     }
 
@@ -1908,6 +1968,14 @@ impl App {
                 self.talk(npc);
             }
         }
+        // `--fx skill:<id>`: replay a skill's effect on the player whenever the last one ended.
+        if let Some(id) = self.fx_test.and_then(|n| n.strip_prefix("skill:")).and_then(|n| n.parse::<u16>().ok()) {
+            let idle = self.renderer.as_ref().is_some_and(|r| r.effects.is_empty() && r.procs.is_empty()) && self.sprite_fx.is_empty();
+            if idle {
+                let pos = self.unit_pos(self.account_id).or_else(|| self.player.as_ref().map(|p| p.actor.pos));
+                self.skill_fx(id, pos);
+            }
+        }
         // Cast the skill we walked into range for (re-walks if the target moved).
         if let (Some((skill, level, target, _)), None) = (self.pending_skill, self.walk_goal.as_ref()) {
             if self.player.as_ref().is_some_and(|p| !p.walker.is_walking()) {
@@ -1959,18 +2027,34 @@ impl App {
                 }
                 r.actors.push(a);
             }
-            if let (Some(name), true, Some(vfs), Some(p)) = (self.fx_test, r.effects.is_empty(), self.vfs.as_ref(), self.player.as_ref()) {
+            if let (Some(name), true, Some(vfs), Some(p)) = (self.fx_test.filter(|n| !n.starts_with("skill:")), r.effects.is_empty(), self.vfs.as_ref(), self.player.as_ref()) {
                 if let Some(asset) = self.fx.get(r, vfs, name) {
-                    r.effects.push(ro_render::Fx { asset, pos: p.actor.pos, time_ms: 0.0 });
+                    r.effects.push(ro_render::Fx { asset, pos: p.actor.pos, time_ms: 0.0, looping: false, tag: 0 });
                 }
             }
             // Skill effects run once, then go.
             for e in &mut r.effects {
                 e.time_ms += dt;
             }
-            let alive: Vec<bool> = r.effects.iter().map(|e| e.time_ms < r.fx_duration(e.asset)).collect();
-            let mut alive = alive.into_iter();
-            r.effects.retain(|_| alive.next().unwrap_or(false));
+            // Ground effects loop until the server removes them.
+            let durations: Vec<f32> = r.effects.iter().map(|e| r.fx_duration(e.asset)).collect();
+            for (e, d) in r.effects.iter_mut().zip(&durations) {
+                if e.looping && *d > 0.0 {
+                    e.time_ms %= d;
+                }
+            }
+            let mut alive = durations.into_iter();
+            r.effects.retain(|e| alive.next().is_some_and(|d| e.looping || e.time_ms < d));
+            for p in &mut r.procs {
+                p.time_ms += dt;
+            }
+            r.procs.retain(|p| p.time_ms < p.duration_ms);
+            for (a, left) in &mut self.sprite_fx {
+                a.time_ms += dt;
+                *left -= dt;
+            }
+            self.sprite_fx.retain(|(_, left)| *left > 0.0);
+            r.actors.extend(self.sprite_fx.iter().map(|(a, _)| a.clone()));
             // Items on the ground: their sprite at the cell plus sub-cell offset.
             for (f, actor) in self.floor.values() {
                 if let Some(mut a) = actor.clone() {
@@ -2469,6 +2553,7 @@ fn main() -> anyhow::Result<()> {
         hotkey_row: 0,
         casts: Default::default(),
         fx: Default::default(),
+        sprite_fx: vec![],
         fx_test: arg("--fx").map(|s| &*s.leak()),
         alt: false,
         queued_action: None,

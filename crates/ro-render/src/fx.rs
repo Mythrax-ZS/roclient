@@ -24,6 +24,10 @@ pub struct Fx {
     /// Where it plays (usually a unit's feet).
     pub pos: Vec3,
     pub time_ms: f32,
+    /// Ground effects repeat until removed.
+    pub looping: bool,
+    /// Owner key (a skill unit id) so it can be removed; 0 for one-shots.
+    pub tag: u32,
 }
 
 impl FxAsset {

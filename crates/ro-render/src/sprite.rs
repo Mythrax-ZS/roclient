@@ -118,6 +118,11 @@ impl Sheet {
         self.act.actions.get(action).or_else(|| self.act.actions.get(action % 8)).filter(|a| !a.frames.is_empty())
     }
 
+    /// Length of one pass through `action`.
+    pub fn action_ms(&self, action: usize) -> f32 {
+        self.action(action).map_or(0.0, |a| a.delay_ms.max(1.0) * a.frames.len() as f32)
+    }
+
     /// Frame index of `action` at `time_ms`, looping.
     fn frame_index(&self, action: usize, time_ms: f32, once: bool) -> usize {
         self.action(action).map_or(0, |a| {

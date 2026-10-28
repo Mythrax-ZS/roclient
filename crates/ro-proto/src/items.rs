@@ -449,3 +449,18 @@ pub fn parse_notify_effect(data: &[u8]) -> (u32, u32) {
     let mut b = &data[2..];
     (b.get_u32_le(), b.get_u32_le())
 }
+
+/// ZC_SKILL_ENTRY5 (0x09ca): a lasting ground effect appeared.
+/// (unit id, creator, cell, unit type: 0x7e safety wall, 0x7f fire wall, 0x83 sanctuary...)
+pub fn parse_skill_entry(data: &[u8]) -> (u32, u32, (u16, u16), u32) {
+    let mut b = &data[4..];
+    let id = b.get_u32_le();
+    let creator = b.get_u32_le();
+    let cell = (b.get_u16_le(), b.get_u16_le());
+    (id, creator, cell, b.get_u32_le())
+}
+
+/// ZC_SKILL_DISAPPEAR (0x0120): the ground effect `id` ended.
+pub fn parse_skill_disappear(data: &[u8]) -> u32 {
+    u32::from_le_bytes([data[2], data[3], data[4], data[5]])
+}

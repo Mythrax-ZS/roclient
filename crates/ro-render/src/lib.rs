@@ -15,6 +15,7 @@ pub use camera::{Camera, CELL};
 pub use ro_formats::image::Rgba;
 pub use scene::{SceneBuilder, SceneMesh};
 pub use water::WaterMesh;
+pub use effect::{ProcFx, Shape, TexId};
 pub use fx::{Fx, FxId};
 pub use sprite::{Actor, Dir, SheetId};
 use winit::window::Window;
@@ -103,6 +104,9 @@ pub struct Renderer {
     warp_texture: Option<wgpu::BindGroup>,
     fx_pipeline: wgpu::RenderPipeline,
     fx_assets: Vec<fx::FxAsset>,
+    effect_textures: Vec<wgpu::BindGroup>,
+    /// Code-drawn effects playing this frame; the client advances and removes them.
+    pub procs: Vec<ProcFx>,
     /// STR effects playing this frame; the client advances and removes them.
     pub effects: Vec<Fx>,
     effect_pipeline: wgpu::RenderPipeline,
@@ -423,6 +427,8 @@ impl Renderer {
             warp_texture: None,
             fx_pipeline,
             fx_assets: vec![],
+            effect_textures: vec![],
+            procs: vec![],
             effects: vec![],
             effect_pipeline,
             started: std::time::Instant::now(),
@@ -459,6 +465,25 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.repeat_sampler) },
             ],
         }));
+    }
+
+    /// Uploads a texture for code-drawn effects (light columns, ground circles).
+    pub fn add_effect_texture(&mut self, img: &Rgba) -> TexId {
+        let view = scene::upload_texture(&self.device, &self.queue, img, true);
+        self.effect_textures.push(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("effect texture"),
+            layout: &self.sprite_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.repeat_sampler) },
+            ],
+        }));
+        TexId(self.effect_textures.len() - 1)
+    }
+
+    /// How long one pass of an actor action takes (sprite effects play it once).
+    pub fn action_ms(&self, sheet: SheetId, action: usize) -> f32 {
+        self.sheets.get(sheet.0).map_or(0.0, |s| s.action_ms(action))
     }
 
     pub fn add_sheet(&mut self, spr: &ro_formats::spr::Spr, act: ro_formats::act::Act, palette: Option<&[[u8; 4]; 256]>) -> SheetId {
@@ -718,6 +743,32 @@ impl Renderer {
                     pass.set_vertex_buffer(0, buffer.slice(..));
                     for (sheet, range) in draws {
                         pass.set_bind_group(1, &self.sheets[sheet].bind, &[]);
+                        pass.draw(range, 0..1);
+                    }
+                }
+            }
+            // Code-drawn skill effects (additive, world space).
+            if !self.procs.is_empty() {
+                let mut vertices = vec![];
+                let mut draws = vec![];
+                for p in &self.procs {
+                    if p.tex.0 >= self.effect_textures.len() {
+                        continue;
+                    }
+                    let start = vertices.len() as u32;
+                    p.vertices(&mut vertices);
+                    draws.push((p.tex.0, start..vertices.len() as u32));
+                }
+                if !vertices.is_empty() {
+                    let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("skill effects"),
+                        contents: bytemuck::cast_slice(&vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    pass.set_pipeline(&self.effect_pipeline);
+                    pass.set_vertex_buffer(0, buffer.slice(..));
+                    for (tex, range) in draws {
+                        pass.set_bind_group(1, &self.effect_textures[tex], &[]);
                         pass.draw(range, 0..1);
                     }
                 }
