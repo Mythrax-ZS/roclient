@@ -134,3 +134,38 @@ mod tests {
         assert_eq!((r.owner, r.id, r.users, r.title.as_str()), (1, 2, 1, "Hello"));
     }
 }
+
+/// Whisper blocking: /ex and /in (one player), /exall and /inall, and the block list.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IgnoreRequest {
+    Player { name: String, block: bool },
+    All { block: bool },
+    List,
+}
+
+impl Encode for IgnoreRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            IgnoreRequest::Player { name, block } => {
+                d.put_u16_le(0x00cf);
+                fixed(d, name, 24);
+                d.put_u8(!*block as u8);
+            }
+            IgnoreRequest::All { block } => {
+                d.put_u16_le(0x00d0);
+                d.put_u8(!*block as u8);
+            }
+            IgnoreRequest::List => d.put_u16_le(0x00d3),
+        }
+    }
+}
+
+/// ZC_WHISPER_LIST (0x00d4): the blocked names.
+pub fn parse_ignore_list(data: &[u8]) -> Vec<String> {
+    let Some(mut b) = data.get(4..) else { return vec![] };
+    let mut out = vec![];
+    while b.len() >= 24 {
+        out.push(get_fixed_str(&mut b, 24));
+    }
+    out
+}

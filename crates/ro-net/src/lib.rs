@@ -28,7 +28,7 @@ pub use ro_proto::companions::{CompanionRequest, CompanionSkill, HomunInfo, Merc
 use ro_proto::companions::*;
 pub use ro_proto::mail::{MailHeader, MailItem, MailRequest};
 use ro_proto::mail::*;
-pub use ro_proto::chatroom::{ChatRoomRequest, Room};
+pub use ro_proto::chatroom::{ChatRoomRequest, IgnoreRequest, Room};
 use ro_proto::chatroom::*;
 use ro_proto::quests::*;
 use ro_proto::menus::*;
@@ -335,6 +335,9 @@ pub enum Event {
     SoldToStore { index: u16, amount: u16, price: u32 },
     /// A buying store message (failure or closure).
     BuyStoreNotice(String),
+    /// Whisper blocking: (all?, block?, result: 0 ok, 1 failed, 2 list full).
+    IgnoreResult { all: bool, block: bool, result: u8 },
+    IgnoreList(Vec<String>),
     /// A chat room sign appeared or changed.
     RoomSign(Room),
     RoomGone(u32),
@@ -469,6 +472,7 @@ pub enum Command {
     Companion(CompanionRequest),
     Mail(MailRequest),
     ChatRoom(ChatRoomRequest),
+    Ignore(IgnoreRequest),
     /// Look at a player's equipment.
     ViewEquip(u32),
     /// Let others look at ours.
@@ -609,6 +613,7 @@ impl MapSession {
                     Some(Command::Companion(r)) => self.send(r).await?,
                     Some(Command::Mail(r)) => self.send(r).await?,
                     Some(Command::ChatRoom(r)) => self.send(r).await?,
+                    Some(Command::Ignore(r)) => self.send(r).await?,
                     Some(Command::ViewEquip(aid)) => self.send(CzViewEquip(aid)).await?,
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
@@ -788,6 +793,8 @@ impl MapSession {
                             7 => "The buyer can't pay for that.".into(),
                             _ => "The deal failed.".into(),
                         })),
+                        0x00d1 | 0x00d2 if data.len() >= 4 => Some(Event::IgnoreResult { all: opcode == 0x00d2, block: data[2] == 0, result: data[3] }),
+                        0x00d4 => Some(Event::IgnoreList(parse_ignore_list(&data))),
                         0x00d7 | 0x00df => parse_room(&data).map(Event::RoomSign),
                         0x00d8 if data.len() >= 6 => Some(Event::RoomGone(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x00d6 if data.len() >= 3 => Some(Event::RoomCreated(data[2])),

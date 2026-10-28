@@ -811,6 +811,8 @@ struct App {
     mailbox: mail::Mailbox,
     /// Chat rooms.
     rooms: chatrooms::ChatRooms,
+    /// The last /ex or /in sent: (name, block).
+    ignore_pending: Option<(String, bool)>,
     /// A companion window request, handled after the UI pass.
     companion_action: Option<companions::CompanionAction>,
     /// When the companion AI next checks distances.
@@ -1466,6 +1468,20 @@ impl App {
                 if result == 0 {
                     self.send(ro_net::Command::Mail(ro_net::MailRequest::Open { refresh: true }));
                 }
+            }
+            IgnoreResult { all, block, result } => {
+                let who = if all { "everyone".to_string() } else { self.ignore_pending.take().map_or_else(|| "that player".into(), |(n, _)| n) };
+                let msg = match (result, block) {
+                    (0, true) => format!("Whispers from {who} are now blocked."),
+                    (0, false) => format!("Whispers from {who} are allowed again."),
+                    (2, _) => "Your block list is full.".into(),
+                    _ => format!("Couldn't change whispers from {who}."),
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, msg);
+            }
+            IgnoreList(names) => {
+                let msg = if names.is_empty() { "You aren't blocking anyone's whispers.".into() } else { format!("Blocked: {}", names.join(", ")) };
+                self.hud.push_chat(ro_net::ChatKind::System, msg);
             }
             RoomSign(room) => {
                 if room.owner == self.account_id {
@@ -2967,6 +2983,24 @@ impl App {
             // "/p text" goes to the party, "/g text" to the guild.
             let speaker = self.hud.status.name.clone();
             let mut note = None;
+            // Whisper blocking, as the original: /ex name, /in name, /exall, /inall, /ex (list).
+            let ignore = match text.trim() {
+                "/exall" => Some(ro_net::IgnoreRequest::All { block: true }),
+                "/inall" => Some(ro_net::IgnoreRequest::All { block: false }),
+                "/ex" => Some(ro_net::IgnoreRequest::List),
+                t => match t.split_once(' ') {
+                    Some(("/ex", n)) => Some(ro_net::IgnoreRequest::Player { name: n.trim().trim_matches('"').to_string(), block: true }),
+                    Some(("/in", n)) => Some(ro_net::IgnoreRequest::Player { name: n.trim().trim_matches('"').to_string(), block: false }),
+                    _ => None,
+                },
+            };
+            if let Some(r) = ignore {
+                if let ro_net::IgnoreRequest::Player { name, block } = &r {
+                    self.ignore_pending = Some((name.clone(), *block));
+                }
+                let _ = tx.send(ro_net::Command::Ignore(r));
+                return;
+            }
             let cmd = match text.split_once(' ') {
                 Some(("/p", rest)) => Some(ro_net::Command::Party(ro_net::PartyRequest::Chat { speaker, text: rest.to_string() })),
                 Some(("/g", rest)) => Some(ro_net::Command::Party(ro_net::PartyRequest::GuildChat { speaker, text: rest.to_string() })),
@@ -4723,6 +4757,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         rooms: Default::default(),
+        ignore_pending: None,
         companion_action: None,
         follow_at: std::time::Instant::now(),
         unit_jobs: Default::default(),
