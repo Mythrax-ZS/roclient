@@ -124,7 +124,7 @@ pub fn misc_effect(effect: u32) -> Option<&'static str> {
     match effect {
         0 => Some("h_levelup"),
         1 => Some("joblvup"),
-        _ => ef_str(effect),
+        _ => None,
     }
 }
 
@@ -232,6 +232,30 @@ impl FxLib {
             Some(r.add_fx(str, images))
         })
     }
+}
+
+/// rAthena `EF_*` effects the original draws in code, shown with the matching skill's effect.
+pub fn ef_skill(effect: u32) -> Option<u16> {
+    Some(match effect {
+        312 | 313 => 28,   // HEAL, HEAL2: Heal
+        226 => 254,        // GRANDCROSS
+        18 => 50,          // STEAL
+        16 => 5,           // BASH
+        53 => 52,          // POISONHIT: Envenom
+        125 => 138,        // ENCHANTPOISON
+        215 => 196,        // SUMMONSLAVE
+        106 => 122,        // BLASTMINEBOMB
+        72 => 261,         // SPHERE: Call Spirits
+        99 => 120,         // FLASHER
+        496 => 249,        // GUARD2: Auto Guard
+        9 | 60 => 45,      // ENHANCE, LOCKON: Improve Concentration
+        71 => 29,          // CONE: Increase AGI
+        _ => return None,
+    })
+}
+
+pub fn script_effect(effect: u32) -> Option<&'static str> {
+    ef_str(effect)
 }
 
 /// rAthena `EF_*` effect ids whose name matches an STR in the client data (generated from

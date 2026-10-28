@@ -2695,6 +2695,18 @@ impl App {
                     self.member_pos.insert(id, ((x as f32, y as f32), guild));
                 }
             }
+            ScriptEffect { id, effect } => {
+                if let Some(pos) = self.unit_pos(id) {
+                    match (fx::script_effect(effect), fx::ef_skill(effect)) {
+                        (Some(name), _) => self.play_fx(name, pos),
+                        (None, Some(skill)) => {
+                            tracing::debug!(effect, skill, "script effect via skill");
+                            self.skill_fx(skill, Some(pos), false);
+                        }
+                        _ => tracing::debug!(effect, "no visual for script effect"),
+                    }
+                }
+            }
             UnitEffect { id, effect } => {
                 if let (Some(name), Some(pos)) = (fx::misc_effect(effect), self.unit_pos(id)) {
                     self.play_fx(name, pos);
