@@ -928,7 +928,7 @@ impl MapSession {
                             _ => Some(Event::Notice("The item could not be identified.".into())),
                         },
                         0x013c if data.len() >= 4 => Some(Event::ArrowEquipped(u16::from_le_bytes([data[2], data[3]]))),
-                        0x013b | 0x0189 | 0x011e | 0x012c | 0x02bb | 0x0223 => notice_text(opcode, &data).map(Event::Notice),
+                        0x013b | 0x0189 | 0x011e | 0x012c | 0x02bb | 0x0223 | 0x01fe => notice_text(opcode, &data).map(Event::Notice),
                         0x0152 if data.len() >= 12 => Some(Event::GuildEmblem { guild: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), version: u32::from_le_bytes([data[8], data[9], data[10], data[11]]), data: data[12..].to_vec() }),
                         0x010c if data.len() >= 6 => Some(Event::Mvp(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x010a if data.len() >= 6 => Some(Event::MvpItem(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
@@ -1178,7 +1178,7 @@ impl MapSession {
                         0x02b7 if data.len() >= 7 => Some(Event::QuestActiveChanged { quest: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), active: data[6] != 0 }),
                         0x0446 => parse_quest_mark(&data).map(|(npc, mark, color)| Event::QuestMark { npc, mark, color }),
                         0x043d if data.len() >= 8 => Some(Event::SkillCooldown { skill: u16::from_le_bytes([data[2], data[3]]), ms: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
-                        0x01ad | 0x018d | 0x025a | 0x0abe | 0x0afb | 0x0177 | 0x0442 | 0x01a6 => parse_menu(opcode, &data).map(Event::Menu),
+                        0x01ad | 0x018d | 0x025a | 0x0abe | 0x0afb | 0x0177 | 0x0442 | 0x01a6 | 0x0b65 => parse_menu(opcode, &data).map(Event::Menu),
                         0x018f => parse_make_result(&data).map(|(ok, item)| Event::MakeResult { ok, item }),
                         0x0229 => {
                             let (id, option) = parse_state_change(&data);
@@ -1480,6 +1480,8 @@ fn notice_text(opcode: u16, data: &[u8]) -> Option<String> {
         .into(),
         // ZC_EQUIPITEM_DAMAGED
         0x02bb => "One of your equipped items was damaged.".into(),
+        // ZC_ACK_ITEMREPAIR
+        0x01fe => if *data.get(4)? == 0 { "Item has been repaired." } else { "Item repair failed." }.into(),
         // ZC_ACK_WEAPONREFINE
         0x0223 => match data.get(2..6).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))? {
             0 | 1 => "Weapon upgraded.",

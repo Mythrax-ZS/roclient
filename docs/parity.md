@@ -28,7 +28,7 @@ Ticked items are handled and tested in game against the local server.
 
 ## Items and skills
 - [x] ZC_ACK_ITEMIDENTIFY (Magnifier) + ZC_AUTORUN_SKILL (all itemskill items)
-- [ ] ZC_REPAIRITEMLIST / ACK_ITEMREPAIR
+- [x] ZC_REPAIRITEMLIST / ACK_ITEMREPAIR (Weapon Repair list and result)
 - [~] ZC_ACK_WEAPONREFINE message; ZC_NOTIFY_WEAPONITEMLIST list still missing
 - [x] ZC_ACK_REMEMBER_WARPPOINT (Warp Portal memo)
 - [x] ZC_EQUIP_ARROW, ZC_ACTION_FAILURE, ZC_ACK_ADDITEM_TO_CART, ZC_NOTIFY_MAPINFO, ZC_EQUIPITEM_DAMAGED

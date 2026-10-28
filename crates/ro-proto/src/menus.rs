@@ -27,6 +27,9 @@ pub enum Menu {
     Skill { flag: i32, skills: Vec<u16> },
     /// 0x01a6: pet eggs to hatch (inventory indices).
     Egg(Vec<u16>),
+    /// ZC_REPAIRITEMLIST (0x0b65): damaged items Weapon Repair can fix: (index, item id, refine).
+    /// The index is in the inventory of whoever is being repaired.
+    Repair(Vec<(u16, u32, u8)>),
 }
 
 pub fn parse_menu(opcode: u16, data: &[u8]) -> Option<Menu> {
@@ -57,6 +60,7 @@ pub fn parse_menu(opcode: u16, data: &[u8]) -> Option<Menu> {
             Menu::Skill { flag, skills: u16s(b).into_iter().filter(|&s| s != 0).collect() }
         }
         0x01a6 => Menu::Egg(u16s(body)),
+        0x0b65 => Menu::Repair(body.chunks_exact(24).map(|c| (u16::from_le_bytes([c[0], c[1]]), u32::from_le_bytes([c[2], c[3], c[4], c[5]]), c[22])).collect()),
         _ => return None,
     })
 }
@@ -73,6 +77,7 @@ pub enum MenuReply {
     Identify(u16),
     Skill { flag: i32, skill: u16 },
     Egg(u16),
+    Repair { index: u16, item: u32, refine: u8 },
 }
 
 impl Encode for MenuReply {
@@ -118,6 +123,14 @@ impl Encode for MenuReply {
             MenuReply::Egg(index) => {
                 d.put_u16_le(0x01a7);
                 d.put_u16_le(*index);
+            }
+            MenuReply::Repair { index, item, refine } => {
+                d.put_u16_le(0x0b66);
+                d.put_u16_le(*index);
+                d.put_u32_le(*item);
+                d.put_slice(&[0; 16]);
+                d.put_u8(*refine);
+                d.put_u8(0);
             }
         }
     }

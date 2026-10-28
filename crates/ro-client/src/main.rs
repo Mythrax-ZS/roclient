@@ -4420,6 +4420,7 @@ impl App {
                                     let by_item = self.inventory.items.values().find(|i| i.id == id && !i.identified && list.contains(&i.index)).map(|i| i.index);
                                     Some(MenuReply::Identify(by_item.unwrap_or(id as u16)))
                                 }
+                                Menu::Repair(list) => list.iter().find(|r| r.1 == id).map(|&(index, item, refine)| MenuReply::Repair { index, item, refine }),
                                 Menu::Egg(_) => Some(MenuReply::Egg(self.inventory.items.values().find(|i| i.id == id).map_or(id as u16, |i| i.index))),
                                 Menu::Warp { skill, maps } => maps.get(id as usize).map(|m| MenuReply::Warp { skill, map: m.clone() }),
                             };

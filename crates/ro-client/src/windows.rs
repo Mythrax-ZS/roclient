@@ -1123,6 +1123,7 @@ impl Windows {
                 Menu::Identify(_) => "Item Appraisal",
                 Menu::Skill { .. } => "Select a Skill",
                 Menu::Egg(_) => "Hatch an Egg",
+                Menu::Repair(_) => "Weapon Repair",
             };
             let skill_name = |id: u16| v.skill_info.and_then(|i| i.internal(id)).map_or_else(|| format!("Skill {id}"), |n| (v.skill_names)(n));
             let item_name_of = |id: u32| v.db.map_or_else(|| format!("Item #{id}"), |d| d.name(id, true));
@@ -1165,6 +1166,14 @@ impl Windows {
                                 let Some(it) = inv(index) else { continue };
                                 if item_row(ui, it.id, item_name(v.db, it)) {
                                     chosen = Some(if matches!(menu, Menu::Egg(_)) { MenuReply::Egg(index) } else { MenuReply::Identify(index) });
+                                }
+                            }
+                        }
+                        Menu::Repair(list) => {
+                            for &(index, id, refine) in list {
+                                let label = if refine > 0 { format!("+{refine} {}", item_name_of(id)) } else { item_name_of(id) };
+                                if item_row(ui, id, label) {
+                                    chosen = Some(MenuReply::Repair { index, item: id, refine });
                                 }
                             }
                         }
