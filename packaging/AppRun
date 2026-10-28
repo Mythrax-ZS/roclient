@@ -1,0 +1,9 @@
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "$0")")"
+CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/roclient"
+mkdir -p "$CFG_DIR"
+if [ ! -f "$CFG_DIR/local.toml" ]; then
+  cp "$HERE/usr/share/roclient/example.toml" "$CFG_DIR/local.toml"
+fi
+export ROCLIENT_CONFIG="${ROCLIENT_CONFIG:-$CFG_DIR/local.toml}"
+exec "$HERE/usr/bin/ro-client" "$@"
