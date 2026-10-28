@@ -14,7 +14,7 @@ use tokio_util::codec::Framed;
 pub use ro_proto::packets::{sp, Act, CharInfo, ChatKind, Look, NpcDialog, NpcReply, UnitInfo, UnitPos};
 pub use ro_proto::items::{Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
-pub use ro_proto::guild::{GuildInfo, GuildMember, GuildRequest};
+pub use ro_proto::guild::{GuildInfo, GuildMember, GuildRequest, GuildSkill, Position};
 use ro_proto::guild::*;
 pub use ro_proto::social::{Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
 use ro_proto::social::*;
@@ -215,6 +215,13 @@ pub enum Event {
     GuildInviteResult(u8),
     GuildMemberState { account_id: u32, char_id: u32, online: bool },
     GuildMemberGone { char_id: u32, reason: String, expelled: bool },
+    /// Rank titles (id, name), and rank settings (id, mode, tax).
+    GuildRankNames(Vec<(i32, String)>),
+    GuildRankInfo(Vec<(i32, u32, i32)>),
+    GuildRanksChanged(Vec<Position>),
+    /// Members moved to ranks: (account, char, rank).
+    GuildRankMoves(Vec<(u32, u32, i32)>),
+    GuildSkills { points: i16, skills: Vec<GuildSkill> },
     Friends(Vec<Friend>),
     FriendOnline { account_id: u32, char_id: u32, online: bool },
     FriendRequested { account_id: u32, char_id: u32, name: String },
@@ -475,6 +482,14 @@ impl MapSession {
                             Some(Event::GuildBelong { id, master, name })
                         }
                         0x0167 => Some(Event::GuildCreated(data[2])),
+                        0x0166 => Some(Event::GuildRankNames(parse_position_names(&data))),
+                        0x0160 => Some(Event::GuildRankInfo(parse_position_info(&data))),
+                        0x0174 => Some(Event::GuildRanksChanged(parse_positions_changed(&data))),
+                        0x0156 => Some(Event::GuildRankMoves(parse_rank_changes(&data))),
+                        0x0162 => {
+                            let (points, skills) = parse_guild_skills(&data);
+                            Some(Event::GuildSkills { points, skills })
+                        }
                         0x0b7b => Some(Event::GuildInfo(parse_guild_info(&data))),
                         0x0b7d => Some(Event::GuildMembers(parse_members(&data))),
                         0x016f => {

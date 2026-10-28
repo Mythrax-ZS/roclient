@@ -1251,6 +1251,39 @@ impl App {
                 self.guild.info = Some(info);
             }
             GuildMembers(m) => self.guild.members = m,
+            GuildRankNames(names) => {
+                for (id, name) in names {
+                    match self.guild.ranks.iter_mut().find(|r| r.id == id) {
+                        Some(r) => r.name = name,
+                        None => self.guild.ranks.push(ro_net::Position { id, name, ..Default::default() }),
+                    }
+                }
+                self.guild.ranks.sort_by_key(|r| r.id);
+            }
+            GuildRankInfo(info) => {
+                for (id, mode, tax) in info {
+                    if let Some(r) = self.guild.ranks.iter_mut().find(|r| r.id == id) {
+                        (r.mode, r.tax) = (mode, tax);
+                    }
+                }
+            }
+            GuildRanksChanged(list) => {
+                for p in list {
+                    match self.guild.ranks.iter_mut().find(|r| r.id == p.id) {
+                        Some(r) => *r = p,
+                        None => self.guild.ranks.push(p),
+                    }
+                }
+                self.guild.ranks.sort_by_key(|r| r.id);
+            }
+            GuildRankMoves(moves) => {
+                for (_, char_id, position) in moves {
+                    if let Some(m) = self.guild.members.iter_mut().find(|m| m.char_id == char_id) {
+                        m.position = position;
+                    }
+                }
+            }
+            GuildSkills { points, skills } => (self.guild.skill_points, self.guild.skills) = (points, skills),
             GuildNotice { subject, text } => self.guild.notice = (subject, text),
             GuildInvited { guild, name } => self.social.prompts.push(social::Prompt::Guild { guild, name }),
             GuildInviteResult(r) => {
@@ -2375,7 +2408,8 @@ impl App {
             }
         }
         if std::mem::take(&mut self.open_windows) {
-            (self.windows.guild, self.guild.tab_members) = (true, std::env::args().any(|a| a == "--guild-members"));
+            self.windows.guild = true;
+            self.guild.start_tab = std::env::args().skip_while(|a| a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()).unwrap_or(0);
         }
         for c in std::mem::take(&mut self.queued_commands) {
             self.send(c);

@@ -19,6 +19,10 @@ pub enum GuildRequest {
     Leave { guild: u32, account_id: u32, char_id: u32, reason: String },
     Expel { guild: u32, account_id: u32, char_id: u32, reason: String },
     Notice { guild: u32, subject: String, text: String },
+    /// Save ranks (titles, permissions, tax).
+    Positions(Vec<Position>),
+    /// Move a member to a rank.
+    SetRank { account_id: u32, char_id: u32, position: i32 },
 }
 
 impl Encode for GuildRequest {
@@ -48,6 +52,28 @@ impl Encode for GuildRequest {
                 d.put_u32_le(*account_id);
                 d.put_u32_le(*char_id);
                 put_fixed_str(d, reason, 40);
+            }
+            // CZ_REG_CHANGE_GUILD_POSITIONINFO (0x0161): 40 bytes per rank.
+            GuildRequest::Positions(list) => {
+                let mut body = BytesMut::new();
+                for p in list {
+                    body.put_i32_le(p.id);
+                    body.put_u32_le(p.mode);
+                    body.put_i32_le(p.id);
+                    body.put_i32_le(p.tax);
+                    put_fixed_str(&mut body, &p.name, 24);
+                }
+                d.put_u16_le(0x0161);
+                d.put_u16_le((4 + body.len()) as u16);
+                d.put_slice(&body);
+            }
+            // CZ_REQ_CHANGE_MEMBERPOS (0x0155).
+            GuildRequest::SetRank { account_id, char_id, position } => {
+                d.put_u16_le(0x0155);
+                d.put_u16_le(16);
+                d.put_u32_le(*account_id);
+                d.put_u32_le(*char_id);
+                d.put_i32_le(*position);
             }
             GuildRequest::Notice { guild, subject, text } => {
                 let (mut s, mut t) = (BytesMut::new(), BytesMut::new());
@@ -184,4 +210,88 @@ mod tests {
         GuildRequest::Invite { name: "Buddy".into() }.encode(&mut b);
         assert_eq!(b.len(), 26);
     }
+}
+
+/// A guild rank: title, permissions (mode: 0x01 invite, 0x10 expel, 0x40 storage) and
+/// the share of members' experience paid to the guild (tax, 0..50 %).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Position {
+    pub id: i32,
+    pub name: String,
+    pub mode: u32,
+    pub tax: i32,
+}
+
+/// ZC_POSITION_ID_NAME_INFO (0x0166): (rank id, title) pairs, 28 bytes each.
+pub fn parse_position_names(data: &[u8]) -> Vec<(i32, String)> {
+    data.get(4..)
+        .unwrap_or_default()
+        .chunks_exact(28)
+        .map(|mut b| {
+            let id = b.get_i32_le();
+            (id, get_fixed_str(&mut b, 24))
+        })
+        .collect()
+}
+
+/// ZC_POSITION_INFO (0x0160): (rank id, mode, tax), 16 bytes each.
+pub fn parse_position_info(data: &[u8]) -> Vec<(i32, u32, i32)> {
+    data.get(4..)
+        .unwrap_or_default()
+        .chunks_exact(16)
+        .map(|mut b| {
+            let id = b.get_i32_le();
+            let mode = b.get_u32_le();
+            b.advance(4); // ranking
+            (id, mode, b.get_i32_le())
+        })
+        .collect()
+}
+
+/// ZC_ACK_CHANGE_GUILD_POSITIONINFO (0x0174): ranks after a change, 40 bytes each.
+pub fn parse_positions_changed(data: &[u8]) -> Vec<Position> {
+    data.get(4..)
+        .unwrap_or_default()
+        .chunks_exact(40)
+        .map(|mut b| {
+            let id = b.get_i32_le();
+            let mode = b.get_u32_le();
+            b.advance(4);
+            let tax = b.get_i32_le();
+            Position { id, mode, tax, name: get_fixed_str(&mut b, 24) }
+        })
+        .collect()
+}
+
+/// ZC_ACK_REQ_CHANGE_MEMBERS (0x0156): (account, char, rank) for moved members.
+pub fn parse_rank_changes(data: &[u8]) -> Vec<(u32, u32, i32)> {
+    data.get(4..).unwrap_or_default().chunks_exact(12).map(|mut b| (b.get_u32_le(), b.get_u32_le(), b.get_i32_le())).collect()
+}
+
+/// A guild skill (GD_*): id 10000+, as in ZC_GUILD_SKILLINFO.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GuildSkill {
+    pub id: u16,
+    pub level: u16,
+    pub name: String,
+    pub upgradable: bool,
+}
+
+/// ZC_GUILD_SKILLINFO (0x0162): (skill points, skills), 37 bytes per skill.
+pub fn parse_guild_skills(data: &[u8]) -> (i16, Vec<GuildSkill>) {
+    let points = i16::from_le_bytes([data[4], data[5]]);
+    let skills = data
+        .get(6..)
+        .unwrap_or_default()
+        .chunks_exact(37)
+        .map(|mut b| {
+            let id = b.get_u16_le();
+            b.advance(4); // target type
+            let level = b.get_u16_le();
+            b.advance(4); // sp, range
+            let name = get_fixed_str(&mut b, 24);
+            GuildSkill { id, level, name, upgradable: b.get_u8() != 0 }
+        })
+        .collect();
+    (points, skills)
 }

@@ -3,7 +3,7 @@
 //! (social.rs); players are invited from their click menu or the Members tab.
 
 use egui::{Color32, RichText, Vec2};
-use ro_net::{Command, GuildInfo, GuildMember, GuildRequest};
+use ro_net::{Command, GuildInfo, GuildMember, GuildRequest, GuildSkill, Position, StatRequest};
 
 /// Emperium: consumed to found a guild.
 pub const EMPERIUM: u32 = 714;
@@ -13,6 +13,8 @@ enum Tab {
     #[default]
     Info,
     Members,
+    Positions,
+    Skills,
     Notice,
 }
 
@@ -26,7 +28,13 @@ pub struct Guild {
     pub info: Option<GuildInfo>,
     pub members: Vec<GuildMember>,
     pub notice: (String, String),
-    pub tab_members: bool,
+    /// Ranks (titles, permissions, tax) and guild skills.
+    pub ranks: Vec<Position>,
+    pub skills: Vec<GuildSkill>,
+    pub skill_points: i16,
+    edit_ranks: Option<Vec<Position>>,
+    /// Test hook: open on this tab (1 members, 2 positions, 3 skills).
+    pub start_tab: u8,
     tab: Tab,
     create_name: String,
     invite_name: String,
@@ -57,6 +65,8 @@ impl Guild {
         if std::mem::take(&mut self.needs_refresh) && self.id != 0 {
             out.push(Command::Guild(GuildRequest::Info(0)));
             out.push(Command::Guild(GuildRequest::Info(1)));
+            out.push(Command::Guild(GuildRequest::Info(2)));
+            out.push(Command::Guild(GuildRequest::Info(3)));
         }
         let mut open = true;
         let title = if self.id == 0 { "Guild".to_string() } else { format!("Guild — {}", self.name) };
@@ -66,18 +76,25 @@ impl Guild {
                 self.create(ui, c, &mut out);
                 return;
             }
-            if std::mem::take(&mut self.tab_members) {
-                self.tab = Tab::Members;
+            match std::mem::take(&mut self.start_tab) {
+                1 => self.tab = Tab::Members,
+                2 => self.tab = Tab::Positions,
+                3 => self.tab = Tab::Skills,
+                _ => {}
             }
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.tab, Tab::Info, "Info");
                 ui.selectable_value(&mut self.tab, Tab::Members, "Members");
+                ui.selectable_value(&mut self.tab, Tab::Positions, "Positions");
+                ui.selectable_value(&mut self.tab, Tab::Skills, "Skills");
                 ui.selectable_value(&mut self.tab, Tab::Notice, "Notice");
             });
             ui.separator();
             match self.tab {
                 Tab::Info => self.info(ui),
                 Tab::Members => self.members(ui, c, &mut out),
+                Tab::Positions => self.positions(ui, &mut out),
+                Tab::Skills => self.skills(ui, &mut out),
                 Tab::Notice => self.notice(ui, &mut out),
             }
         });
@@ -130,7 +147,7 @@ impl Guild {
         let online = self.members.iter().filter(|m| m.online).count();
         ui.label(RichText::new(format!("{} members, {online} online", self.members.len())).color(Color32::GRAY));
         egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-            egui::Grid::new("guild members").num_columns(4).spacing(Vec2::new(12.0, 4.0)).striped(true).show(ui, |ui| {
+            egui::Grid::new("guild members").num_columns(5).spacing(Vec2::new(12.0, 4.0)).striped(true).show(ui, |ui| {
                 let mut sorted: Vec<&GuildMember> = self.members.iter().collect();
                 sorted.sort_by_key(|m| (!m.online, m.position, m.name.clone()));
                 for m in sorted {
@@ -138,6 +155,19 @@ impl Guild {
                     ui.label(RichText::new(if m.online { "online" } else { "offline" }).color(color).size(11.5));
                     ui.label(RichText::new(&m.name).color(if m.online { Color32::WHITE } else { Color32::GRAY }));
                     ui.label(format!("{} {}", (c.job_name)(m.job), m.level));
+                    // Rank: the master assigns it (rank 0 is the master's own and fixed).
+                    let rank = self.rank_name(m.position);
+                    if self.master && m.position != 0 && !self.ranks.is_empty() {
+                        egui::ComboBox::from_id_salt(("rank", m.char_id)).selected_text(rank).width(110.0).show_ui(ui, |ui| {
+                            for r in self.ranks.iter().filter(|r| r.id != 0) {
+                                if ui.selectable_label(r.id == m.position, &r.name).clicked() && r.id != m.position {
+                                    out.push(Command::Guild(GuildRequest::SetRank { account_id: m.account_id, char_id: m.char_id, position: r.id }));
+                                }
+                            }
+                        });
+                    } else {
+                        ui.label(RichText::new(rank).color(Color32::from_rgb(220, 200, 140)));
+                    }
                     if self.master && m.char_id != c.char_id {
                         if ui.small_button("Expel").clicked() {
                             out.push(Command::Guild(GuildRequest::Expel { guild: self.id, account_id: m.account_id, char_id: m.char_id, reason: String::new() }));
@@ -163,6 +193,89 @@ impl Guild {
             });
         });
         ui.label(RichText::new("Guild chat: /g message").color(Color32::GRAY).size(11.5));
+    }
+
+    fn rank_name(&self, id: i32) -> String {
+        self.ranks.iter().find(|r| r.id == id).map_or_else(|| format!("Rank {}", id + 1), |r| r.name.clone())
+    }
+
+    /// Ranks: title, invite/expel permissions and experience tax. The master edits them.
+    fn positions(&mut self, ui: &mut egui::Ui, out: &mut Vec<Command>) {
+        if self.ranks.is_empty() {
+            ui.label(RichText::new("Loading...").color(Color32::GRAY));
+            return;
+        }
+        let editing = self.edit_ranks.is_some();
+        let list = self.edit_ranks.as_mut().unwrap_or(&mut self.ranks);
+        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            egui::Grid::new("guild ranks").num_columns(5).spacing(Vec2::new(10.0, 4.0)).striped(true).show(ui, |ui| {
+                for h in ["#", "Title", "Invite", "Expel", "Tax %"] {
+                    ui.label(RichText::new(h).color(Color32::GRAY));
+                }
+                ui.end_row();
+                for p in list.iter_mut() {
+                    ui.label((p.id + 1).to_string());
+                    let fixed = p.id == 0; // the master's rank keeps its rights
+                    if editing {
+                        ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(130.0).char_limit(23));
+                        let mut invite = p.mode & 0x01 != 0;
+                        let mut expel = p.mode & 0x10 != 0;
+                        ui.add_enabled(!fixed, egui::Checkbox::without_text(&mut invite));
+                        ui.add_enabled(!fixed, egui::Checkbox::without_text(&mut expel));
+                        p.mode = (p.mode & !0x11) | if invite { 0x01 } else { 0 } | if expel { 0x10 } else { 0 };
+                        ui.add(egui::DragValue::new(&mut p.tax).range(0..=50).suffix("%"));
+                    } else {
+                        ui.label(&p.name);
+                        ui.label(if p.mode & 0x01 != 0 { "yes" } else { "-" });
+                        ui.label(if p.mode & 0x10 != 0 { "yes" } else { "-" });
+                        ui.label(format!("{}%", p.tax));
+                    }
+                    ui.end_row();
+                }
+            });
+        });
+        ui.separator();
+        if !self.master {
+            ui.label(RichText::new("Only the guild master can change ranks.").color(Color32::GRAY).size(11.5));
+        } else if editing {
+            let (save, cancel) = ui.horizontal(|ui| (ui.button("Save").clicked(), ui.button("Cancel").clicked())).inner;
+            if save {
+                let ranks = self.edit_ranks.take().unwrap_or_default();
+                out.push(Command::Guild(GuildRequest::Positions(ranks.clone())));
+                self.ranks = ranks;
+            } else if cancel {
+                self.edit_ranks = None;
+            }
+        } else if ui.button("Edit ranks").clicked() {
+            self.edit_ranks = Some(self.ranks.clone());
+        }
+        ui.label(RichText::new("Tax: share of members' experience given to the guild (how guilds level).").color(Color32::GRAY).size(11.5));
+    }
+
+    /// Guild skills, raised with guild skill points (one per guild level).
+    fn skills(&mut self, ui: &mut egui::Ui, out: &mut Vec<Command>) {
+        ui.label(format!("Skill points: {}", self.skill_points));
+        ui.separator();
+        if self.skills.is_empty() {
+            ui.label(RichText::new("Loading...").color(Color32::GRAY));
+            return;
+        }
+        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            egui::Grid::new("guild skills").num_columns(3).spacing(Vec2::new(12.0, 4.0)).striped(true).show(ui, |ui| {
+                for s in &self.skills {
+                    ui.label(guild_skill_name(&s.name));
+                    ui.label(format!("Lv {}", s.level));
+                    let can = self.master && s.upgradable && self.skill_points > 0;
+                    if ui.add_enabled(can, egui::Button::new("+")).clicked() {
+                        out.push(Command::Stat(StatRequest::SkillUp(s.id)));
+                    }
+                    ui.end_row();
+                }
+            });
+        });
+        if !self.master {
+            ui.label(RichText::new("Only the guild master can raise guild skills.").color(Color32::GRAY).size(11.5));
+        }
     }
 
     fn notice(&mut self, ui: &mut egui::Ui, out: &mut Vec<Command>) {
@@ -193,4 +306,32 @@ impl Guild {
             }
         }
     }
+}
+
+/// Readable name for a guild skill (the server sends GD_* internal names).
+fn guild_skill_name(internal: &str) -> String {
+    let known = match internal {
+        "GD_APPROVAL" => "Official Guild Approval",
+        "GD_KAFRACONTRACT" => "Kafra Contract",
+        "GD_GUARDRESEARCH" => "Guardian Research",
+        "GD_GUARDUP" => "Strengthen Guardians",
+        "GD_EXTENSION" => "Guild Extension",
+        "GD_GLORYGUILD" => "Glory of Guild",
+        "GD_LEADERSHIP" => "Great Leadership",
+        "GD_GLORYWOUNDS" => "Glorious Wounds",
+        "GD_SOULCOLD" => "Cold Heart",
+        "GD_HAWKEYES" => "Sharp Gaze",
+        "GD_BATTLEORDER" => "Battle Orders",
+        "GD_REGENERATION" => "Regeneration",
+        "GD_RESTORE" => "Restore",
+        "GD_EMERGENCYCALL" => "Emergency Call",
+        "GD_DEVELOPMENT" => "Permanent Development",
+        "GD_ITEMEMERGENCYCALL" => "Emergency Call (Item)",
+        "GD_GUILD_STORAGE" => "Guild Storage Expansion",
+        "GD_CHARGESHOUT_FLAG" => "Charge Shout Flag",
+        "GD_CHARGESHOUT_BEATING" => "Charge Shout Beating",
+        "GD_EMERGENCY_MOVE" => "Emergency Move",
+        _ => "",
+    };
+    if known.is_empty() { internal.trim_start_matches("GD_").replace('_', " ") } else { known.to_string() }
 }
