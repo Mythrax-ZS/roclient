@@ -365,6 +365,9 @@ pub enum Event {
     MailReceiver(u32, String),
     /// Sending a mail: 0 = sent.
     MailSent(u8),
+    /// An item attached to the mail being written: (result; 0 = ok, index, amount, item id).
+    MailItemAdded { result: u8, index: u16, amount: u16, id: u32 },
+    MailItemRemoved { ok: bool, index: u16, amount: u16 },
     /// Our pet's details.
     Pet(PetInfo),
     /// Pet (0x01a4) or homunculus (0x0230) state: (homunculus?, state, unit id, value).
@@ -816,6 +819,8 @@ impl MapSession {
                         0x09e7 if data.len() >= 3 => Some(Event::MailUnread(data[2] != 0)),
                         0x0a51 => parse_checkname(&data).map(|(id, name)| Event::MailReceiver(id, name)),
                         0x09ed if data.len() >= 3 => Some(Event::MailSent(data[2])),
+                        0x0b3f => ro_proto::mail::parse_add_item_ack(&data).map(|(result, index, amount, id)| Event::MailItemAdded { result, index, amount, id }),
+                        0x0a07 => ro_proto::mail::parse_remove_item_ack(&data).map(|(ok, index, amount)| Event::MailItemRemoved { ok, index, amount }),
                         0x01a2 => parse_pet(&data).map(Event::Pet),
                         0x01a4 | 0x0230 => parse_changestate(opcode, &data).map(|(state, id, value)| Event::CompanionState { homun: opcode == 0x0230, state, id, value }),
                         0x0ba4 => parse_homun(&data).map(Event::Homun),

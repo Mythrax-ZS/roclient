@@ -104,6 +104,18 @@ pub fn parse_checkname(data: &[u8]) -> Option<(u32, String)> {
     Some((id, get_fixed_str(&mut b, 24)))
 }
 
+/// ZC_ACK_ADD_ITEM_RODEX (0x0b3f): (result; 0 = ok, index, amount, item id).
+pub fn parse_add_item_ack(data: &[u8]) -> Option<(u8, u16, u16, u32)> {
+    let mut b = data.get(2..11)?;
+    Some((b.get_u8(), b.get_u16_le(), b.get_u16_le(), b.get_u32_le()))
+}
+
+/// ZC_ACK_REMOVE_ITEM_MAIL (0x0a07): (removed?, index, amount).
+pub fn parse_remove_item_ack(data: &[u8]) -> Option<(bool, u16, u16)> {
+    let mut b = data.get(2..7)?;
+    Some((b.get_u8() != 0, b.get_u16_le(), b.get_u16_le()))
+}
+
 fn name24(d: &mut BytesMut, name: &str) {
     let (t, _, _) = encoding_rs::EUC_KR.encode(name);
     let mut buf = [0u8; 24];
@@ -125,6 +137,10 @@ pub enum MailRequest {
     CancelWrite,
     /// CZ_CHECKNAME2: look up a receiver.
     CheckName(String),
+    /// CZ_REQ_ADD_ITEM_TO_MAIL: attach (inventory index, amount) to the mail being written.
+    AddItem { index: u16, amount: u16 },
+    /// CZ_REQ_REMOVE_ITEM_MAIL.
+    RemoveItem { index: u16, amount: u16 },
     /// CZ_REQ_WRITE_MAIL2.
     Send { to: String, to_id: u32, from: String, title: String, text: String, zeny: u64 },
 }
@@ -157,6 +173,11 @@ impl Encode for MailRequest {
                 name24(d, name);
             }
             MailRequest::CancelWrite => d.put_u16_le(0x0a03),
+            MailRequest::AddItem { index, amount } | MailRequest::RemoveItem { index, amount } => {
+                d.put_u16_le(if matches!(self, MailRequest::AddItem { .. }) { 0x0a04 } else { 0x0a06 });
+                d.put_u16_le(*index);
+                d.put_u16_le(*amount);
+            }
             MailRequest::CheckName(name) => {
                 d.put_u16_le(0x0b97);
                 name24(d, name);

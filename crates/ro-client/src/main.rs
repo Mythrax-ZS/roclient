@@ -1466,6 +1466,8 @@ impl App {
                     self.send(ro_net::Command::Mail(req));
                 }
             }
+            MailItemAdded { result, index, amount, id } => self.mailbox.item_added(result, index, amount, id),
+            MailItemRemoved { ok, index, amount } => self.mailbox.item_removed(ok, index, amount),
             MailSent(result) => {
                 self.mailbox.sent(result);
                 if result == 0 {
@@ -3619,10 +3621,17 @@ impl App {
                     // mail:to:title:zeny writes and sends a mail.
                     Some(("mail", spec)) => {
                         let f: Vec<&str> = spec.split(':').collect();
-                        if let [to, title, zeny] = f.as_slice() {
-                            for r in self.mailbox.compose(to, title, "Sent by the test script.", zeny) {
-                                self.send(ro_net::Command::Mail(r));
+                        // mail:to:title:zeny:itemid also attaches one of that item.
+                        if let [to, title, zeny, rest @ ..] = f.as_slice() {
+                            let [begin, check] = self.mailbox.compose(to, title, "Sent by the test script.", zeny);
+                            self.send(ro_net::Command::Mail(begin));
+                            if let Some(item) = rest.first().and_then(|s| s.parse::<u32>().ok()) {
+                                if let Some(i) = self.inventory.items.values().find(|i| i.id == item && i.equipped == 0) {
+                                    let index = i.index;
+                                    self.send(ro_net::Command::Mail(ro_net::MailRequest::AddItem { index, amount: 1 }));
+                                }
                             }
+                            self.send(ro_net::Command::Mail(check));
                         }
                         None
                     }
@@ -4269,7 +4278,12 @@ impl App {
                 if let Some(a) = self.companions.show(ui.ctx(), target) {
                     self.companion_action = Some(a);
                 }
-                for req in self.mailbox.show(ui.ctx(), self.item_db.as_ref(), &self.icons, self.hud.status.zeny) {
+                let mailable: Vec<(u16, u32, u16)> = {
+                    let mut v: Vec<_> = self.inventory.items.values().filter(|i| i.equipped == 0).map(|i| (i.index, i.id, i.amount)).collect();
+                    v.sort_unstable();
+                    v
+                };
+                for req in self.mailbox.show(ui.ctx(), self.item_db.as_ref(), &self.icons, self.hud.status.zeny, &mailable) {
                     self.queued_commands.push(ro_net::Command::Mail(req));
                 }
                 let me = self.hud.status.name.clone();
