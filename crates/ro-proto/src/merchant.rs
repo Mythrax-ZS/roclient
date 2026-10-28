@@ -29,7 +29,7 @@ pub fn parse_cart_add(data: &[u8]) -> Option<ItemData> {
     let cards = cards(&mut b);
     b.advance(25); // options
     let refine = b.get_u8();
-    Some(ItemData { index, id, kind, amount, location: 0, equipped: 0, refine, identified, cards, look: 0 })
+    Some(ItemData { index, id, kind, amount, location: 0, equipped: 0, refine, grade: 0, identified, cards, look: 0 })
 }
 
 /// ZC_DELETE_ITEM_FROM_CART (0x0125): (index, amount).

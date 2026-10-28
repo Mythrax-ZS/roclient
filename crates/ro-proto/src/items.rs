@@ -18,6 +18,8 @@ pub struct ItemData {
     pub location: u32,
     pub equipped: u32,
     pub refine: u8,
+    /// Enchant grade: 0 none, 1 D, 2 C, 3 B, 4 A.
+    pub grade: u8,
     pub identified: bool,
     pub cards: [u32; 4],
     pub look: u16,
@@ -44,7 +46,7 @@ pub fn parse_itemlist_normal(data: &[u8]) -> Vec<ItemData> {
             // Cards carry the slots they fit in where other items say what they occupy;
             // a card is never worn.
             let (location, equipped) = if kind == 6 { (0, 0) } else { (0, equipped) };
-            ItemData { index, id, kind, amount, location, equipped, refine: 0, identified: flags & 1 != 0, cards, look: 0 }
+            ItemData { index, id, kind, amount, location, equipped, refine: 0, grade: 0, identified: flags & 1 != 0, cards, look: 0 }
         })
         .collect()
 }
@@ -65,9 +67,9 @@ pub fn parse_itemlist_equip(data: &[u8]) -> Vec<ItemData> {
             let look = b.get_u16_le();
             b.advance(1 + 25); // option count, options
             let refine = b.get_u8();
-            b.advance(1); // grade
+            let grade = b.get_u8();
             let flags = b.get_u8();
-            ItemData { index, id, kind, amount: 1, location, equipped, refine, identified: flags & 1 != 0, cards, look }
+            ItemData { index, id, kind, amount: 1, location, equipped, refine, grade, identified: flags & 1 != 0, cards, look }
         })
         .collect()
 }
@@ -88,7 +90,8 @@ pub fn parse_pickup(data: &[u8]) -> Option<ItemData> {
     b.advance(4 + 2 + 25 + 1); // hire date, bind, options, favorite
     let look = b.get_u16_le();
     let refine = b.get_u8();
-    (result == 0).then_some(ItemData { index, id, kind, amount, location, equipped: 0, refine, identified, cards, look })
+    let grade = b.get_u8();
+    (result == 0).then_some(ItemData { index, id, kind, amount, location, equipped: 0, refine, grade, identified, cards, look })
 }
 
 /// An item lying on the ground.

@@ -19,7 +19,7 @@ use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
 pub use ro_proto::quests::{Objective, Quest};
 pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, MerchantRequest, VendItem, WantedItem};
-pub use ro_proto::refine::{RefineOption, RefineRequest};
+pub use ro_proto::refine::{GradeOptions, GradeRequest, RefineOption, RefineRequest};
 use ro_proto::refine::*;
 use ro_proto::merchant::*;
 pub use ro_proto::progress::{AchRank, Achievement, ProgressRequest};
@@ -370,6 +370,11 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// The grade enchant options for the chosen item.
+    GradeOptions(GradeOptions),
+    GradeResult { index: u16, grade: u16, result: u32 },
+    /// Someone (anyone on the server) graded an item up or failed to.
+    GradeBroadcast { name: String, item: u32, grade: u16, ok: bool },
     /// An item attached to the mail being written: (result; 0 = ok, index, amount, item id).
     MailItemAdded { result: u8, index: u16, amount: u16, id: u32 },
     MailItemRemoved { ok: bool, index: u16, amount: u16 },
@@ -476,6 +481,7 @@ pub enum Command {
     /// Cart and player-shop requests.
     Merchant(MerchantRequest),
     Refine(RefineRequest),
+    Grade(GradeRequest),
     Bank(BankRequest),
     BuyingStore(BuyingStoreRequest),
     CashShop(CashShopRequest),
@@ -618,6 +624,7 @@ impl MapSession {
                     Some(Command::QuestActive { quest, active }) => self.send(CzActiveQuest { quest, active }).await?,
                     Some(Command::Merchant(r)) => self.send(r).await?,
                     Some(Command::Refine(r)) => self.send(r).await?,
+                    Some(Command::Grade(r)) => self.send(r).await?,
                     Some(Command::Bank(r)) => self.send(r).await?,
                     Some(Command::BuyingStore(r)) => self.send(r).await?,
                     Some(Command::CashShop(r)) => self.send(r).await?,
@@ -822,6 +829,9 @@ impl MapSession {
                         0x00dc | 0x00dd => parse_member(opcode, &data).map(|(_, name, kicked)| Event::RoomMember { joined: opcode == 0x00dc, name, kicked }),
                         0x00e1 => parse_role(&data).and_then(|(owner, name)| owner.then_some(Event::RoomOwner(name))),
                         0x0ac2 => Some(Event::Inbox(parse_inbox(&data))),
+                        0x0b5a => parse_grade_options(&data).map(Event::GradeOptions),
+                        0x0b5d => parse_grade_result(&data).map(|(index, grade, result)| Event::GradeResult { index, grade, result }),
+                        0x0b5e => parse_grade_broadcast(&data).map(|(name, item, grade, ok)| Event::GradeBroadcast { name, item, grade, ok }),
                         0x0b63 => parse_mail(&data).map(|(tab, id, text, zeny, items)| Event::Mail { tab, id, text, zeny, items }),
                         0x09f2 | 0x09f4 => parse_take_ack(&data).map(|(id, _, result)| Event::MailTaken { items: opcode == 0x09f4, id, result }),
                         0x09f6 => parse_delete_ack(&data).map(|(_, id)| Event::MailDeleted(id)),

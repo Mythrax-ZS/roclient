@@ -102,6 +102,8 @@ pub struct InvItem {
     /// Slots it currently occupies (0 when not worn).
     pub equipped: u32,
     pub refine: u8,
+    /// Enchant grade: 0 none, 1 D, 2 C, 3 B, 4 A.
+    pub grade: u8,
     pub identified: bool,
     pub cards: [u32; 4],
     /// Sprite id when worn (headgear view / weapon class).

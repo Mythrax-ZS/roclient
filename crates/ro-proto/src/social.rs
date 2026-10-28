@@ -130,7 +130,7 @@ pub fn parse_store_add(data: &[u8]) -> ItemData {
     let cards = [b.get_u32_le(), b.get_u32_le(), b.get_u32_le(), b.get_u32_le()];
     b.advance(25); // options
     let refine = b.get_u8();
-    ItemData { index, id, kind, amount, location: 0, equipped: 0, refine, identified, cards, look: 0 }
+    ItemData { index, id, kind, amount, location: 0, equipped: 0, refine, grade: 0, identified, cards, look: 0 }
 }
 
 /// ZC_DELETE_ITEM_FROM_STORE (0x00f6): (index, amount).

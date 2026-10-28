@@ -21,6 +21,7 @@ mod screens;
 mod ai;
 mod booking;
 mod clan;
+mod grade;
 mod buffs;
 mod chatrooms;
 mod classic;
@@ -451,6 +452,7 @@ fn inv_item(d: ro_net::ItemData) -> ro_game::items::InvItem {
         location: d.location,
         equipped: d.equipped,
         refine: d.refine,
+        grade: d.grade,
         identified: d.identified,
         cards: d.cards,
         look: d.look,
@@ -812,6 +814,7 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    grade: grade::Grade,
     /// Chat rooms.
     rooms: chatrooms::ChatRooms,
     /// Party booking.
@@ -1694,6 +1697,28 @@ impl App {
                     self.progress.load_art(&self.egui_ctx, vfs);
                 }
                 self.progress.attendance = Some(data);
+            }
+            UiOpen { kind: 8, .. } => {
+                self.grade.open = true;
+            }
+            GradeOptions(o) => self.grade.options = Some(o),
+            GradeResult { index, grade, result } => {
+                if let Some(it) = self.inventory.items.get_mut(&index) {
+                    it.grade = grade as u8;
+                    // A grade raised starts again from +0.
+                    if result == 0 {
+                        it.refine = 0;
+                    }
+                }
+                if let Some(r) = self.grade.result(grade, result) {
+                    self.send(ro_net::Command::Grade(r));
+                }
+            }
+            GradeBroadcast { name, item, grade, ok } => {
+                let item = self.item_db.as_ref().map_or_else(|| format!("Item #{item}"), |d| d.name(item, true));
+                let letter = grade::LETTERS.get(grade as usize).copied().unwrap_or("?");
+                let text = if ok { format!("{name} raised {item} to grade {letter}!") } else { format!("{name} failed to raise the grade of {item}.") };
+                self.hud.push_chat(ro_net::ChatKind::Broadcast, text);
             }
             UiOpen { .. } => {}
             Attendance(data) => {
@@ -3582,6 +3607,20 @@ impl App {
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some(("card", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::CardTargets(index)),
                     // refsel:item picks equipment in the refine window; refine:material refines it.
+                    // gradesel:item picks equipment in the grade window; gradeup:material tries.
+                    Some(("gradesel", id)) => {
+                        if let Some(index) = id.parse().ok().and_then(item).map(|(index, _)| index) {
+                            self.grade.pick(index);
+                            self.queued_commands.push(ro_net::Command::Grade(ro_net::GradeRequest::Select(index)));
+                        }
+                        None
+                    }
+                    Some(("gradeup", m)) => {
+                        if let Some(r) = self.grade.upgrade(m.parse().unwrap_or(0)) {
+                            self.queued_commands.push(ro_net::Command::Grade(r));
+                        }
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -4323,6 +4362,10 @@ impl App {
                     v
                 };
                 self.clan.show(ui.ctx());
+                let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
+                for r in self.grade.show(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons, self.hud.status.zeny) {
+                    self.queued_commands.push(ro_net::Command::Grade(r));
+                }
                 for req in self.mailbox.show(ui.ctx(), self.item_db.as_ref(), &self.icons, self.hud.status.zeny, &mailable) {
                     self.queued_commands.push(ro_net::Command::Mail(req));
                 }
@@ -4861,6 +4904,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        grade: Default::default(),
         rooms: Default::default(),
         booking: Default::default(),
         ignore_pending: None,
