@@ -373,6 +373,10 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// ZC_ACK_RANKING2: (type, (char id, points), ours).
+    Ranking { kind: u16, list: Vec<(u32, u32)>, mine: u32 },
+    /// ZC_ACK_REQNAME_BYGID: a character id's name.
+    CharName { cid: u32, name: String },
     /// Store search: opened (uses left), results, a failure, a shop located.
     SearchOpen(u8),
     SearchResults { first: bool, more: bool, uses: u8, found: Vec<Found> },
@@ -545,6 +549,7 @@ pub enum Command {
     Emotion(u8),
     /// Ask for a player's party / guild names.
     ReqName(u32),
+    Ranking(u16),
     /// Answer a skill or item menu.
     Menu(MenuReply),
     /// Show (true) or hide a quest in the active list.
@@ -699,6 +704,7 @@ impl MapSession {
                     Some(Command::Whisper { to, text }) => self.send(CzWhisper { to: &to, text: &text }).await?,
                     Some(Command::Emotion(e)) => self.send(CzEmotion(e)).await?,
                     Some(Command::ReqName(id)) => self.send(ro_proto::social::ReqName(id)).await?,
+                    Some(Command::Ranking(k)) => self.send(ro_proto::social::ReqRanking(k)).await?,
                     Some(Command::Menu(reply)) => self.send(reply).await?,
                     Some(Command::QuestActive { quest, active }) => self.send(CzActiveQuest { quest, active }).await?,
                     Some(Command::Merchant(r)) => self.send(r).await?,
@@ -817,6 +823,8 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x0af6 => ro_proto::social::parse_ranking(&data).map(|(kind, list, mine)| Event::Ranking { kind, list, mine }),
+                        0x0af7 if data.len() >= 32 => Some(Event::CharName { cid: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), name: ro_proto::packets::get_fixed_str(&mut &data[8..32], 24) }),
                         0x083a if data.len() >= 5 => Some(Event::SearchOpen(data[4])),
                         0x0b64 => ro_proto::search::parse_results(&data).map(|(first, more, uses, found)| Event::SearchResults { first, more, uses, found }),
                         0x0837 if data.len() >= 3 => Some(Event::SearchFailed(data[2])),

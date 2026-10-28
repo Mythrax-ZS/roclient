@@ -22,6 +22,7 @@ mod ai;
 mod booking;
 mod battle;
 mod clan;
+mod ranking;
 mod storesearch;
 mod stylist;
 mod reform;
@@ -828,6 +829,7 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    ranking: ranking::Ranking,
     store_search: storesearch::StoreSearch,
     stylist: stylist::Stylist,
     reform: reform::Reform,
@@ -2541,6 +2543,16 @@ impl App {
             RemoveEffect { .. } => {}
             Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
             StyleResult(failed) => self.stylist.result(failed),
+            Ranking { kind, list, mine } => {
+                self.ranking.open = true;
+                (self.ranking.kind, self.ranking.list, self.ranking.mine) = (kind, list, mine);
+                for cid in self.ranking.missing() {
+                    self.send(ro_net::Command::ReqName(cid));
+                }
+            }
+            CharName { cid, name } => {
+                self.ranking.names.insert(cid, name);
+            }
             SearchOpen(uses) => self.store_search.opened(uses),
             SearchResults { first, more, uses, found } => self.store_search.results(first, more, uses, found),
             SearchFailed(r) => self.store_search.failed(r),
@@ -3111,6 +3123,7 @@ impl App {
             "c" => self.toggle_cash_shop(),
             "y" => self.progress.open = !self.progress.open,
             "clan" => self.clan.open = !self.clan.open,
+            "rank" => self.send(ro_net::Command::Ranking(self.ranking.kind)),
             "battle" => {
                 self.battle.ensure_loaded(self.vfs.as_ref());
                 self.battle.open = !self.battle.open;
@@ -3373,6 +3386,10 @@ impl App {
                     _ => None,
                 },
             };
+            if let Some(k) = ["/blacksmith", "/alchemist", "/taekwon", "/pk"].iter().position(|c| text.trim() == *c) {
+                let _ = tx.send(ro_net::Command::Ranking(k as u16));
+                return;
+            }
             // /navi map [x/y]: guide there, as the original client; /navi alone opens the window.
             if let Some(rest) = text.trim().strip_prefix("/navi") {
                 self.navi.ensure_loaded(self.vfs.as_ref());
@@ -4813,6 +4830,9 @@ impl App {
                     v
                 };
                 self.clan.show(ui.ctx());
+                if let Some(k) = self.ranking.show(ui.ctx()) {
+                    self.queued_commands.push(ro_net::Command::Ranking(k));
+                }
                 for r in self.store_search.show(ui.ctx(), self.item_db.as_ref(), &self.icons) {
                     self.queued_commands.push(ro_net::Command::Search(r));
                 }
@@ -5415,6 +5435,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        ranking: Default::default(),
         store_search: Default::default(),
         stylist: Default::default(),
         reform: Default::default(),

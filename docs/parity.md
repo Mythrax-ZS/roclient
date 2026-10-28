@@ -54,7 +54,8 @@ Ticked items are handled and tested in game against the local server.
 - [ ] ZC_PARTY_CONFIG, ZC_PARTY_JOIN_REQ_ACK, ZC_ITEM_PICKUP_PARTY
 - [x] Store search (Universal Catalog: search, pages, click to locate)
 - [ ] ZC_ACK_OPENSTORE2
-- [ ] ZC_CONGRATULATION, ZC_DIVORCE, ranks (BLACKSMITH / ALCHEMIST / TAEKWON / KILLER, ZC_ACK_RANKING)
+- [x] Ranking window (ZC_ACK_RANKING2 + names by char id; /blacksmith /alchemist /taekwon /pk)
+- [ ] ZC_CONGRATULATION, ZC_DIVORCE
 - [ ] ZC_ACK_REQNAMEALL / NPC / BYGID, ZC_BAN_LIST
 
 ## Found while testing

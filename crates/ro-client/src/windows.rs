@@ -606,6 +606,7 @@ impl Windows {
                             }
                             for (label, key) in [
                                 ("Clan", "clan"),
+                                ("Ranking", "rank"),
                                 ("Companions   Alt+R", "r"),
                                 ("Navigation   /navi", "navi"),
                                 ("Party Booking   Alt+N", "n"),

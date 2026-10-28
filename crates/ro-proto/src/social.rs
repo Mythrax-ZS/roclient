@@ -532,3 +532,23 @@ impl Encode for StyleRequest {
         }
     }
 }
+
+/// CZ_REQ_RANKING: 0 blacksmith, 1 alchemist, 2 taekwon, 3 PK.
+pub struct ReqRanking(pub u16);
+
+impl Encode for ReqRanking {
+    fn encode(&self, d: &mut BytesMut) {
+        d.put_u16_le(0x097c);
+        d.put_u16_le(self.0);
+    }
+}
+
+/// ZC_ACK_RANKING2 (0x0af6): (type, (char id, points) x10, our points).
+pub fn parse_ranking(data: &[u8]) -> Option<(u16, Vec<(u32, u32)>, u32)> {
+    let mut b = data.get(2..88)?;
+    let kind = b.get_u16_le();
+    let cids: Vec<u32> = (0..10).map(|_| b.get_u32_le()).collect();
+    let pts: Vec<u32> = (0..10).map(|_| b.get_u32_le()).collect();
+    let mine = b.get_u32_le();
+    Some((kind, cids.into_iter().zip(pts).filter(|(c, _)| *c != 0).collect(), mine))
+}
