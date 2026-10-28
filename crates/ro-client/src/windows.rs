@@ -63,6 +63,8 @@ pub struct Windows {
     pub guild: bool,
     pub settings: bool,
     tab: InvTab,
+    /// Classic inventory: rows scrolled.
+    inv_scroll: usize,
 }
 
 #[derive(Default, PartialEq, Clone, Copy)]
@@ -75,6 +77,8 @@ enum InvTab {
 
 /// Everything the windows draw.
 pub struct View<'a> {
+    /// The original art, when the Classic interface is on.
+    pub skin: Option<&'a crate::classic::Skin>,
     pub items: &'a [&'a InvItem],
     pub db: Option<&'a ItemDb>,
     pub icons: &'a HashMap<u32, egui::TextureHandle>,
@@ -267,6 +271,50 @@ fn item_tooltip(ui: &mut egui::Ui, db: Option<&ItemDb>, it: &InvItem) {
     }
 }
 
+/// What an inventory slot does: tooltip, drag to the shortcut bar, double-click to use or
+/// equip, and the right-click menu. Shared by both interface styles.
+fn inventory_item_actions(resp: egui::Response, it: &InvItem, v: &View) -> Option<UiAction> {
+    let mut action = None;
+    let resp = resp.on_hover_ui(|ui| compare_tooltip(ui, v.db, it, v.items));
+    // Usable items and equipment can go on the shortcut bar.
+    if it.is_usable() || it.is_equipment() {
+        resp.dnd_set_drag_payload(Hotkey { skill: false, id: it.id, count: 0 });
+    }
+    if resp.double_clicked() {
+        action = Some(if it.kind == ro_game::items::kind::CARD {
+            UiAction::CardTargets(it.index)
+        } else if it.is_equipment() {
+            UiAction::Equip { index: it.index, location: it.location }
+        } else {
+            UiAction::UseItem(it.index)
+        });
+    }
+    resp.context_menu(|ui| {
+        let card = it.kind == ro_game::items::kind::CARD;
+        if ui.button(if card { "View card" } else { "Info" }).clicked() {
+            action = Some(UiAction::ItemInfo { id: it.id, refine: it.refine, cards: it.cards });
+            ui.close();
+        }
+        if it.is_equipment() && ui.button("Equip").clicked() {
+            action = Some(UiAction::Equip { index: it.index, location: it.location });
+            ui.close();
+        }
+        if it.is_usable() && ui.button("Use").clicked() {
+            action = Some(UiAction::UseItem(it.index));
+            ui.close();
+        }
+        if v.has_cart && it.equipped == 0 && ui.button("Move to cart").clicked() {
+            action = Some(UiAction::CartPut { index: it.index, amount: it.amount });
+            ui.close();
+        }
+        if ui.button(if it.amount > 1 { "Drop all" } else { "Drop" }).clicked() {
+            action = Some(UiAction::Drop { index: it.index, amount: it.amount });
+            ui.close();
+        }
+    });
+    action
+}
+
 /// The item's tooltip; for unworn equipment, beside whatever is worn in the same slots.
 fn compare_tooltip(ui: &mut egui::Ui, db: Option<&ItemDb>, it: &InvItem, items: &[&InvItem]) {
     let worn: Vec<&&InvItem> = if it.is_equipment() && it.equipped == 0 { items.iter().filter(|w| w.equipped & it.location != 0).collect() } else { vec![] };
@@ -382,7 +430,112 @@ impl Windows {
         let w = v.screen_width;
         let col = |i: f32| egui::pos2((w * 0.22 + i * 330.0).min(w - 340.0), 110.0);
 
-        if self.inventory {
+        if let (true, Some(skin)) = (self.inventory, v.skin) {
+            const COLS: usize = 7;
+            let mut open = true;
+            let mut tab = self.tab;
+            let mut scroll = self.inv_scroll;
+            let mut picked = None;
+            let mut bank = false;
+            let shown: Vec<&&InvItem> = v
+                .items
+                .iter()
+                .filter(|it| it.equipped == 0)
+                .filter(|it| match tab {
+                    InvTab::Items => it.is_usable(),
+                    InvTab::Equip => it.is_equipment(),
+                    InvTab::Etc => !it.is_usable() && !it.is_equipment(),
+                })
+                .collect();
+            let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+            skin.window(
+                ctx,
+                "Inventory",
+                col(2.0),
+                20.0 + COLS as f32 * 32.0 + 16.0,
+                &mut open,
+                |ui| {
+                    // Fixed layout over the art: the tab strip, then the slot grid with a
+                    // thin scrollbar; the wheel scrolls rows.
+                    let rows = shown.len().div_ceil(COLS).clamp(4, 6);
+                    let total_rows = shown.len().div_ceil(COLS).max(rows);
+                    let (area, area_resp) = ui.allocate_exact_size(Vec2::new(20.0 + COLS as f32 * 32.0 + 16.0, rows as f32 * 32.0), egui::Sense::hover());
+                    let p = ui.painter().clone();
+                    let strip = match tab {
+                        InvTab::Items => "tab_itm_01",
+                        InvTab::Equip => "tab_itm_02",
+                        InvTab::Etc => "tab_itm_03",
+                    };
+                    let strip_rect = egui::Rect::from_min_size(area.min, Vec2::new(20.0, 82.0));
+                    skin.draw(&p, strip, strip_rect.min);
+                    let resp = ui.interact(strip_rect, ui.scope_id().with("inv_tabs"), egui::Sense::click());
+                    if let Some(at) = resp.clicked().then(|| resp.interact_pointer_pos()).flatten() {
+                        tab = match ((at.y - strip_rect.min.y) / (82.0 / 3.0)) as i32 {
+                            0 => InvTab::Items,
+                            1 => InvTab::Equip,
+                            _ => InvTab::Etc,
+                        };
+                        scroll = 0;
+                    }
+                    let max_scroll = total_rows - rows;
+                    if area_resp.hovered() {
+                        let dy: f32 = ui.input(|i| i.raw.events.iter().map(|e| if let egui::Event::MouseWheel { delta, .. } = e { delta.y } else { 0.0 }).sum());
+                        if dy < 0.0 {
+                            scroll = (scroll + 1).min(max_scroll);
+                        } else if dy > 0.0 {
+                            scroll = scroll.saturating_sub(1);
+                        }
+                    }
+                    scroll = scroll.min(max_scroll);
+                    for r in 0..rows {
+                        for c in 0..COLS {
+                            let cell = egui::Rect::from_min_size(area.min + Vec2::new(20.0 + c as f32 * 32.0, r as f32 * 32.0), Vec2::splat(32.0));
+                            skin.draw(&p, "itemwin_mid", cell.min);
+                            let Some(it) = shown.get((r + scroll) * COLS + c) else { continue };
+                            let resp = ui.interact(cell, ui.scope_id().with(("inv_cell", it.index)), egui::Sense::click_and_drag());
+                            if resp.hovered() {
+                                p.rect_filled(cell.shrink(1.0), 3.0, Color32::from_rgba_unmultiplied(120, 150, 230, 50));
+                            }
+                            if let Some(t) = v.icons.get(&it.id) {
+                                p.image(t.id(), egui::Rect::from_center_size(cell.center(), t.size_vec2().min(Vec2::splat(24.0))), uv, Color32::WHITE);
+                            }
+                            if it.amount > 1 {
+                                let font = egui::FontId::proportional(10.5);
+                                let at = cell.right_bottom() - Vec2::new(2.0, 0.0);
+                                p.text(at + Vec2::new(1.0, 1.0), egui::Align2::RIGHT_BOTTOM, it.amount.to_string(), font.clone(), Color32::WHITE);
+                                p.text(at, egui::Align2::RIGHT_BOTTOM, it.amount.to_string(), font, Color32::BLACK);
+                            }
+                            if let Some(a) = inventory_item_actions(resp, it, v) {
+                                picked = Some(a);
+                            }
+                        }
+                    }
+                    // Scrollbar: a track and a thumb sized to the visible share.
+                    let track = egui::Rect::from_min_max(egui::pos2(area.max.x - 12.0, area.min.y + 2.0), egui::pos2(area.max.x - 4.0, area.max.y - 2.0));
+                    p.rect_filled(track, 3.0, Color32::from_rgb(226, 230, 242));
+                    let share = rows as f32 / total_rows as f32;
+                    let top = track.min.y + track.height() * scroll as f32 / total_rows as f32;
+                    p.rect_filled(egui::Rect::from_min_size(egui::pos2(track.min.x, top), Vec2::new(track.width(), track.height() * share)), 3.0, Color32::from_rgb(140, 160, 214));
+                },
+                |ui| {
+                    ui.label(RichText::new(format!("{} z", v.zeny)).size(11.5));
+                    ui.add_space(6.0);
+                    bank = skin.button(ui, "Bank").on_hover_text("Alt+B").clicked();
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(format!("{} / {}", v.weight.0 / 10, v.weight.1 / 10)).size(11.5)).on_hover_text("Weight");
+                    });
+                },
+            );
+            self.tab = tab;
+            self.inv_scroll = scroll;
+            if picked.is_some() {
+                action = picked;
+            }
+            if bank {
+                action = Some(UiAction::OpenBank);
+            }
+            self.inventory = open;
+        } else if self.inventory {
             let mut open = true;
             egui::Window::new("Inventory").open(&mut open).default_pos(col(2.0)).resizable(false).show(ctx, |ui| {
                 ui.horizontal(|ui| {
@@ -403,43 +556,10 @@ impl Windows {
                     .collect();
                 egui::Grid::new("inv").spacing(Vec2::splat(4.0)).show(ui, |ui| {
                     for (i, it) in shown.iter().enumerate() {
-                        let resp = item_slot(ui, v.icons, it, 38.0).on_hover_ui(|ui| compare_tooltip(ui, v.db, it, v.items));
-                        // Usable items and equipment can go on the shortcut bar.
-                        if it.is_usable() || it.is_equipment() {
-                            resp.dnd_set_drag_payload(Hotkey { skill: false, id: it.id, count: 0 });
+                        let resp = item_slot(ui, v.icons, it, 38.0);
+                        if let Some(a) = inventory_item_actions(resp, it, v) {
+                            action = Some(a);
                         }
-                        if resp.double_clicked() {
-                            action = Some(if it.kind == ro_game::items::kind::CARD {
-                                UiAction::CardTargets(it.index)
-                            } else if it.is_equipment() {
-                                UiAction::Equip { index: it.index, location: it.location }
-                            } else {
-                                UiAction::UseItem(it.index)
-                            });
-                        }
-                        resp.context_menu(|ui| {
-                            let card = it.kind == ro_game::items::kind::CARD;
-                            if ui.button(if card { "View card" } else { "Info" }).clicked() {
-                                action = Some(UiAction::ItemInfo { id: it.id, refine: it.refine, cards: it.cards });
-                                ui.close();
-                            }
-                            if it.is_equipment() && ui.button("Equip").clicked() {
-                                action = Some(UiAction::Equip { index: it.index, location: it.location });
-                                ui.close();
-                            }
-                            if it.is_usable() && ui.button("Use").clicked() {
-                                action = Some(UiAction::UseItem(it.index));
-                                ui.close();
-                            }
-                            if v.has_cart && it.equipped == 0 && ui.button("Move to cart").clicked() {
-                                action = Some(UiAction::CartPut { index: it.index, amount: it.amount });
-                                ui.close();
-                            }
-                            if ui.button(if it.amount > 1 { "Drop all" } else { "Drop" }).clicked() {
-                                action = Some(UiAction::Drop { index: it.index, amount: it.amount });
-                                ui.close();
-                            }
-                        });
                         if i % 8 == 7 {
                             ui.end_row();
                         }

@@ -16,6 +16,7 @@ mod quests;
 mod refine;
 mod screens;
 mod buffs;
+mod classic;
 mod emotes;
 mod settings;
 mod skilltree;
@@ -798,6 +799,8 @@ struct App {
     merchant: merchant::Merchant,
     /// Buying stores and the cash shop.
     stores: stores::Stores,
+    /// The Classic interface art, loaded once the GRF is open.
+    skin: Option<classic::Skin>,
     /// The item information / card illustration window.
     item_info: iteminfo::ItemInfo,
     refine: refine::Refine,
@@ -3528,9 +3531,15 @@ impl App {
             let mut sent = None;
             let mut answer = None;
             let mut ui_action = None;
+            if self.skin.is_none() && self.settings.classic_ui {
+                if let Some(vfs) = self.vfs.as_ref() {
+                    self.skin = Some(classic::Skin::load(&self.egui_ctx, vfs));
+                }
+            }
             let items: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
             let skill_names = |n: &str| self.skill_names.display(n);
             let view = windows::View {
+                skin: self.skin.as_ref().filter(|_| self.settings.classic_ui),
                 items: &items,
                 db: self.item_db.as_ref(),
                 icons: &self.icons,
@@ -4206,6 +4215,7 @@ fn main() -> anyhow::Result<()> {
         quests: Default::default(),
         merchant: Default::default(),
         stores: Default::default(),
+        skin: None,
         item_info: Default::default(),
         refine: Default::default(),
         show_equip: None,
