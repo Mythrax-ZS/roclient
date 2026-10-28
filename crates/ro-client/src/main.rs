@@ -2467,6 +2467,35 @@ impl App {
         r.procs.push(ro_render::ProcFx { tex, shape, pos: from, color: [0.85, 0.7, 0.5], time_ms: 0.0, duration_ms: 650.0 });
     }
 
+    /// Alt+letter window shortcuts (also the Classic Basic Info buttons).
+    fn alt_key(&mut self, key: &str) {
+        match key {
+            "e" => self.windows.toggle_inventory(),
+            "q" => self.windows.toggle_equipment(),
+            "a" => self.windows.toggle_stats(),
+            "s" => self.windows.toggle_skills(),
+            "z" => self.windows.party = !self.windows.party,
+            "h" => self.windows.friends = !self.windows.friends,
+            "g" => self.windows.guild = !self.windows.guild,
+            "m" => {
+                self.settings.minimap = !self.settings.minimap;
+                self.settings.save();
+            }
+            "o" => self.windows.settings = !self.windows.settings,
+            "u" => self.quests.open = !self.quests.open,
+            "w" => self.merchant.cart_open = !self.merchant.cart_open,
+            "b" => self.toggle_bank(),
+            "c" => self.toggle_cash_shop(),
+            // Alt+1..Alt+0: the emote shortcuts.
+            d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => {
+                if let Some((tx, _)) = self.net.as_ref() {
+                    let _ = tx.send(ro_net::Command::Emotion(emotes::shortcut(d.as_bytes()[0] - b'0')));
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Opens the bank (asking for the balance) or closes it.
     fn toggle_bank(&mut self) {
         let aid = self.account_id;
@@ -3354,6 +3383,9 @@ impl App {
         }
 
         self.update_room();
+        if let Some(key) = self.hud.menu_click.take() {
+            self.alt_key(key);
+        }
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         r.actors.clear();
         r.warps = self
@@ -3999,31 +4031,7 @@ impl ApplicationHandler for App {
                         let slot = self.hotkey_row as usize * HOTKEYS_PER_ROW + hotkey_slot(k).unwrap_or(0);
                         self.queued_action = Some(windows::UiAction::UseHotkey(slot));
                     }
-                    Key::Character(c) if self.alt => match c.to_ascii_lowercase().as_str() {
-                        "e" => self.windows.toggle_inventory(),
-                        "q" => self.windows.toggle_equipment(),
-                        "a" => self.windows.toggle_stats(),
-                        "s" => self.windows.toggle_skills(),
-                        "z" => self.windows.party = !self.windows.party,
-                        "h" => self.windows.friends = !self.windows.friends,
-                        "g" => self.windows.guild = !self.windows.guild,
-                        "m" => {
-                            self.settings.minimap = !self.settings.minimap;
-                            self.settings.save();
-                        }
-                        "o" => self.windows.settings = !self.windows.settings,
-                        "u" => self.quests.open = !self.quests.open,
-                        "w" => self.merchant.cart_open = !self.merchant.cart_open,
-                        "b" => self.toggle_bank(),
-                        "c" => self.toggle_cash_shop(),
-                        // Alt+1..Alt+0: the emote shortcuts.
-                        d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => {
-                            if let Some((tx, _)) = self.net.as_ref() {
-                                let _ = tx.send(ro_net::Command::Emotion(emotes::shortcut(d.as_bytes()[0] - b'0')));
-                            }
-                        }
-                        _ => {}
-                    },
+                    Key::Character(c) if self.alt => self.alt_key(&c.to_ascii_lowercase()),
                     _ => {}
                 }
             }

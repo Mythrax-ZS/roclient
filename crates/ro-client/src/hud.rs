@@ -80,6 +80,8 @@ pub struct Hud {
     pub classic_bar: Option<egui::TextureHandle>,
     /// Classic chat: the whisper name field; lines go to this player when it is filled.
     whisper_to: String,
+    /// A Classic Basic Info button clicked this frame (the Alt+key letter of its window).
+    pub menu_click: Option<&'static str>,
 }
 
 /// Dialog navigation from a controller.
@@ -190,6 +192,62 @@ impl Hud {
         }
 
         let s = &self.status;
+        let mut click = None;
+        if let Some(skin) = crate::classic::skin(ctx) {
+            // The original Basic Info window: name on the title bar, HP/SP gauges, levels and
+            // EXP in the grey box, weight and zeny along the bottom, menu buttons at the right.
+            egui::Area::new(egui::Id::unique("basic_info")).anchor(Align2::LEFT_TOP, Vec2::new(12.0, 12.0)).show(ctx, |ui| {
+                let (r, _) = ui.allocate_exact_size(Vec2::new(280.0, 120.0), egui::Sense::hover());
+                let p = ui.painter().clone();
+                skin.draw(&p, "basewin_bg", r.min);
+                let at = |x: f32, y: f32| r.min + Vec2::new(x, y);
+                let ink = crate::classic::TEXT;
+                let f = |s: f32| egui::FontId::proportional(s);
+                p.text(at(8.0, 8.5), Align2::LEFT_CENTER, &s.name, f(12.0), Color32::from_rgb(30, 30, 60));
+                p.text(at(8.0, 27.0), Align2::LEFT_CENTER, &s.job, f(11.0), ink);
+                let gauge = |y: f32, label: &str, v: i64, max: i64| {
+                    p.text(at(104.0, y + 4.0), Align2::RIGHT_CENTER, label, f(10.5), ink);
+                    p.text(at(196.0, y + 13.0), Align2::RIGHT_CENTER, format!("{v} / {max}"), f(9.5), ink);
+                    skin.draw(&p, "gze_bg", at(112.0, y));
+                    let frac = if max > 0 { (v as f32 / max as f32).clamp(0.0, 1.0) } else { 0.0 };
+                    let red = label == "HP" && frac < 0.25;
+                    let (l, m, rt) = if red { ("gzered_left", "gzered_mid", "gzered_right") } else { ("gzeblue_left", "gzeblue_mid", "gzeblue_right") };
+                    let w = 83.0 * frac;
+                    if w >= 2.0 {
+                        skin.bar(&p, egui::Rect::from_min_size(at(113.0, y + 0.5), Vec2::new(w, 8.0)), l, m, rt);
+                    }
+                };
+                gauge(21.5, "HP", s.hp, s.max_hp);
+                gauge(42.5, "SP", s.sp, s.max_sp);
+                let pct = |v: i64, n: i64| if n > 0 { v as f32 * 100.0 / n as f32 } else { 0.0 };
+                p.text(at(14.0, 81.0), Align2::LEFT_CENTER, format!("Base Lv. {}", s.base_level), f(11.0), ink);
+                p.text(at(192.0, 81.0), Align2::RIGHT_CENTER, format!("{:.1}%", pct(s.base_exp, s.next_base_exp)), f(10.5), ink);
+                p.text(at(14.0, 97.0), Align2::LEFT_CENTER, format!("Job Lv. {}", s.job_level), f(11.0), ink);
+                p.text(at(192.0, 97.0), Align2::RIGHT_CENTER, format!("{:.1}%", pct(s.job_exp, s.next_job_exp)), f(10.5), ink);
+                let heavy = s.max_weight > 0 && s.weight * 2 >= s.max_weight;
+                p.text(at(8.0, 114.0), Align2::LEFT_CENTER, format!("Weight : {} / {}", s.weight / 10, s.max_weight / 10), f(10.0), if heavy { Color32::from_rgb(200, 60, 40) } else { ink });
+                p.text(at(198.0, 114.0), Align2::RIGHT_CENTER, format!("Zeny : {}", s.zeny), f(10.0), ink);
+                // The menu buttons, two columns down the striped side.
+                const BUTTONS: [(&str, &str, &str); 8] = [
+                    ("btn_status", "a", "Status (Alt+A)"),
+                    ("btn_equip", "q", "Equipment (Alt+Q)"),
+                    ("btn_items", "e", "Inventory (Alt+E)"),
+                    ("btn_skill", "s", "Skills (Alt+S)"),
+                    ("btn_comm", "z", "Party (Alt+Z)"),
+                    ("btn_friend", "h", "Friends (Alt+H)"),
+                    ("btn_option", "o", "Settings (Alt+O)"),
+                    ("btn_map", "m", "Minimap (Alt+M)"),
+                ];
+                for (i, (img, key, tip)) in BUTTONS.iter().enumerate() {
+                    let b = egui::Rect::from_min_size(at(207.0 + (i % 2) as f32 * 36.0, 22.0 + (i / 2) as f32 * 22.0), Vec2::new(30.0, 20.0));
+                    let resp = ui.interact(b, ui.scope_id().with(("basic_btn", i)), egui::Sense::click()).on_hover_text(*tip);
+                    skin.draw(&p, &format!("{img}_{}", if resp.hovered() { "on" } else { "off" }), b.min);
+                    if resp.clicked() {
+                        click = Some(*key);
+                    }
+                }
+            });
+        } else {
         egui::Window::new("status")
             .title_bar(false)
             .resizable(false)
@@ -221,6 +279,10 @@ impl Hud {
                     });
                 });
             });
+        }
+        if click.is_some() {
+            self.menu_click = click;
+        }
 
         let mut sent = None;
         let classic = self.classic_bar.clone();

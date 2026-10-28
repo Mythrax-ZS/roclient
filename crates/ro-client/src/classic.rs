@@ -11,7 +11,7 @@ const DIR: &str = r"data\texture\유저인터페이스\basic_interface";
 /// The images loaded (file names without .bmp).
 const NAMES: &[&str] = &[
     "titlebar_left", "titlebar_mid", "titlebar_right", "btnbar_left", "btnbar_mid", "btnbar_right", "itemwin_mid", "tab_itm_01", "tab_itm_02", "tab_itm_03", "sys_close_off",
-    "sys_close_on", "equipwin_bg", "statwin_bg", "arw_right", "arw_right_on", "dialog_bg", "tab_l", "tab_m", "tab_r", "tab_a_l", "tab_a_m", "tab_a_r",
+    "sys_close_on", "equipwin_bg", "statwin_bg", "arw_right", "arw_right_on", "dialog_bg", "basewin_bg", "gze_bg", "gzeblue_left", "gzeblue_mid", "gzeblue_right", "gzered_left", "gzered_mid", "gzered_right", "btn_status_off", "btn_status_on", "btn_equip_off", "btn_equip_on", "btn_items_off", "btn_items_on", "btn_skill_off", "btn_skill_on", "btn_comm_off", "btn_comm_on", "btn_friend_off", "btn_friend_on", "btn_option_off", "btn_option_on", "btn_map_off", "btn_map_on", "tab_l", "tab_m", "tab_r", "tab_a_l", "tab_a_m", "tab_a_r",
 ];
 
 /// Dark text on the white window bodies.
@@ -140,7 +140,7 @@ impl Skin {
     }
 
     /// A three-piece bar (left cap, stretched middle, right cap) across `r`.
-    fn bar(&self, p: &egui::Painter, r: Rect, left: &str, mid: &str, right: &str) {
+    pub fn bar(&self, p: &egui::Painter, r: Rect, left: &str, mid: &str, right: &str) {
         let (Some(l), Some(m), Some(rt)) = (self.tex.get(left), self.tex.get(mid), self.tex.get(right)) else { return };
         let (lw, rw) = (l.size_vec2().x, rt.size_vec2().x);
         p.image(l.id(), Rect::from_min_size(r.min, Vec2::new(lw, r.height())), UV, Color32::WHITE);
