@@ -34,7 +34,7 @@ Ticked items are handled and tested in game against the local server.
 
 ## World
 - [~] ZC_MVP, ZC_MVP_GETTING_ITEM, ZC_MVP_GETTING_SPECIAL_EXP, ZC_THROW_MVPITEM (built; not seen in game yet)
-- [~] ZC_NOTIFY_POSITION_TO_GROUPM / GUILDM (minimap dots; built, needs a party test)
+- [x] ZC_NOTIFY_POSITION_TO_GROUPM / GUILDM (party members off-screen on the minimap)
 - [ ] ZC_NOTIFY_MEMBERINFO_TO_GROUPM
 - [ ] ZC_NOTIFY_MAPPROPERTY2, ZC_NOTIFY_MAPINFO, ZC_UPDATE_MAPINFO, ZC_MONSTER_INFO, ZC_BOSS_INFO
 - [ ] ZC_CHANGE_DIRECTION, ZC_SKILL_SCALE, ZC_NOTIFY_ACTORINIT, ZC_COUPLENAME
