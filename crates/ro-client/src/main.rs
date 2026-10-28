@@ -1365,6 +1365,12 @@ impl App {
             }
             SkillHit { skill, act } => {
                 let target = act.target;
+                // Grimtooth: a line of spikes erupting from the caster to the target.
+                if skill == 137 {
+                    if let (Some(from), Some(to)) = (self.unit_pos(act.src), self.unit_pos(target)) {
+                        self.spike_line(from, to);
+                    }
+                }
                 self.act(act);
                 self.skill_fx(skill, self.unit_pos(target), true);
             }
@@ -1764,6 +1770,16 @@ impl App {
                 tracing::debug!(skill, name = ?self.skill_names.internal(skill), "no mapped effect; used fallback");
             }
         }
+    }
+
+    /// Earth spikes erupting in a wave from `from` toward `to` (Grimtooth).
+    fn spike_line(&mut self, from: glam::Vec3, to: glam::Vec3) {
+        let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
+        let Some(tex) = self.fx.texture(r, vfs, "dustblast_stick.bmp") else { return };
+        let reach = to - from;
+        let count = ((reach.length() / ro_render::CELL) as u32).clamp(3, 12);
+        let shape = ro_render::Shape::Spikes { reach, count };
+        r.procs.push(ro_render::ProcFx { tex, shape, pos: from, color: [0.85, 0.7, 0.5], time_ms: 0.0, duration_ms: 650.0 });
     }
 
     fn play_fx(&mut self, name: &'static str, pos: glam::Vec3) {
@@ -2373,6 +2389,9 @@ impl App {
             let idle = self.renderer.as_ref().is_some_and(|r| r.effects.is_empty() && r.procs.is_empty()) && self.sprite_fx.is_empty();
             if idle {
                 let pos = self.unit_pos(self.account_id).or_else(|| self.player.as_ref().map(|p| p.actor.pos));
+                if let (137, Some(p)) = (id, pos) {
+                    self.spike_line(p, p + glam::Vec3::new(6.0 * ro_render::CELL, 0.0, -3.0 * ro_render::CELL));
+                }
                 self.skill_fx(id, pos, true);
             }
         }

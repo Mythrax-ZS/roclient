@@ -66,6 +66,8 @@ pub enum Shape {
     Column { radius: f32, height: f32 },
     /// A flat circle on the ground, turning (radius in cells, turns per second).
     Disc { radius: f32, spin: f32 },
+    /// Spikes erupting in a wave along `reach` (world offset from `pos`), like Grimtooth.
+    Spikes { reach: Vec3, count: u32 },
 }
 
 /// A playing code-drawn effect.
@@ -91,6 +93,37 @@ impl ProcFx {
                 let r = radius * CELL;
                 cylinder(out, self.pos, r, r * 0.8, h, t * 0.5, color);
                 cylinder(out, self.pos, r * 0.6, r * 0.5, h * 1.2, -t * 0.7, color);
+            }
+            Shape::Spikes { reach, count } => {
+                // Each spike rises and sinks in turn, the wave running from pos to pos + reach.
+                let side = Vec3::new(-reach.z, 0.0, reach.x).normalize_or_zero();
+                for i in 0..count {
+                    let f = (i as f32 + 1.0) / count as f32;
+                    let local = (t * 1.6 - f * 0.9).clamp(0.0, 1.0);
+                    if local <= 0.0 || local >= 1.0 {
+                        continue;
+                    }
+                    let rise = (local * std::f32::consts::PI).sin();
+                    // Alternate sides a little so the line looks jagged.
+                    let jitter = side * if i % 2 == 0 { 0.35 } else { -0.35 } * CELL;
+                    let base = self.pos + reach * f + jitter;
+                    let h = CELL * (2.2 + 1.0 * ((i * 7 % 5) as f32 / 4.0)) * rise;
+                    let r = CELL * 0.4;
+                    let c = [color[0], color[1], color[2], color[3] * rise.min(1.0)];
+                    let apex = base + Vec3::new(0.0, h, 0.0);
+                    for k in 0..5 {
+                        let a0 = k as f32 / 5.0 * std::f32::consts::TAU;
+                        let a1 = (k + 1) as f32 / 5.0 * std::f32::consts::TAU;
+                        let p0 = base + Vec3::new(a0.cos() * r, 0.0, a0.sin() * r);
+                        let p1 = base + Vec3::new(a1.cos() * r, 0.0, a1.sin() * r);
+                        let (u0, u1) = (k as f32 / 5.0, (k + 1) as f32 / 5.0);
+                        out.extend([
+                            Vertex { pos: p0.into(), uv: [u0, 1.0], color: c },
+                            Vertex { pos: p1.into(), uv: [u1, 1.0], color: c },
+                            Vertex { pos: apex.into(), uv: [(u0 + u1) * 0.5, 0.0], color: c },
+                        ]);
+                    }
+                }
             }
             Shape::Disc { radius, spin } => {
                 let r = radius * CELL;
