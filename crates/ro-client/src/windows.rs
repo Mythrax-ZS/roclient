@@ -23,6 +23,8 @@ pub enum UiAction {
     Menu(ro_net::MenuReply),
     /// Move an inventory item into the cart.
     CartPut { index: u16, amount: u16 },
+    /// Show the item information window (cards: their illustration).
+    ItemInfo { id: u32, refine: u8, cards: [u32; 4] },
     SkillUp(u16),
     UseSkill(u16),
     /// Activate shortcut slot n (row * HOTKEYS_PER_ROW + column).
@@ -383,6 +385,11 @@ impl Windows {
                             });
                         }
                         resp.context_menu(|ui| {
+                            let card = it.kind == ro_game::items::kind::CARD;
+                            if ui.button(if card { "View card" } else { "Info" }).clicked() {
+                                action = Some(UiAction::ItemInfo { id: it.id, refine: it.refine, cards: it.cards });
+                                ui.close();
+                            }
                             if it.is_equipment() && ui.button("Equip").clicked() {
                                 action = Some(UiAction::Equip { index: it.index, location: it.location });
                                 ui.close();
@@ -431,6 +438,9 @@ impl Windows {
                                 used_acc.push(it.index);
                             }
                             let resp = item_slot(ui, v.icons, it, 32.0).on_hover_ui(|ui| item_tooltip(ui, v.db, it));
+                            if resp.secondary_clicked() {
+                                action = Some(UiAction::ItemInfo { id: it.id, refine: it.refine, cards: it.cards });
+                            }
                             if resp.double_clicked() {
                                 action = Some(UiAction::Unequip(it.index));
                             }

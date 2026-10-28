@@ -8,6 +8,7 @@ mod fx;
 mod gamepad;
 mod guild;
 mod hud;
+mod iteminfo;
 mod jobs;
 mod merchant;
 mod preview;
@@ -793,6 +794,8 @@ struct App {
     quests: quests::QuestLog,
     /// Cart, vending and shops.
     merchant: merchant::Merchant,
+    /// The item information / card illustration window.
+    item_info: iteminfo::ItemInfo,
     /// Skills cooling down: id -> ready again at.
     cooldowns: std::collections::HashMap<u16, std::time::Instant>,
     /// When a paused (`wait:`) test script carries on.
@@ -1957,6 +1960,11 @@ impl App {
             }
             InsertCard { card, equip } => self.send(Command::Item(ItemRequest::InsertCard { card, equip })),
             Menu(reply) => self.send(Command::Menu(reply)),
+            ItemInfo { id, refine, cards } => {
+                if let Some(vfs) = self.vfs.as_ref() {
+                    self.item_info.show_item(&self.egui_ctx, vfs, self.item_db.as_ref(), id, refine, cards);
+                }
+            }
             CartPut { index, amount } => self.send(Command::Merchant(ro_net::MerchantRequest::CartPut { index, amount: amount as u32 })),
             SkillUp(id) => self.send(Command::Stat(StatRequest::SkillUp(id))),
             UseSkill(id) => {
@@ -2873,6 +2881,7 @@ impl App {
                     Some(("equip", id)) => id.parse().ok().and_then(item).map(|(index, location)| windows::UiAction::Equip { index, location }),
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some(("card", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::CardTargets(index)),
+                    Some(("info", id)) => id.parse().ok().map(|id| windows::UiAction::ItemInfo { id, refine: 0, cards: [0; 4] }),
                     // Merchant tests: cartwin opens the cart; vend:price fills the shop
                     // set-up with everything in the cart; browse:aid looks in a shop; buyone
                     // buys one of each item in the shop being browsed.
@@ -3372,6 +3381,7 @@ impl App {
                         }
                     }
                 }
+                self.item_info.show(ui.ctx(), self.item_db.as_ref());
                 let zeny = self.hud.status.zeny;
                 if let Some(req) = self.merchant.show(ui.ctx(), self.item_db.as_ref(), &self.icons, zeny) {
                     self.queued_commands.push(ro_net::Command::Merchant(req));
@@ -3908,6 +3918,7 @@ fn main() -> anyhow::Result<()> {
         buffs: Default::default(),
         quests: Default::default(),
         merchant: Default::default(),
+        item_info: Default::default(),
         cooldowns: Default::default(),
         script_resume: None,
         pad: gamepad::Pad::new(),
@@ -3983,6 +3994,7 @@ fn main() -> anyhow::Result<()> {
         app.fx.index(vfs);
         app.buffs = buffs::Buffs::load(vfs);
         app.quests = quests::QuestLog::load(vfs);
+        app.item_info = iteminfo::ItemInfo::load(vfs);
         // Achievement titles, for the "achievement complete" notice.
         if let Some(d) = read(r"System\achievement_list.lub") {
             match ro_formats::lub::eval(&d) {
