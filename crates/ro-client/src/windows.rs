@@ -606,7 +606,7 @@ impl Windows {
                                 *open = !*open;
                             }
                         }
-                        for (label, key, tip) in [("Clan", "clan", "Your clan"), ("Navi", "navi", "Navigation: find NPCs and places (/navi)"), ("Booking", "n", "Alt+N"), ("Chat", "k", "Chat room (Alt+K)"), ("Mail", "x", "Alt+X"), ("Companions", "r", "Alt+R"), ("Achievements", "y", "Alt+Y"), ("Attendance", "j", "Alt+J")] {
+                        for (label, key, tip) in [("Clan", "clan", "Your clan"), ("Battle", "battle", "Battlegrounds and castles"), ("Navi", "navi", "Navigation: find NPCs and places (/navi)"), ("Booking", "n", "Alt+N"), ("Chat", "k", "Chat room (Alt+K)"), ("Mail", "x", "Alt+X"), ("Companions", "r", "Alt+R"), ("Achievements", "y", "Alt+Y"), ("Attendance", "j", "Alt+J")] {
                             if ui.selectable_label(false, label).on_hover_text(tip).clicked() {
                                 self.menu_key = Some(key);
                             }

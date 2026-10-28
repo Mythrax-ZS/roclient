@@ -19,6 +19,7 @@ use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
 pub use ro_proto::quests::{Objective, Quest};
 pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, MerchantRequest, VendItem, WantedItem};
+pub use ro_proto::bg::{apply_error as bg_apply_error, BgEvent, BgRequest, CastleRequest};
 pub use ro_proto::refine::{GradeOptions, GradeRequest, RefineOption, RefineRequest};
 use ro_proto::refine::*;
 use ro_proto::merchant::*;
@@ -370,6 +371,13 @@ pub enum Event {
     /// Clan members online, and the clan's maximum.
     ClanOnline(u16, u16),
     ClanLeft,
+    /// Battleground queue and match updates.
+    Bg(BgEvent),
+    /// Castles our guild holds (client castle ids).
+    Castles(Vec<u8>),
+    CastleInfo { id: u8, economy: u32, defense: u32 },
+    /// Castle teleport refused: 1 not enough zeny, 2 not allowed now.
+    CastleTeleport(u16),
     /// The server asks us to guide the player (script navigateto): map, cell (0 = any).
     Navigate { map: String, x: u16, y: u16 },
     /// The grade enchant options for the chosen item.
@@ -484,6 +492,8 @@ pub enum Command {
     Merchant(MerchantRequest),
     Refine(RefineRequest),
     Grade(GradeRequest),
+    Bg(BgRequest),
+    Castle(CastleRequest),
     Bank(BankRequest),
     BuyingStore(BuyingStoreRequest),
     CashShop(CashShopRequest),
@@ -627,6 +637,8 @@ impl MapSession {
                     Some(Command::Merchant(r)) => self.send(r).await?,
                     Some(Command::Refine(r)) => self.send(r).await?,
                     Some(Command::Grade(r)) => self.send(r).await?,
+                    Some(Command::Bg(r)) => self.send(r).await?,
+                    Some(Command::Castle(r)) => self.send(r).await?,
                     Some(Command::Bank(r)) => self.send(r).await?,
                     Some(Command::BuyingStore(r)) => self.send(r).await?,
                     Some(Command::CashShop(r)) => self.send(r).await?,
@@ -733,6 +745,10 @@ impl MapSession {
                         0x098a => parse_clan_info(&data).map(Event::ClanInfo),
                         0x0988 if data.len() >= 6 => Some(Event::ClanOnline(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0989 => Some(Event::ClanLeft),
+                        0x08d8 | 0x08d9 | 0x08db | 0x08df | 0x08e1 | 0x090e | 0x02de | 0x02df | 0x0a0e | 0x02dd | 0x02dc => ro_proto::bg::parse(opcode, &data).map(Event::Bg),
+                        0x0b27 => Some(Event::Castles(ro_proto::bg::parse_castles(&data))),
+                        0x0b2d => ro_proto::bg::parse_castle_info(&data).map(|(id, economy, defense)| Event::CastleInfo { id, economy, defense }),
+                        0x0b2e if data.len() >= 4 => Some(Event::CastleTeleport(u16::from_le_bytes([data[2], data[3]]))),
                         0x08e2 if data.len() >= 27 => {
                             let raw = &data[5..21];
                             let end = raw.iter().position(|c| *c == 0).unwrap_or(raw.len());

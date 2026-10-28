@@ -20,6 +20,7 @@ mod refine;
 mod screens;
 mod ai;
 mod booking;
+mod battle;
 mod clan;
 mod navigation;
 mod grade;
@@ -815,6 +816,7 @@ struct App {
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
+    battle: battle::Battle,
     navi: navigation::Navigation,
     /// A walk the navigation window asked for (done outside the UI pass).
     navi_walk: Option<(u16, u16)>,
@@ -1503,6 +1505,23 @@ impl App {
                 let cell = (x > 0 && y > 0).then_some((x, y));
                 let label = match cell { Some((x, y)) => format!("{map} ({x}, {y})"), None => map.clone() };
                 self.navi.go(&map, cell, label);
+            }
+            Bg(e) => {
+                let map = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
+                if let Some(text) = self.battle.event(e, &map) {
+                    self.hud.push_chat(ro_net::ChatKind::Battle, text);
+                }
+                if self.battle.auto_accept {
+                    if let Some((name, lobby)) = self.battle.ready.take() {
+                        self.send(ro_net::Command::Bg(ro_net::BgRequest::Reply { accept: true, name, lobby }));
+                    }
+                }
+            }
+            Castles(list) => self.battle.castles = list,
+            CastleInfo { id, economy, defense } => self.battle.castle_info(id, economy, defense),
+            CastleTeleport(r) => {
+                let why = if r == 1 { "You don't have enough zeny to teleport to the castle." } else { "You can't teleport to the castle right now." };
+                self.hud.push_chat(ro_net::ChatKind::System, why.into());
             }
             ClanLeft => {
                 self.clan.left();
@@ -2843,6 +2862,10 @@ impl App {
             "c" => self.toggle_cash_shop(),
             "y" => self.progress.open = !self.progress.open,
             "clan" => self.clan.open = !self.clan.open,
+            "battle" => {
+                self.battle.ensure_loaded(self.vfs.as_ref());
+                self.battle.open = !self.battle.open;
+            }
             "navi" => {
                 self.navi.ensure_loaded(self.vfs.as_ref());
                 self.navi.open = !self.navi.open;
@@ -3129,6 +3152,7 @@ impl App {
                 Some(("/p", rest)) => Some(ro_net::Command::Party(ro_net::PartyRequest::Chat { speaker, text: rest.to_string() })),
                 Some(("/g", rest)) => Some(ro_net::Command::Party(ro_net::PartyRequest::GuildChat { speaker, text: rest.to_string() })),
                 Some(("/cl", rest)) => Some(ro_net::Command::Party(ro_net::PartyRequest::ClanChat { speaker, text: rest.to_string() })),
+                Some(("/bc", rest)) => Some(ro_net::Command::Bg(ro_net::BgRequest::Chat(format!("{speaker} : {rest}")))),
                 // /guild "Name": found a guild, as in the original client.
                 Some(("/guild", rest)) => Some(ro_net::Command::Guild(ro_net::GuildRequest::Create { char_id: self.char_id, name: rest.trim().trim_matches('"').to_string() })),
                 // /r text: answer whoever whispered last.
@@ -3671,6 +3695,17 @@ impl App {
                         self.navi_walk = self.navi.waypoint(&map);
                         None
                     }
+                    // bg:Name applies solo to a battleground; bgauto enters it when ready.
+                    Some(("bg", name)) => {
+                        self.battle.ensure_loaded(self.vfs.as_ref());
+                        self.battle.open = true;
+                        self.queued_commands.push(ro_net::Command::Bg(ro_net::BgRequest::Apply { kind: 1, name: name.to_string() }));
+                        None
+                    }
+                    Some(("bgauto", _)) => {
+                        self.battle.auto_accept = true;
+                        None
+                    }
                     Some(("equiptab", t)) => {
                         self.windows.equip_tab = t.parse().unwrap_or(0);
                         None
@@ -4064,6 +4099,7 @@ impl App {
         if let (Some(w), Some(p)) = (self.world.as_ref(), self.player.as_ref()) {
             let (map, me) = (w.name.clone(), (p.walker.cell.0 as u16, p.walker.cell.1 as u16));
             self.navi.update(&map, me);
+            self.battle.map_changed(&map);
         }
         if let Some(cell) = self.navi_walk.take() {
             self.request_walk(cell);
@@ -4299,7 +4335,7 @@ impl App {
             let mut front_action = None;
             let mut player_cmd = None;
             let party: std::collections::HashSet<&str> = self.social.party.iter().flat_map(|p| p.members.iter().map(|m| m.name.as_str())).collect();
-            let dots: Vec<_> = self
+            let mut dots: Vec<_> = self
                 .units
                 .values()
                 .filter(|m| m.dying.is_none() && self.world.as_ref().is_none_or(|w| w.shows_cell(m.walker.cell.0, m.walker.cell.1)))
@@ -4314,6 +4350,7 @@ impl App {
                     Some(((m.walker.cell.0 as f32, m.walker.cell.1 as f32), color))
                 })
                 .collect();
+            dots.extend(self.battle.team_dots().into_iter().map(|c| (c, egui::Color32::from_rgb(255, 160, 200))));
             let me = self.player.as_ref().map(|p| (p.walker.cell.0 as f32, p.walker.cell.1 as f32));
             let map_name = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
             let out = self.egui_ctx.run_ui(input, |ui| {
@@ -4419,6 +4456,8 @@ impl App {
                     v
                 };
                 self.clan.show(ui.ctx());
+                let (bg_reqs, castle_reqs) = self.battle.show(ui.ctx(), self.hud.status.base_level.max(0) as u32);
+                self.queued_commands.extend(bg_reqs.into_iter().map(ro_net::Command::Bg).chain(castle_reqs.into_iter().map(ro_net::Command::Castle)));
                 if let Some(navigation::NaviAction::Walk(x, y)) = self.navi.show(ui.ctx(), &map_name) {
                     self.navi_walk = Some((x, y));
                 }
@@ -4964,6 +5003,7 @@ fn main() -> anyhow::Result<()> {
         companions: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
+        battle: Default::default(),
         navi: Default::default(),
         navi_walk: None,
         grade: Default::default(),

@@ -103,6 +103,7 @@ fn chat_color(kind: ChatKind) -> Color32 {
         ChatKind::Party => Color32::from_rgb(255, 200, 220),
         ChatKind::Guild => Color32::from_rgb(180, 255, 200),
         ChatKind::Clan => Color32::from_rgb(255, 200, 120),
+        ChatKind::Battle => Color32::from_rgb(255, 160, 200),
     }
 }
 
