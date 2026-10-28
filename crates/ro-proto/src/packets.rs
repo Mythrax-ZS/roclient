@@ -679,6 +679,14 @@ pub enum NpcDialog {
     Clear { npc: u32 },
     /// Show (or with `kind` 255, hide) an illustration from texture\유저인터페이스\illust.
     Cutin { image: String, kind: u8 },
+    /// Text alignment (`setdialogalign`): 0 left, 1 right, 2 centre, 3 top, 4 middle, 5 bottom.
+    Align(u8),
+    /// Window size in pixels (`setdialogsize`).
+    Size { width: i32, height: i32 },
+    /// Window top-left in pixels (`setdialogpos`).
+    Pos { x: i32, y: i32 },
+    /// Window centre as a percentage of the screen (`setdialogpospercent`).
+    PosPercent { x: i32, y: i32 },
 }
 
 pub fn parse_npc_dialog(opcode: u16, data: &[u8]) -> Option<NpcDialog> {
@@ -696,6 +704,10 @@ pub fn parse_npc_dialog(opcode: u16, data: &[u8]) -> Option<NpcDialog> {
             let image = get_fixed_str(&mut b, 64);
             NpcDialog::Cutin { image, kind: data[66] }
         }
+        0x0ba1 => NpcDialog::Align(data[2]),
+        0x0ba2 => NpcDialog::Size { height: npc_at(2) as i32, width: npc_at(6) as i32 },
+        0x0ba3 => NpcDialog::Pos { x: npc_at(2) as i32, y: npc_at(6) as i32 },
+        0x0bb5 => NpcDialog::PosPercent { x: npc_at(2) as i32, y: npc_at(6) as i32 },
         _ => return None,
     })
 }

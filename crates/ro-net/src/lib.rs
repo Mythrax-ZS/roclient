@@ -810,7 +810,7 @@ impl MapSession {
                             Some(Event::MapMove { map: map.trim_end_matches(".gat").to_string(), x, y })
                         }
                         0x09fd | 0x09fe | 0x09ff => parse_unit(opcode, &data).map(Event::Unit),
-                        0x00b4 | 0x00b5 | 0x00b6 | 0x00b7 | 0x0142 | 0x01d4 | 0x08d6 | 0x01b3 => parse_npc_dialog(opcode, &data).map(Event::Npc),
+                        0x00b4 | 0x00b5 | 0x00b6 | 0x00b7 | 0x0142 | 0x01d4 | 0x08d6 | 0x01b3 | 0x0ba1 | 0x0ba2 | 0x0ba3 | 0x0bb5 => parse_npc_dialog(opcode, &data).map(Event::Npc),
                         // Inventory (invType 0 only; carts and storage come later).
                         // Kafra storage: the same item lists with invType 2.
                         0x0b08 if data.get(4) == Some(&2) => Some(Event::StorageOpen),

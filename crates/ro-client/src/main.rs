@@ -3920,6 +3920,10 @@ impl App {
             Cutin { image, kind } => {
                 self.cutin = if kind == 255 { None } else { self.load_cutin(&image, kind) };
             }
+            Align(a) => self.hud.dialog_layout.align = a,
+            Size { width, height } => self.hud.dialog_layout.size = Some((width, height)),
+            Pos { x, y } => self.hud.dialog_layout.pos = Some(hud::DialogPos::Pixels(x, y)),
+            PosPercent { x, y } => self.hud.dialog_layout.pos = Some(hud::DialogPos::Percent(x, y)),
         }
     }
 

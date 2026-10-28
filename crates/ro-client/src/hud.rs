@@ -69,6 +69,8 @@ pub struct Label {
 #[derive(Default)]
 pub struct Hud {
     pub status: Status,
+    /// Script overrides for the NPC dialog's layout; cleared when the dialog ends.
+    pub dialog_layout: DialogLayout,
     chat: VecDeque<(ChatKind, String)>,
     input: String,
     /// Enter focuses the chat box; Enter again sends, Escape leaves.
@@ -445,6 +447,22 @@ pub struct Dialog {
     pub mode: DialogMode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DialogPos {
+    /// Top-left corner in screen pixels.
+    Pixels(i32, i32),
+    /// Centre as a percentage of the screen.
+    Percent(i32, i32),
+}
+
+/// What `setdialogalign` / `setdialogsize` / `setdialogpos` asked for.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DialogLayout {
+    pub align: u8,
+    pub size: Option<(i32, i32)>,
+    pub pos: Option<DialogPos>,
+}
+
 /// An NPC illustration ("cutin") and where the script wants it.
 pub struct Cutin {
     pub texture: egui::TextureHandle,
@@ -493,26 +511,46 @@ impl Hud {
             });
         }
 
-        let d = dialog.as_mut()?;
+        let Some(d) = dialog.as_mut() else {
+            self.dialog_layout = DialogLayout::default();
+            return None;
+        };
         let mut reply = None;
-        egui::Window::new("npc dialog")
-            .title_bar(false)
-            .resizable(false)
-            .anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 60.0))
-            .frame(popup_frame(ctx))
+        let layout = self.dialog_layout;
+        let (width, text_height) = layout.size.map_or((440.0, 220.0), |(w, h)| ((w as f32 - 16.0).max(160.0), (h as f32 - 90.0).max(40.0)));
+        let screen = ctx.content_rect();
+        let window = egui::Window::new("npc dialog").title_bar(false).resizable(false).frame(popup_frame(ctx));
+        let window = match layout.pos {
+            Some(DialogPos::Pixels(x, y)) => window.fixed_pos(egui::pos2(x as f32, y as f32)),
+            Some(DialogPos::Percent(x, y)) => window.pivot(Align2::CENTER_CENTER).fixed_pos(egui::pos2(screen.width() * x as f32 / 100.0, screen.height() * y as f32 / 100.0)),
+            None => window.anchor(Align2::CENTER_CENTER, Vec2::new(0.0, 60.0)),
+        };
+        window
             .show(ctx, |ui| {
                 if crate::classic::skin(ui.ctx()).is_none() {
                     ui.style_mut().visuals = egui::Visuals::dark();
                 }
-                ui.set_width(440.0);
+                ui.set_width(width);
                 if !d.title.is_empty() {
                     ui.label(RichText::new(&d.title).strong().size(14.0).color(crate::classic::ink(Color32::from_rgb(160, 225, 255))));
                     ui.add_space(4.0);
                 }
-                egui::ScrollArea::vertical().max_height(220.0).stick_to_bottom(true).show(ui, |ui| {
-                    for line in &d.lines {
-                        ui.label(npc_text(line, 14.0));
-                    }
+                let (h, v) = match layout.align {
+                    1 => (egui::Align::Max, egui::Align::Min),
+                    2 => (egui::Align::Center, egui::Align::Min),
+                    4 => (egui::Align::Min, egui::Align::Center),
+                    5 => (egui::Align::Min, egui::Align::Max),
+                    _ => (egui::Align::Min, egui::Align::Min),
+                };
+                egui::ScrollArea::vertical().max_height(text_height).stick_to_bottom(true).show(ui, |ui| {
+                    // A fixed size keeps the text box that tall, so vertical alignment means something.
+                    let min_h = if layout.size.is_some() { text_height } else { 0.0 };
+                    ui.allocate_ui_with_layout(Vec2::new(width, min_h), egui::Layout::top_down(h).with_main_align(v).with_main_justify(min_h > 0.0 && v != egui::Align::Min), |ui| {
+                        ui.set_min_height(min_h);
+                        for line in &d.lines {
+                            ui.label(npc_text(line, 14.0));
+                        }
+                    });
                 });
                 ui.add_space(8.0);
                 let nav = self.pad_nav.take();

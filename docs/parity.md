@@ -9,7 +9,7 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_COMPASS (`viewpoint`: minimap marks)
 - [x] ZC_NPCSPRITE_CHANGE (`setnpcdisplay`)
 - [x] ZC_CHANGE_DIRECTION; server directions (0 north) converted to sprite directions (0 south): standing units faced the wrong way
-- [ ] ZC_SAY_DIALOG2 / ZC_WAIT_DIALOG2, ZC_DIALOG_TEXT_ALIGN / WINDOW_SIZE / WINDOW_POS / POS2
+- [x] ZC_DIALOG_TEXT_ALIGN / WINDOW_SIZE / WINDOW_POS / POS2 (ZC_SAY_DIALOG2 / WAIT_DIALOG2 are never sent by rAthena)
 - [x] ZC_MSG_COLOR, ZC_MSG_VALUE, ZC_MSG_SKILL, and every ZC_MSG id (was: only two)
 - [ ] ZC_SPECIALPOPUP, ZC_SKILLMSG
 - [x] ZC_REMOVE_EFFECT, ZC_EQUIPMENT_EFFECT
