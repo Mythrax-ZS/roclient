@@ -167,6 +167,11 @@ impl Chunk {
         }
     }
 
+    /// `t[i]` for a numeric key (array-style rows like `{ "Name", 1, 24034 }`).
+    pub fn field_index<'a>(&'a self, t: &Value, i: u32) -> Option<&'a Value> {
+        self.entries(t).iter().find(|(k, _)| k.as_number() == Some(i as f64)).map(|(_, v)| v)
+    }
+
     /// `t[key]` for a string key.
     pub fn field<'a>(&'a self, t: &Value, key: &str) -> Option<&'a Value> {
         self.entries(t).iter().find(|(k, _)| k.as_str() == Some(key)).map(|(_, v)| v)

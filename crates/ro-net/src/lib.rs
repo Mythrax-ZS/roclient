@@ -22,7 +22,7 @@ pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, M
 pub use ro_proto::search::{Found, SearchRequest};
 pub use ro_proto::market::{BarterItem, MarketItem, MarketRequest};
 pub use ro_proto::bg::{apply_error as bg_apply_error, BgEvent, BgRequest, CastleRequest};
-pub use ro_proto::refine::{EnchantRequest, ReformRequest, GradeOptions, GradeRequest, RefineOption, RefineRequest};
+pub use ro_proto::refine::{EnchantRequest, LapineRequest, ReformRequest, GradeOptions, GradeRequest, RefineOption, RefineRequest};
 use ro_proto::refine::*;
 use ro_proto::merchant::*;
 pub use ro_proto::progress::{AchRank, Achievement, ProgressRequest};
@@ -462,6 +462,12 @@ pub enum Event {
     StyleResult(bool),
     /// ZC_OPEN_REFORM_UI (the tool item) / ZC_ITEM_REFORM_ACK (index, result: 0 ok).
     ReformOpen(u32),
+    /// ZC_RANDOM_COMBINE_ITEM_UI_OPEN / ZC_RANDOM_UPGRADE_ITEM_UI_OPEN: a Laphine window for this trigger item.
+    LapineOpen { upgrade: bool, trigger: u32 },
+    /// ZC_ACK_RANDOM_COMBINE_ITEM (0 ok, 5 amount, 7 item) / ZC_ACK_RANDOM_UPGRADE_ITEM (0 ok, 1 failed).
+    LapineResult { upgrade: bool, result: u16 },
+    /// ZC_CHANGE_ITEM_OPTION: an item's cards, refine and grade after an upgrade.
+    ItemChanged { index: u16, cards: [u32; 4], refine: u8, grade: u8 },
     ReformResult { index: u16, result: u8 },
     /// ZC_UI_OPEN_V3: a UI with a 64-bit argument (type 10: the enchant window, its set).
     UiOpenV3 { kind: u8, data: u64 },
@@ -654,6 +660,7 @@ pub enum Command {
     Grade(GradeRequest),
     Enchant(EnchantRequest),
     Reform(ReformRequest),
+    Lapine(LapineRequest),
     Bg(BgRequest),
     Castle(CastleRequest),
     Style(StyleRequest),
@@ -813,6 +820,7 @@ impl MapSession {
                     Some(Command::Grade(r)) => self.send(r).await?,
                     Some(Command::Enchant(r)) => self.send(r).await?,
                     Some(Command::Reform(r)) => self.send(r).await?,
+                    Some(Command::Lapine(r)) => self.send(r).await?,
                     Some(Command::Bg(r)) => self.send(r).await?,
                     Some(Command::Castle(r)) => self.send(r).await?,
                     Some(Command::Style(r)) => self.send(r).await?,
@@ -976,6 +984,12 @@ impl MapSession {
                         0x083d if data.len() >= 6 => Some(Event::SearchAt(u16::from_le_bytes([data[2], data[3]]), u16::from_le_bytes([data[4], data[5]]))),
                         0x0a02 => Some(Event::DressRoom),
                         0x0a47 if data.len() >= 3 => Some(Event::StyleResult(data[2] != 0)),
+                        0x0a4e | 0x0ab4 if data.len() >= 6 => Some(Event::LapineOpen { upgrade: opcode == 0x0ab4, trigger: u32::from_le_bytes([data[2], data[3], data[4], data[5]]) }),
+                        0x0a50 | 0x0ab7 if data.len() >= 4 => Some(Event::LapineResult { upgrade: opcode == 0x0ab7, result: u16::from_le_bytes([data[2], data[3]]) }),
+                        0x0b43 if data.len() >= 48 => {
+                            let l = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                            Some(Event::ItemChanged { index: u16::from_le_bytes([data[2], data[3]]), cards: [l(5), l(9), l(13), l(17)], refine: data[46], grade: data[47] })
+                        }
                         0x0b8f if data.len() >= 6 => Some(Event::ReformOpen(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x0b92 if data.len() >= 5 => Some(Event::ReformResult { index: u16::from_le_bytes([data[2], data[3]]), result: data[4] }),
                         0x0b9a if data.len() >= 11 => Some(Event::UiOpenV3 { kind: data[2], data: u64::from_le_bytes(data[3..11].try_into().unwrap()) }),

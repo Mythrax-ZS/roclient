@@ -30,6 +30,7 @@ mod gameopts;
 mod ranking;
 mod storesearch;
 mod stylist;
+mod lapine;
 mod reform;
 mod enchant;
 mod market;
@@ -462,6 +463,15 @@ fn floor_cell(f: &ro_net::FloorItem) -> (f32, f32) {
     (f.x as f32 + f.sub.0 as f32 / 12.0, f.y as f32 + f.sub.1 as f32 / 12.0)
 }
 
+fn lapine_command(a: lapine::LapineAction) -> ro_net::Command {
+    ro_net::Command::Lapine(match a {
+        lapine::LapineAction::Synthesize { trigger, items } => ro_net::LapineRequest::Synthesize { trigger, items },
+        lapine::LapineAction::Upgrade { trigger, index } => ro_net::LapineRequest::Upgrade { trigger, index },
+        lapine::LapineAction::Close { upgrade: false } => ro_net::LapineRequest::SynthesisClose,
+        lapine::LapineAction::Close { upgrade: true } => ro_net::LapineRequest::UpgradeClose,
+    })
+}
+
 fn inv_item(d: ro_net::ItemData) -> ro_game::items::InvItem {
     ro_game::items::InvItem {
         index: d.index,
@@ -851,6 +861,7 @@ struct App {
     store_search: storesearch::StoreSearch,
     stylist: stylist::Stylist,
     reform: reform::Reform,
+    lapine: lapine::Lapine,
     enchant: enchant::Enchant,
     market: market::Market,
     /// Test hook: a market purchase to make once a shop opens.
@@ -1231,6 +1242,10 @@ impl App {
         }
         tracing::debug!(id = info.id, job = info.job, name = %info.name, ?cell, "unit");
         self.units.insert(info.id, mob);
+    }
+
+    fn lapine_action(&mut self, a: lapine::LapineAction) {
+        self.queued_commands.push(lapine_command(a));
     }
 
     /// Asks to walk to a cell: through the server online, locally offline.
@@ -2869,6 +2884,19 @@ impl App {
                 self.stylist.dressing = true;
             }
             ReformOpen(tool) => self.reform.open(self.vfs.as_ref(), tool),
+            LapineOpen { upgrade, trigger } => self.lapine.open(self.vfs.as_ref(), upgrade, trigger),
+            LapineResult { upgrade, result } => {
+                if let Some(a) = self.lapine.result(upgrade, result) {
+                    self.lapine_action(a);
+                }
+                let msg = self.lapine.status.clone();
+                self.hud.push_chat(ro_net::ChatKind::System, msg);
+            }
+            ItemChanged { index, cards, refine, grade } => {
+                if let Some(it) = self.inventory.items.get_mut(&index) {
+                    (it.cards, it.refine, it.grade) = (cards, refine, grade);
+                }
+            }
             ReformResult { result, .. } => self.reform.result(result == 0),
             UiOpenV3 { kind: 10, data } => self.enchant.open(self.vfs.as_ref(), data),
             UiOpenV3 { .. } => {}
@@ -4377,6 +4405,13 @@ impl App {
                         }
                         None
                     }
+                    Some(("lapine", _)) => {
+                        let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
+                        if let Some(a) = self.lapine.test_go(&inv) {
+                            self.lapine_action(a);
+                        }
+                        None
+                    }
                     Some(("comptab", n)) => {
                         self.companions.select_tab(n.parse().unwrap_or(0));
                         None
@@ -5321,6 +5356,12 @@ impl App {
                 }
                 {
                     let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
+                    if let Some(a) = self.lapine.show(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons) {
+                        self.queued_commands.push(lapine_command(a));
+                    }
+                }
+                {
+                    let inv: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
                     if let Some(a) = self.reform.show(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons) {
                         self.queued_commands.push(ro_net::Command::Reform(match a {
                             reform::ReformAction::Reform { tool, index } => ro_net::ReformRequest::Reform { tool, index },
@@ -5932,6 +5973,7 @@ fn main() -> anyhow::Result<()> {
         store_search: Default::default(),
         stylist: Default::default(),
         reform: Default::default(),
+        lapine: Default::default(),
         enchant: Default::default(),
         market: Default::default(),
         market_buy: None,

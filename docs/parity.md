@@ -24,7 +24,7 @@ Ticked items are handled and tested in game against the local server.
 - [x] Failed item adds (full inventory, overweight) now say why
 - [x] Reputation window (ZC_REPUTE_INFO / OPEN, names from contentdataepute*.bson)
 - [~] Item merge window (mergeitem): built; no mergeable stacks could be produced to test
-- [ ] ZC_RANDOM_COMBINE / RANDOM_UPGRADE_ITEM
+- [x] ZC_RANDOM_COMBINE / RANDOM_UPGRADE_ITEM (Laphine synthesis + upgrade windows, recipes from lapine*.lub merged across iRO/kRO; ZC_CHANGE_ITEM_OPTION 0x0b43)
 
 ## Items and skills
 - [x] ZC_ACK_ITEMIDENTIFY (Magnifier) + ZC_AUTORUN_SKILL (all itemskill items)

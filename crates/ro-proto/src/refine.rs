@@ -215,3 +215,40 @@ impl Encode for ReformRequest {
         }
     }
 }
+
+/// Laphine synthesis (combine several items into a reward box) and Laphine upgrade
+/// (re-roll one item), opened by item scripts.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LapineRequest {
+    /// CZ_REQ_RANDOM_COMBINE_ITEM: the items handed in, as (inventory index, count).
+    Synthesize { trigger: u32, items: Vec<(u16, u16)> },
+    /// CZ_RANDOM_COMBINE_ITEM_UI_CLOSE.
+    SynthesisClose,
+    /// CZ_REQ_RANDOM_UPGRADE_ITEM.
+    Upgrade { trigger: u32, index: u16 },
+    /// CZ_RANDOM_UPGRADE_ITEM_UI_CLOSE.
+    UpgradeClose,
+}
+
+impl Encode for LapineRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            LapineRequest::Synthesize { trigger, items } => {
+                d.put_u16_le(0x0a4f);
+                d.put_u16_le((8 + 4 * items.len()) as u16);
+                d.put_u32_le(*trigger);
+                for (index, count) in items {
+                    d.put_u16_le(*index);
+                    d.put_u16_le(*count);
+                }
+            }
+            LapineRequest::SynthesisClose => d.put_u16_le(0x0a70),
+            LapineRequest::Upgrade { trigger, index } => {
+                d.put_u16_le(0x0ab6);
+                d.put_u32_le(*trigger);
+                d.put_u16_le(*index);
+            }
+            LapineRequest::UpgradeClose => d.put_u16_le(0x0ab5),
+        }
+    }
+}
