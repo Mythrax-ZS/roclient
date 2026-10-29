@@ -1,0 +1,875 @@
+{
+  "note": "Explicit stance and grounded-pose roots authored by visual review. Full-sheet calibration uses cast-windup standing height against the corresponding master idle. Prone rects extend left of nominal col3 to preserve full head.",
+  "sheets": {
+    "utility_S": {
+      "path": "source/utility/utility_S.png",
+      "x_edges": [
+        0,
+        416,
+        832,
+        1248,
+        1659
+      ],
+      "y_edges": [
+        0,
+        476,
+        948
+      ],
+      "origin": [
+        0,
+        0
+      ],
+      "source_scale": 0.870588,
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            416,
+            476
+          ],
+          "origin": [
+            212,
+            456
+          ],
+          "absolute_root": [
+            212,
+            456
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            416,
+            0,
+            832,
+            476
+          ],
+          "origin": [
+            224,
+            456
+          ],
+          "absolute_root": [
+            640,
+            456
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            832,
+            0,
+            1248,
+            476
+          ],
+          "origin": [
+            192,
+            456
+          ],
+          "absolute_root": [
+            1024,
+            456
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1248,
+            0,
+            1659,
+            476
+          ],
+          "origin": [
+            184,
+            456
+          ],
+          "absolute_root": [
+            1432,
+            456
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            476,
+            416,
+            948
+          ],
+          "origin": [
+            212,
+            440
+          ],
+          "absolute_root": [
+            212,
+            916
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            416,
+            476,
+            832,
+            948
+          ],
+          "origin": [
+            208,
+            440
+          ],
+          "absolute_root": [
+            624,
+            916
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            832,
+            476,
+            1200,
+            948
+          ],
+          "origin": [
+            192,
+            432
+          ],
+          "absolute_root": [
+            1024,
+            908
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1200,
+            660,
+            1659,
+            948
+          ],
+          "origin": [
+            240,
+            228
+          ],
+          "absolute_root": [
+            1440,
+            888
+          ]
+        }
+      ]
+    },
+    "utility_SW": {
+      "path": "source/utility/utility_SW.png",
+      "x_edges": [
+        0,
+        416,
+        832,
+        1248,
+        1659
+      ],
+      "y_edges": [
+        0,
+        476,
+        948
+      ],
+      "origin": [
+        0,
+        0
+      ],
+      "source_scale": 0.846868,
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            416,
+            484
+          ],
+          "origin": [
+            248,
+            456
+          ],
+          "absolute_root": [
+            248,
+            456
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            416,
+            0,
+            832,
+            476
+          ],
+          "origin": [
+            240,
+            452
+          ],
+          "absolute_root": [
+            656,
+            452
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            832,
+            0,
+            1248,
+            476
+          ],
+          "origin": [
+            212,
+            452
+          ],
+          "absolute_root": [
+            1044,
+            452
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1248,
+            0,
+            1659,
+            484
+          ],
+          "origin": [
+            204,
+            452
+          ],
+          "absolute_root": [
+            1452,
+            452
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            484,
+            416,
+            948
+          ],
+          "origin": [
+            216,
+            432
+          ],
+          "absolute_root": [
+            216,
+            916
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            416,
+            476,
+            832,
+            948
+          ],
+          "origin": [
+            228,
+            440
+          ],
+          "absolute_root": [
+            644,
+            916
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            832,
+            476,
+            1200,
+            948
+          ],
+          "origin": [
+            208,
+            432
+          ],
+          "absolute_root": [
+            1040,
+            908
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1200,
+            660,
+            1659,
+            948
+          ],
+          "origin": [
+            240,
+            224
+          ],
+          "absolute_root": [
+            1440,
+            884
+          ]
+        }
+      ]
+    },
+    "utility_W": {
+      "path": "source/utility/utility_W.png",
+      "x_edges": [
+        0,
+        416,
+        832,
+        1248,
+        1659
+      ],
+      "y_edges": [
+        0,
+        476,
+        948
+      ],
+      "origin": [
+        0,
+        0
+      ],
+      "source_scale": 0.86747,
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            416,
+            476
+          ],
+          "origin": [
+            256,
+            444
+          ],
+          "absolute_root": [
+            256,
+            444
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            416,
+            0,
+            832,
+            476
+          ],
+          "origin": [
+            244,
+            448
+          ],
+          "absolute_root": [
+            660,
+            448
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            832,
+            0,
+            1248,
+            476
+          ],
+          "origin": [
+            200,
+            448
+          ],
+          "absolute_root": [
+            1032,
+            448
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1248,
+            0,
+            1659,
+            476
+          ],
+          "origin": [
+            172,
+            448
+          ],
+          "absolute_root": [
+            1420,
+            448
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            476,
+            416,
+            948
+          ],
+          "origin": [
+            220,
+            412
+          ],
+          "absolute_root": [
+            220,
+            888
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            416,
+            476,
+            832,
+            948
+          ],
+          "origin": [
+            224,
+            412
+          ],
+          "absolute_root": [
+            640,
+            888
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            832,
+            476,
+            1168,
+            948
+          ],
+          "origin": [
+            200,
+            404
+          ],
+          "absolute_root": [
+            1032,
+            880
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1168,
+            660,
+            1659,
+            948
+          ],
+          "origin": [
+            248,
+            216
+          ],
+          "absolute_root": [
+            1416,
+            876
+          ]
+        }
+      ]
+    },
+    "utility_NW": {
+      "path": "source/utility/utility_NW.png",
+      "x_edges": [
+        0,
+        416,
+        832,
+        1248,
+        1659
+      ],
+      "y_edges": [
+        0,
+        476,
+        948
+      ],
+      "origin": [
+        0,
+        0
+      ],
+      "source_scale": 0.834515,
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            416,
+            476
+          ],
+          "origin": [
+            232,
+            448
+          ],
+          "absolute_root": [
+            232,
+            448
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            416,
+            0,
+            832,
+            476
+          ],
+          "origin": [
+            228,
+            444
+          ],
+          "absolute_root": [
+            644,
+            444
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            832,
+            0,
+            1248,
+            476
+          ],
+          "origin": [
+            196,
+            448
+          ],
+          "absolute_root": [
+            1028,
+            448
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1248,
+            0,
+            1659,
+            476
+          ],
+          "origin": [
+            200,
+            448
+          ],
+          "absolute_root": [
+            1448,
+            448
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            476,
+            416,
+            948
+          ],
+          "origin": [
+            212,
+            420
+          ],
+          "absolute_root": [
+            212,
+            896
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            416,
+            476,
+            832,
+            948
+          ],
+          "origin": [
+            224,
+            420
+          ],
+          "absolute_root": [
+            640,
+            896
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            832,
+            476,
+            1216,
+            948
+          ],
+          "origin": [
+            200,
+            392
+          ],
+          "absolute_root": [
+            1032,
+            868
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1232,
+            660,
+            1659,
+            948
+          ],
+          "origin": [
+            224,
+            232
+          ],
+          "absolute_root": [
+            1456,
+            892
+          ]
+        }
+      ]
+    },
+    "utility_N": {
+      "path": "source/utility/utility_N_fixed.png",
+      "x_edges": [
+        0,
+        416,
+        832,
+        1248,
+        1659
+      ],
+      "y_edges": [
+        0,
+        460,
+        948
+      ],
+      "origin": [
+        0,
+        0
+      ],
+      "source_scale": 0.878049,
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            416,
+            460
+          ],
+          "origin": [
+            208,
+            428
+          ],
+          "absolute_root": [
+            208,
+            428
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            416,
+            0,
+            832,
+            460
+          ],
+          "origin": [
+            208,
+            424
+          ],
+          "absolute_root": [
+            624,
+            424
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            832,
+            0,
+            1248,
+            460
+          ],
+          "origin": [
+            208,
+            428
+          ],
+          "absolute_root": [
+            1040,
+            428
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1248,
+            0,
+            1659,
+            460
+          ],
+          "origin": [
+            200,
+            428
+          ],
+          "absolute_root": [
+            1448,
+            428
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            460,
+            416,
+            948
+          ],
+          "origin": [
+            208,
+            416
+          ],
+          "absolute_root": [
+            208,
+            876
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            416,
+            460,
+            832,
+            948
+          ],
+          "origin": [
+            208,
+            416
+          ],
+          "absolute_root": [
+            624,
+            876
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            832,
+            460,
+            1200,
+            948
+          ],
+          "origin": [
+            184,
+            416
+          ],
+          "absolute_root": [
+            1016,
+            876
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1216,
+            660,
+            1659,
+            948
+          ],
+          "origin": [
+            224,
+            220
+          ],
+          "absolute_root": [
+            1440,
+            880
+          ]
+        }
+      ]
+    }
+  }
+}

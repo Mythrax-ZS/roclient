@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*", "tools/*"]
+exclude = ["tools/samurai_assets"]
 
 [workspace.package]
 edition = "2021"

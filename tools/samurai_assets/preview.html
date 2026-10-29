@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Samurai animation review</title>
+<style>
+body{margin:24px;background:#17202a;color:#e3e8ee;font:15px system-ui}h1{font-size:22px}p{color:#b3c0cd}nav{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:20px 0}button,select{background:#2c3c4b;color:inherit;border:1px solid #789;padding:8px;font:inherit}canvas{display:block;width:100%;max-width:1600px;image-rendering:pixelated;background:#26303c;border:1px solid #526272}#status{white-space:pre-line}label{display:flex;gap:6px;align-items:center}
+</style>
+<h1 id="name">Samurai animation review</h1>
+<p>All eight directions decoded from the compiled SPR/ACT files. The cross marks the fixed ground origin.</p>
+<nav><label>Action <select id="action"></select></label><button id="play">Pause</button><button id="step">Step</button><button id="restart">Restart</button><label>Speed <select id="speed"><option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label><label><input type="checkbox" id="weapon" checked>Katana</label><label>Scale <select id="zoom"><option value="1">1×</option><option value="2" selected>2×</option><option value="3">3×</option></select></label></nav>
+<canvas id="stage" width="1536" height="768" style="width:auto;max-width:none"></canvas><p id="status"></p>
+<p>Review left/right foot alternation, stationary ground registration, direction consistency, clothing volume and loop closure. Canvas/PNG rotation rasterization can differ slightly from the GPU.</p>
+<script src="preview_manifest.js"></script>
+<script>
+(async()=>{
+'use strict';
+const $=id=>document.getElementById(id), data=window.SAMURAI_PREVIEW, context=$('stage').getContext('2d');
+if(!data){$('status').textContent='Missing preview_manifest.js';return;}
+$('name').textContent=data.name+' — animation review';
+for(const group of data.groups)$('action').add(new Option(group.name,group.index));
+$('action').value='1';
+const images={};
+try{for(const [name,sheet] of Object.entries(data.sheets))images[name]=await Promise.all(sheet.images.map(path=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('Cannot load '+path));image.src=path;})));}catch(error){$('status').textContent=String(error);return;}
+let playing=true, time=0, last=performance.now();
+function paintLayers(kind,layers){for(const layer of layers){if(layer.sprite_index<0)continue;const image=images[kind][layer.sprite_index];context.save();context.translate(layer.x,layer.y);context.rotate((layer.rotation||0)*Math.PI/180);context.scale((layer.mirror?-1:1)*(layer.scale_x??1),layer.scale_y??1);context.globalAlpha=(layer.color?.[3]??255)/255;context.drawImage(image,-image.width/2,-image.height/2);context.restore();}}
+function render(now){
+  const group=+$('action').value, zoom=+$('zoom').value, loop=data.groups[group].loop;
+  if(playing)time+=Math.min(100,now-last)*+$('speed').value;
+  last=now;
+  const layout=data.layout, cw=layout.cell_width*zoom, ch=layout.cell_height*zoom;
+  if($('stage').width!==cw*4||$('stage').height!==ch*2){$('stage').width=cw*4;$('stage').height=ch*2;}
+  context.fillStyle='#26303c';context.fillRect(0,0,cw*4,ch*2);context.imageSmoothingEnabled=false;
+  const frames=[];
+  for(let direction=0;direction<8;direction++){
+    const index=group*8+direction,body=data.sheets.body.actions[index],weapon=data.sheets.weapon.actions[index];
+    let frame=Math.floor(time/(body.interval*25));
+    frame=loop?frame%body.frames.length:Math.min(frame,body.frames.length-1);frames.push(frame+1);
+    const column=direction%4,row=Math.floor(direction/4);
+    context.save();context.translate(column*cw+layout.origin_x*zoom,row*ch+layout.origin_y*zoom);
+    context.strokeStyle='#647b8d';context.beginPath();context.moveTo(-60*zoom,.5);context.lineTo(60*zoom,.5);
+    context.moveTo(.5,-6);context.lineTo(.5,6);context.stroke();context.scale(zoom,zoom);
+    const drawWeapon=()=>{if($('weapon').checked)paintLayers('weapon',weapon.frames[frame].layers);};
+    if([3,4,5].includes(direction))drawWeapon();
+    paintLayers('body',body.frames[frame].layers);
+    if(![3,4,5].includes(direction))drawWeapon();
+    context.restore();context.fillStyle='#e3e8ee';context.font='14px system-ui';
+    context.fillText(data.directions[direction],column*cw+8,row*ch+22);
+  }
+  const first=data.sheets.body.actions[group*8];
+  $('status').textContent='Frame: '+frames.join(' / ')+' · '+first.interval*25+' ms/frame · '+(loop?'loops':'holds final pose')+' / '+(playing?'Playing':'Paused');
+  requestAnimationFrame(render);
+}
+function reset(){time=0;last=performance.now();}
+$('action').onchange=reset;$('restart').onclick=reset;$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'Pause':'Play';};$('step').onclick=()=>{playing=false;$('play').textContent='Play';const action=data.sheets.body.actions[+$('action').value*8];time=(Math.floor(time/(action.interval*25))+1)*action.interval*25;};requestAnimationFrame(render);
+})();
+</script>
+</html>

@@ -1,0 +1,1154 @@
+{
+  "note": "Authored pelvis-axis roots, with waist-to-ground distance calibrated against the corresponding master idle rig. Origins are NOT derived from individual foot minima. Uniform scale per whole direction sheet. Sampling/preview only; source pixels unchanged. S is a curated compromise with shared neutral passing frame2 and omitted wrong-side frame4. Final S order is neutral, right swing, right heel contact, right flat contact, neutral, left swing, left heel contact, left flat contact; aligns passing/contact phases with W/SW. Supplemental walk_S_contact cell2 replaces old S cell6 at timeline frame3; timelines map is final authority for mixed-sheet playback.",
+  "sheets": {
+    "walk_S": {
+      "path": "source/walk_S.png",
+      "x_edges": [
+        0,
+        416,
+        832,
+        1248,
+        1659
+      ],
+      "y_edges": [
+        0,
+        476,
+        948
+      ],
+      "source_scale": 0.95,
+      "timeline": [
+        2,
+        1,
+        7,
+        6,
+        2,
+        5,
+        3,
+        0
+      ],
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            416,
+            476
+          ],
+          "origin": [
+            224,
+            448
+          ],
+          "absolute_root": [
+            224,
+            448
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            416,
+            0,
+            832,
+            476
+          ],
+          "origin": [
+            208,
+            448
+          ],
+          "absolute_root": [
+            624,
+            448
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            832,
+            0,
+            1248,
+            476
+          ],
+          "origin": [
+            196,
+            448
+          ],
+          "absolute_root": [
+            1028,
+            448
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1248,
+            0,
+            1659,
+            476
+          ],
+          "origin": [
+            192,
+            448
+          ],
+          "absolute_root": [
+            1440,
+            448
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            476,
+            416,
+            948
+          ],
+          "origin": [
+            228,
+            428
+          ],
+          "absolute_root": [
+            228,
+            904
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            416,
+            476,
+            832,
+            948
+          ],
+          "origin": [
+            212,
+            428
+          ],
+          "absolute_root": [
+            628,
+            904
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            832,
+            476,
+            1248,
+            948
+          ],
+          "origin": [
+            196,
+            428
+          ],
+          "absolute_root": [
+            1028,
+            904
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1248,
+            476,
+            1659,
+            948
+          ],
+          "origin": [
+            204,
+            432
+          ],
+          "absolute_root": [
+            1452,
+            908
+          ]
+        }
+      ]
+    },
+    "walk_SW": {
+      "path": "source/walk_SW.png",
+      "x_edges": [
+        0,
+        416,
+        832,
+        1248,
+        1659
+      ],
+      "y_edges": [
+        0,
+        476,
+        948
+      ],
+      "source_scale": 0.9,
+      "timeline": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            416,
+            476
+          ],
+          "origin": [
+            204,
+            444
+          ],
+          "absolute_root": [
+            204,
+            444
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            416,
+            0,
+            832,
+            476
+          ],
+          "origin": [
+            200,
+            444
+          ],
+          "absolute_root": [
+            616,
+            444
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            832,
+            0,
+            1248,
+            476
+          ],
+          "origin": [
+            200,
+            448
+          ],
+          "absolute_root": [
+            1032,
+            448
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1248,
+            0,
+            1659,
+            476
+          ],
+          "origin": [
+            204,
+            448
+          ],
+          "absolute_root": [
+            1452,
+            448
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            476,
+            416,
+            948
+          ],
+          "origin": [
+            204,
+            428
+          ],
+          "absolute_root": [
+            204,
+            904
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            416,
+            476,
+            832,
+            948
+          ],
+          "origin": [
+            200,
+            428
+          ],
+          "absolute_root": [
+            616,
+            904
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            832,
+            476,
+            1248,
+            948
+          ],
+          "origin": [
+            196,
+            428
+          ],
+          "absolute_root": [
+            1028,
+            904
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1248,
+            476,
+            1659,
+            948
+          ],
+          "origin": [
+            204,
+            428
+          ],
+          "absolute_root": [
+            1452,
+            904
+          ]
+        }
+      ]
+    },
+    "walk_W": {
+      "path": "source/walk_W.png",
+      "x_edges": [
+        0,
+        416,
+        832,
+        1248,
+        1659
+      ],
+      "y_edges": [
+        0,
+        476,
+        948
+      ],
+      "source_scale": 0.94,
+      "timeline": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            416,
+            476
+          ],
+          "origin": [
+            192,
+            432
+          ],
+          "absolute_root": [
+            192,
+            432
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            416,
+            0,
+            832,
+            476
+          ],
+          "origin": [
+            200,
+            432
+          ],
+          "absolute_root": [
+            616,
+            432
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            832,
+            0,
+            1248,
+            476
+          ],
+          "origin": [
+            200,
+            444
+          ],
+          "absolute_root": [
+            1032,
+            444
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1248,
+            0,
+            1659,
+            476
+          ],
+          "origin": [
+            192,
+            444
+          ],
+          "absolute_root": [
+            1440,
+            444
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            476,
+            416,
+            948
+          ],
+          "origin": [
+            192,
+            420
+          ],
+          "absolute_root": [
+            192,
+            896
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            416,
+            476,
+            832,
+            948
+          ],
+          "origin": [
+            204,
+            424
+          ],
+          "absolute_root": [
+            620,
+            900
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            832,
+            476,
+            1248,
+            948
+          ],
+          "origin": [
+            200,
+            428
+          ],
+          "absolute_root": [
+            1032,
+            904
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1248,
+            476,
+            1659,
+            948
+          ],
+          "origin": [
+            188,
+            432
+          ],
+          "absolute_root": [
+            1436,
+            908
+          ]
+        }
+      ]
+    },
+    "walk_NW": {
+      "path": "source/walk_NW.png",
+      "x_edges": [
+        0,
+        416,
+        832,
+        1248,
+        1659
+      ],
+      "y_edges": [
+        0,
+        476,
+        948
+      ],
+      "source_scale": 1.0,
+      "timeline": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            416,
+            476
+          ],
+          "origin": [
+            216,
+            408
+          ],
+          "absolute_root": [
+            216,
+            408
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            416,
+            0,
+            832,
+            476
+          ],
+          "origin": [
+            208,
+            408
+          ],
+          "absolute_root": [
+            624,
+            408
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            832,
+            0,
+            1248,
+            476
+          ],
+          "origin": [
+            204,
+            412
+          ],
+          "absolute_root": [
+            1036,
+            412
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1248,
+            0,
+            1659,
+            476
+          ],
+          "origin": [
+            208,
+            412
+          ],
+          "absolute_root": [
+            1456,
+            412
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            476,
+            416,
+            948
+          ],
+          "origin": [
+            208,
+            400
+          ],
+          "absolute_root": [
+            208,
+            876
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            416,
+            476,
+            832,
+            948
+          ],
+          "origin": [
+            204,
+            400
+          ],
+          "absolute_root": [
+            620,
+            876
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            832,
+            476,
+            1248,
+            948
+          ],
+          "origin": [
+            200,
+            400
+          ],
+          "absolute_root": [
+            1032,
+            876
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1248,
+            476,
+            1659,
+            948
+          ],
+          "origin": [
+            208,
+            404
+          ],
+          "absolute_root": [
+            1456,
+            880
+          ]
+        }
+      ]
+    },
+    "walk_N": {
+      "path": "source/walk_N.png",
+      "x_edges": [
+        0,
+        416,
+        832,
+        1248,
+        1659
+      ],
+      "y_edges": [
+        0,
+        476,
+        948
+      ],
+      "source_scale": 1.0,
+      "timeline": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            416,
+            476
+          ],
+          "origin": [
+            204,
+            416
+          ],
+          "absolute_root": [
+            204,
+            416
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            416,
+            0,
+            832,
+            476
+          ],
+          "origin": [
+            200,
+            420
+          ],
+          "absolute_root": [
+            616,
+            420
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            832,
+            0,
+            1248,
+            476
+          ],
+          "origin": [
+            204,
+            428
+          ],
+          "absolute_root": [
+            1036,
+            428
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1248,
+            0,
+            1659,
+            476
+          ],
+          "origin": [
+            208,
+            424
+          ],
+          "absolute_root": [
+            1456,
+            424
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            476,
+            416,
+            948
+          ],
+          "origin": [
+            200,
+            420
+          ],
+          "absolute_root": [
+            200,
+            896
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            416,
+            476,
+            832,
+            948
+          ],
+          "origin": [
+            196,
+            420
+          ],
+          "absolute_root": [
+            612,
+            896
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            832,
+            476,
+            1248,
+            948
+          ],
+          "origin": [
+            204,
+            424
+          ],
+          "absolute_root": [
+            1036,
+            900
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1248,
+            476,
+            1659,
+            948
+          ],
+          "origin": [
+            204,
+            420
+          ],
+          "absolute_root": [
+            1452,
+            896
+          ]
+        }
+      ]
+    },
+    "walk_S_contact": {
+      "path": "source/walk_S_contact.png",
+      "x_edges": [
+        0,
+        416,
+        832,
+        1248,
+        1659
+      ],
+      "y_edges": [
+        0,
+        476,
+        948
+      ],
+      "source_scale": 0.98,
+      "cells": [
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            832,
+            0,
+            1248,
+            476
+          ],
+          "origin": [
+            208,
+            440
+          ],
+          "absolute_root": [
+            1040,
+            440
+          ]
+        }
+      ]
+    }
+  },
+  "timelines": {
+    "S": [
+      {
+        "sheet": "walk_S",
+        "row": 0,
+        "column": 2
+      },
+      {
+        "sheet": "walk_S",
+        "row": 0,
+        "column": 1
+      },
+      {
+        "sheet": "walk_S",
+        "row": 1,
+        "column": 3
+      },
+      {
+        "sheet": "walk_S_contact",
+        "row": 0,
+        "column": 2
+      },
+      {
+        "sheet": "walk_S",
+        "row": 0,
+        "column": 2
+      },
+      {
+        "sheet": "walk_S",
+        "row": 1,
+        "column": 1
+      },
+      {
+        "sheet": "walk_S",
+        "row": 0,
+        "column": 3
+      },
+      {
+        "sheet": "walk_S",
+        "row": 0,
+        "column": 0
+      }
+    ],
+    "SW": [
+      {
+        "sheet": "walk_SW",
+        "row": 0,
+        "column": 0
+      },
+      {
+        "sheet": "walk_SW",
+        "row": 0,
+        "column": 1
+      },
+      {
+        "sheet": "walk_SW",
+        "row": 0,
+        "column": 2
+      },
+      {
+        "sheet": "walk_SW",
+        "row": 0,
+        "column": 3
+      },
+      {
+        "sheet": "walk_SW",
+        "row": 1,
+        "column": 0
+      },
+      {
+        "sheet": "walk_SW",
+        "row": 1,
+        "column": 1
+      },
+      {
+        "sheet": "walk_SW",
+        "row": 1,
+        "column": 2
+      },
+      {
+        "sheet": "walk_SW",
+        "row": 1,
+        "column": 3
+      }
+    ],
+    "W": [
+      {
+        "sheet": "walk_W",
+        "row": 0,
+        "column": 0
+      },
+      {
+        "sheet": "walk_W",
+        "row": 0,
+        "column": 1
+      },
+      {
+        "sheet": "walk_W",
+        "row": 0,
+        "column": 2
+      },
+      {
+        "sheet": "walk_W",
+        "row": 0,
+        "column": 3
+      },
+      {
+        "sheet": "walk_W",
+        "row": 1,
+        "column": 0
+      },
+      {
+        "sheet": "walk_W",
+        "row": 1,
+        "column": 1
+      },
+      {
+        "sheet": "walk_W",
+        "row": 1,
+        "column": 2
+      },
+      {
+        "sheet": "walk_W",
+        "row": 1,
+        "column": 3
+      }
+    ],
+    "NW": [
+      {
+        "sheet": "walk_NW",
+        "row": 0,
+        "column": 0
+      },
+      {
+        "sheet": "walk_NW",
+        "row": 0,
+        "column": 1
+      },
+      {
+        "sheet": "walk_NW",
+        "row": 0,
+        "column": 2
+      },
+      {
+        "sheet": "walk_NW",
+        "row": 0,
+        "column": 3
+      },
+      {
+        "sheet": "walk_NW",
+        "row": 1,
+        "column": 0
+      },
+      {
+        "sheet": "walk_NW",
+        "row": 1,
+        "column": 1
+      },
+      {
+        "sheet": "walk_NW",
+        "row": 1,
+        "column": 2
+      },
+      {
+        "sheet": "walk_NW",
+        "row": 1,
+        "column": 3
+      }
+    ],
+    "N": [
+      {
+        "sheet": "walk_N",
+        "row": 0,
+        "column": 0
+      },
+      {
+        "sheet": "walk_N",
+        "row": 0,
+        "column": 1
+      },
+      {
+        "sheet": "walk_N",
+        "row": 0,
+        "column": 2
+      },
+      {
+        "sheet": "walk_N",
+        "row": 0,
+        "column": 3
+      },
+      {
+        "sheet": "walk_N",
+        "row": 1,
+        "column": 0
+      },
+      {
+        "sheet": "walk_N",
+        "row": 1,
+        "column": 1
+      },
+      {
+        "sheet": "walk_N",
+        "row": 1,
+        "column": 2
+      },
+      {
+        "sheet": "walk_N",
+        "row": 1,
+        "column": 3
+      }
+    ]
+  }
+}

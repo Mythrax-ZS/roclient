@@ -1,0 +1,127 @@
+"""Regression fixtures for placement, transparency and paired RO timelines."""
+import json
+import math
+from pathlib import Path
+import tempfile
+import unittest
+
+from PIL import Image
+
+from compile import compile_package, preview_layout, reflect_layer, sampled_cell, validate_package, weapon_layer
+from ro_formats import FormatError, read_act, read_spr, write_act, write_spr
+
+
+class CompilerTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def test_trimming_does_not_follow_advancing_foot(self):
+        first = Image.new("RGBA", (16, 20))
+        second = Image.new("RGBA", (16, 20))
+        # A torso point stays at source (8, 4); the contact foot advances.
+        for image, foot_x in ((first, 4), (second, 12)):
+            image.putpixel((8, 4), (220, 10, 20, 128))
+            image.putpixel((foot_x, 17), (200, 30, 50, 255))
+        for image in (first, second):
+            packed, x, y, info = sampled_cell(image, (0, 0, 16, 20), (8, 18), 1)
+            points = [(px, py) for py in range(packed.height) for px in range(packed.width)
+                      if packed.getpixel((px, py))[3] == 128]
+            px, py = points[0]
+            self.assertEqual((px + x - packed.width // 2, py + y - packed.height // 2), (0, -14))
+            self.assertEqual(info["sampled_origin"], [8, 18])
+
+    def test_fixed_sampling_phase_preserves_partial_alpha(self):
+        image = Image.new("RGBA", (8, 8))
+        image.putpixel((3, 3), (200, 100, 50, 97))
+        packed, x, y, _ = sampled_cell(image, (0, 0, 8, 8), (4, 8), 2)
+        self.assertIn(bytes((200, 100, 50, 97)), [packed.tobytes()[i:i+4] for i in range(0, len(packed.tobytes()), 4)])
+        self.assertEqual((x, y), (0, -2))
+        calibrated, cx, cy, _ = sampled_cell(image, (0, 0, 8, 8), (4, 8), 1, source_scale=0.5)
+        self.assertEqual((calibrated.size, calibrated.tobytes(), cx, cy), (packed.size, packed.tobytes(), x, y))
+
+    def test_weapon_reflection_preserves_authored_grip(self):
+        grip, source_grip, size = (-6, -28), (3, 4), (70, 12)
+        layer = weapon_layer(dict(grip=grip, rotation=35, scale=[0.6, 0.8]), size, source_grip)
+        reflected = reflect_layer(layer)
+        def position(layer):
+            x = (source_grip[0] - size[0] / 2) * layer["scale_x"]
+            y = (source_grip[1] - size[1] / 2) * layer["scale_y"]
+            if layer["mirror"]:
+                x = -x
+            angle = math.radians(layer["rotation"])
+            return (layer["x"] + x * math.cos(angle) - y * math.sin(angle),
+                    layer["y"] + x * math.sin(angle) + y * math.cos(angle))
+        original, mirrored = position(layer), position(reflected)
+        self.assertAlmostEqual(mirrored[0], -original[0])
+        self.assertAlmostEqual(mirrored[1], original[1])
+        self.assertLess(abs(original[0] - grip[0]), 0.51)
+        self.assertLess(abs(original[1] - grip[1]), 0.51)
+
+    def test_preview_includes_overhead_weapon_tip(self):
+        image = Image.new("RGBA", (70, 8), (200, 200, 200, 255))
+        layer = dict(sprite_index=0, x=0, y=-110, rotation=270)
+        layout = preview_layout({"weapon": ([image], [dict(frames=[dict(layers=[layer])])])})
+        self.assertGreaterEqual(layout["origin_y"], 169)
+        self.assertGreaterEqual(layout["cell_height"], layout["origin_y"] + 20)
+
+    def config(self):
+        source = Image.new("RGBA", (16, 40))
+        for row in range(5):
+            for column in range(2):
+                source.putpixel((column * 8 + 2, row * 8 + 2), (20 + row, 100, 200, 97))
+                source.putpixel((column * 8 + 4, row * 8 + 6), (20, 30 + column, 80, 255))
+        source.save(self.root / "body.png")
+        write_spr(self.root / "weapon.spr", [dict(width=2, height=2, sprite_type=1, pixels=b"\x01\x02\x03\x80" * 4)])
+        groups = [dict(index=group, sheet="all", columns=[0, 1] if group in (1, 5) else [0], interval_ms=100, loop=True)
+                  for group in range(13)]
+        groups[5]["weapon_poses"] = {direction: [dict(grip=[-2, -4], rotation=20), None]
+                                     for direction in ("S", "SW", "W", "NW", "N")}
+        return dict(schema_version=1, downsample=1,
+                    mirror_directions={"NE": "NW", "E": "W", "SE": "SW"},
+                    sheets={"all": dict(path="body.png", cell_size=[8, 8], rows=["S", "SW", "W", "NW", "N"], origin=[4, 7])},
+                    weapon=dict(spr="weapon.spr", source_grip=[1, 1]), groups=groups)
+
+    def test_full_roundtrip_alpha_origins_and_paired_weapon(self):
+        config = self.config()
+        path = self.root / "build.json"
+        path.write_text(json.dumps(config))
+        output = self.root / "compiled"
+        report = compile_package(path, output)
+        self.assertTrue(report["paired_timelines"])
+        self.assertEqual(report["body"]["actions"], 104)
+        self.assertEqual(report["body"]["frames"], 120)
+        body = read_spr(output / "ember_ronin.spr")
+        self.assertEqual(body["indexed_count"], 0)
+        self.assertIn(97, body["images"][0]["pixels"][3::4])
+        preview = Image.open(output / "body/0000.png").convert("RGBA")
+        self.assertEqual(preview.tobytes(), body["images"][0]["pixels"])
+        ba, wa = (read_act(output / f"{name}.act")["actions"] for name in ("ember_ronin", "katana"))
+        self.assertEqual(ba[6]["frames"][0]["layers"][0]["x"], -ba[2]["frames"][0]["layers"][0]["x"])
+        self.assertTrue(ba[6]["frames"][0]["layers"][0]["mirror"])
+        self.assertTrue(wa[40]["frames"][0]["layers"])
+        self.assertFalse(wa[40]["frames"][1]["layers"])
+        self.assertEqual(len(list(output.glob("contact_*.png"))), 13)
+        self.assertTrue((output / "preview.html").is_file())
+        before = (output / "ember_ronin.spr").read_bytes(), (output / "ember_ronin.act").read_bytes()
+        compile_package(path, output)
+        self.assertEqual(before, ((output / "ember_ronin.spr").read_bytes(), (output / "ember_ronin.act").read_bytes()))
+        wa[8]["interval"] *= 2
+        write_act(output / "katana.act", wa)
+        with self.assertRaisesRegex(FormatError, "timeline mismatch"):
+            validate_package(output, "ember_ronin", "katana")
+
+    def test_empty_cells_and_missing_groups_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Empty source cell"):
+            sampled_cell(Image.new("RGBA", (8, 8)), [0, 0, 8, 8], [4, 7], 1)
+        config = self.config()
+        config["groups"].pop()
+        path = self.root / "build.json"
+        path.write_text(json.dumps(config))
+        with self.assertRaisesRegex(ValueError, "each group"):
+            compile_package(path, self.root / "compiled")
+
+
+if __name__ == "__main__":
+    unittest.main()

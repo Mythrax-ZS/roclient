@@ -1,0 +1,8 @@
+{
+  "mode": "built-in image_gen",
+  "original_file": "C:\\Users\\Mythrax\\.codex\\generated_images\\01a1878d-6558-7953-bf4f-583dfe01146f\\exec-2fcc43ed-8c67-4514-8984-4b0cb83d3cf4.png",
+  "selected_file": "source/attack/attack_NW.png",
+  "prompt_file": "source/attack/attack_NW.prompt.json",
+  "additional_prompt_file": "source/attack/attack_NW.alpha_requirement.json",
+  "visual_review": "Selected: same Samurai design, six chronological blade-free grip poses, input facing retained with natural torso twist. Background RGB is hidden by alpha; checked before compilation."
+}

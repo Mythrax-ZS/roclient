@@ -619,6 +619,16 @@ enum Pose {
     Cast,
 }
 
+/// Keep one clock for the action actually drawn. Movement can temporarily override a
+/// timed pose, so its fitted attack rate must not accelerate the walking frames.
+fn animation_time(previous_action: usize, action: (usize, bool), time_ms: f32, dt: f32, pose_rate: f32) -> f32 {
+    if previous_action != action.0 {
+        0.0
+    } else {
+        time_ms + dt * if action.1 { pose_rate } else { 1.0 }
+    }
+}
+
 impl Mob {
     fn new(actor: ro_render::Actor, cell: (u16, u16), dir: usize, speed: i16) -> Self {
         let speed = if speed > 0 { speed as f32 } else { 150.0 };
@@ -675,7 +685,9 @@ impl Mob {
         self.pose = Some((pose, ms.max(200.0)));
         self.pose_len = ms.max(200.0);
         self.anim_rate = 1.0;
-        self.actor.time_ms = 0.0;
+        if !self.walker.is_walking() || pose == Pose::Dead {
+            self.actor.time_ms = 0.0;
+        }
     }
 
     /// Turns to face a cell.
@@ -718,7 +730,6 @@ impl Mob {
     /// Advances movement and returns the actor to draw. `idle_action` is the pose when
     /// standing; facing is drawn relative to the camera's rotation (`octant`).
     fn update(&mut self, dt: f32, world: &World, octant: i32, idle_action: usize) -> ro_render::Actor {
-        let was_walking = self.walker.is_walking();
         let (wx, wy) = self.walker.update(dt);
         // Ease the drawn position toward the logical one (exponential smoothing, ~50 ms), so
         // corrections and re-aimed walks glide; big jumps (warps, knockback) snap.
@@ -731,9 +742,6 @@ impl Mob {
         };
         self.smooth = Some((fx, fy));
         let walking = self.walker.is_walking();
-        if walking != was_walking {
-            self.actor.time_ms = 0.0; // restart the animation on start/stop
-        }
         let (x, z) = ((fx + 0.5) * ro_render::CELL, (fy + 0.5) * ro_render::CELL);
         // Stand on the GAT surface: it includes stairs, bridges and other walkable models
         // that sit above the GND ground.
@@ -747,7 +755,6 @@ impl Mob {
             *left -= dt;
             if *left <= 0.0 && self.pose.is_some_and(|(p, _)| p != Pose::Dead) {
                 self.pose = None;
-                self.actor.time_ms = 0.0;
             }
         }
         if let Some(left) = self.dying.as_mut() {
@@ -760,11 +767,12 @@ impl Mob {
             _ if self.sitting => (2, false),
             _ => (idle_action, false),
         };
+        // A newly queued walk already reports is_walking() before this update. Compare
+        // rendered actions to catch its start, and retain the phase across cells/turns.
+        self.actor.time_ms = animation_time(self.actor.action, (action, once), self.actor.time_ms, dt, self.anim_rate);
         self.actor.action = action;
         self.actor.once = once;
         self.actor.dir = DIRS[(self.walker.dir as i32 + octant).rem_euclid(8) as usize];
-        // Timed poses play fast enough to finish in the server's time (attack speed).
-        self.actor.time_ms += if self.pose.is_some() { dt * self.anim_rate } else { dt };
         self.actor.clone()
     }
 }
@@ -6885,6 +6893,71 @@ fn attack_group(r: &ro_render::Renderer, a: &ro_render::Actor) -> usize {
     match a.weapon.first() {
         Some(&w) if !r.action_visible(w, 10) && r.action_visible(w, 11) => 11,
         _ => 10,
+    }
+}
+
+#[cfg(test)]
+mod animation_tests {
+    use super::animation_time;
+    use ro_game::Walker;
+
+    /// Drive the same clock with actual path state; no renderer or game window needed.
+    fn step(walker: &mut Walker, clock: &mut (usize, f32), dt: f32, pose_rate: f32) {
+        walker.update(dt);
+        let action = if walker.is_walking() { 1 } else { 0 };
+        clock.1 = animation_time(clock.0, (action, false), clock.1, dt, pose_rate);
+        clock.0 = action;
+    }
+
+    #[test]
+    fn walk_starts_at_frame_zero_after_idle_and_stops_at_frame_zero() {
+        let mut walker = Walker::new((0, 0), 0, 150.0);
+        let mut clock = (0, 4250.0);
+        walker.walk(vec![(1, 0)]);
+        // The walk was queued before the update, so is_walking() is already true.
+        assert!(walker.is_walking());
+        step(&mut walker, &mut clock, 16.0, 1.0);
+        assert_eq!(clock, (1, 0.0));
+        step(&mut walker, &mut clock, 84.0, 1.0);
+        assert_eq!(clock, (1, 84.0));
+        step(&mut walker, &mut clock, 50.0, 1.0);
+        assert_eq!(clock, (0, 0.0));
+    }
+
+    #[test]
+    fn walk_phase_survives_cells_turns_and_path_continuations() {
+        let mut walker = Walker::new((0, 0), 6, 100.0);
+        let mut clock = (0, 3000.0);
+        walker.walk(vec![(1, 0), (2, 0), (2, 1), (2, 2)]);
+        step(&mut walker, &mut clock, 10.0, 1.0);
+        step(&mut walker, &mut clock, 90.0, 1.0);
+        assert_eq!(walker.cell, (1, 0));
+        assert_eq!(clock, (1, 90.0));
+        assert!(walker.redirect((1, 0), vec![(2, 0), (2, 1), (2, 2)]));
+        step(&mut walker, &mut clock, 100.0, 1.0);
+        assert_eq!(walker.cell, (2, 0));
+        assert_eq!(walker.dir, 4);
+        assert_eq!(clock, (1, 190.0));
+        step(&mut walker, &mut clock, 50.0, 1.0);
+        assert_eq!(clock, (1, 240.0));
+    }
+
+    #[test]
+    fn movement_uses_authored_timing_when_it_interrupts_a_fast_pose() {
+        let mut walker = Walker::new((0, 0), 6, 150.0);
+        let mut clock = (10, animation_time(10, (10, true), 25.0, 20.0, 4.0));
+        assert_eq!(clock.1, 105.0); // Timed attack still uses its fitted rate.
+        walker.walk(vec![(1, 0), (2, 0), (3, 0)]);
+        step(&mut walker, &mut clock, 10.0, 4.0);
+        assert_eq!(clock, (1, 0.0));
+        step(&mut walker, &mut clock, 50.0, 4.0);
+        assert_eq!(clock, (1, 50.0));
+        walker.speed = 75.0;
+        step(&mut walker, &mut clock, 50.0, 4.0);
+        assert_eq!(clock, (1, 100.0));
+        // Expiring the interrupted pose must not reset a walk already in progress.
+        step(&mut walker, &mut clock, 50.0, 1.0);
+        assert_eq!(clock, (1, 150.0));
     }
 }
 

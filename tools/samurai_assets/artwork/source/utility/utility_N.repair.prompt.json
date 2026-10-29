@@ -1,0 +1,8 @@
+{
+  "mode": "built-in image_gen",
+  "intent": "edit",
+  "use_case": "precise-object-edit",
+  "reference": "source/utility/utility_N.png",
+  "transparent_background": true,
+  "prompt": "Use case: precise-object-edit. Edit this eight-pose NORTH/back-view Samurai utility sprite sheet. Change ONLY the arms and hands of the bottom-left pose (row2 column1, spell-cast windup). Its hands are wrongly clasped BEHIND its back. Correct them to be clasped IN FRONT of its abdomen, so they are occluded by the back-facing torso and cannot be seen on the rear red sash. Show only restrained bent elbows at the sides. Preserve the entire rest of this exact sheet unchanged: same pixel positions, pose scale, hair, armor, coat, feet, colors, background alpha, other7poses, canvas dimensions. Do not turn the character around. All surrounding pixels genuinely transparent with no halo or background. No weapon, text, effects, or shadows."
+}

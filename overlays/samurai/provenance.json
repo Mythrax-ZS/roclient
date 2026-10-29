@@ -2,20 +2,39 @@
   "schema_version": 1,
   "job_name": "Samurai",
   "appearance_working_name": "Ember Ronin",
-  "source_package": "rathena/generated/custom_jobs/ember_ronin",
-  "origin": "Generated earlier for this project using the built-in image-generation tool and a user-provided character reference.",
-  "license": "No separate artwork license supplied; no rights to the reference image are inferred or granted.",
-  "generation_prompts": "Original package source/*.json",
-  "runtime_changes": "None; copied byte-for-byte from the validated source package.",
+  "revision": "RO style and walk revision, 2026-10-29",
+  "source_package": "tools/samurai_assets/artwork",
+  "origin": "Generated for this project with the built-in image-generation tool. Local stock RO sprites were anatomy and motion references; extracted stock sprites are not included.",
+  "generation_prompts": [
+    "tools/samurai_assets/artwork/prompts_root.json",
+    "tools/samurai_assets/artwork/source/utility/*.prompt.json",
+    "tools/samurai_assets/artwork/source/attack/*.prompt.json"
+  ],
+  "runtime_changes": "Compiled from selected RGBA sources with one uniform calibration per sheet, nearest-neighbor sampling, authored frame origins and weapon grips, and ACT direction mirrors.",
   "head_included": true,
   "hair_included": true,
   "weapon_included_in_body": false,
   "sex": "male",
-  "art_status": "First-pass artwork; direction consistency, weapon grips and overlap need further visual polish.",
+  "art_status": "Revised and visually reviewed in decoded contacts and offline client captures. Three attack groups share one six-frame swing. The supplemental south contact has a slightly narrower torso. Female and separate head/headgear art are not supplied.",
+  "build_config_sha256": "17bd8f19101ecd3323d44762fd319e51ca0824c58a5b57f2bfacea712752f462",
+  "body_images": 119,
+  "actions": 104,
+  "timeline_frames": 304,
+  "body_atlas_size": [
+    1024,
+    1009
+  ],
+  "validation": {
+    "compiler_tests_passed": 15,
+    "client_game_tests_passed": 25,
+    "release_build": "passed",
+    "rebuild_matches_installed_bytes": true,
+    "offline_captures": "All eight walk directions, additional south phase, idle, north ready, south/north attack, east cast and southwest fall, on Prontera. No live account login."
+  },
   "sha256": {
-    "data/sprite/custom/samurai/ember_ronin.spr": "465450265df2f3d585eca59e6a4ab7ebec98a8f0e482880a4df9eb4e69ff21e6",
-    "data/sprite/custom/samurai/ember_ronin.act": "31bba79f8f25a8beaa209f990eec4796e21270de0aabd2072dcc76726f87a798",
-    "data/sprite/custom/samurai/katana.spr": "08c3791ed8bf113f24f8b246090577c4d5df644383d1b69e3fd813786592d341",
-    "data/sprite/custom/samurai/katana.act": "e5d1dd529b1fadb6deb59010e2adb4644b6a97ebda753e0e0ec924b7f11c50e1"
+    "data/sprite/custom/samurai/ember_ronin.spr": "f283c7a11dc532ed181c654e446e4d664f707ea48c91e8e452c0afe6bd190bc5",
+    "data/sprite/custom/samurai/ember_ronin.act": "64705c5053df96cb1a33b6ebc755bd2d98fac0dd53894c07610966f65f6647a8",
+    "data/sprite/custom/samurai/katana.spr": "8da58ff622ca399b46725d95ea9d2032a7252b55bb3a90755a8152c370919813",
+    "data/sprite/custom/samurai/katana.act": "12a0f26c2ac3c4876ac19c83d02b5262b1584a1d49944dfe206c698a50122fe9"
   }
 }
