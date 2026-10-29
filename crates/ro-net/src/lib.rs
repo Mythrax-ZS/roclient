@@ -529,6 +529,12 @@ pub enum Event {
     MsgId(u16),
     /// A mercenary stat changed: (status id, value).
     MercParam(u16, i32),
+    /// ZC_HO_PAR_CHANGE2: one homunculus stat (SP_* type).
+    HomunParam(u16, i64),
+    /// ZC_HOSKILLINFO_UPDATE: one homunculus skill changed.
+    HomunSkill { id: u16, level: u16, sp: u16, range: u16, upgradable: bool },
+    /// ZC_SUMMON_HP_INIT / UPDATE: our summon's HP (max only on init).
+    SummonHp { id: u32, hp: u32, max: Option<u32> },
     /// Every achievement with its progress.
     Achievements { rank: AchRank, list: Vec<Achievement> },
     /// One achievement changed.
@@ -1129,6 +1135,16 @@ impl MapSession {
                         0x0235 | 0x029d => Some(Event::CompanionSkills { merc: opcode == 0x029d, skills: parse_companion_skills(opcode, &data) }),
                         0x0291 if data.len() >= 4 => Some(Event::MsgId(u16::from_le_bytes([data[2], data[3]]))),
                         0x029b => parse_merc(&data).map(Event::Merc),
+                        0x0ba5 if data.len() >= 12 => Some(Event::HomunParam(u16::from_le_bytes([data[2], data[3]]), i64::from_le_bytes(data[4..12].try_into().unwrap()))),
+                        0x0239 if data.len() >= 11 => {
+                            let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
+                            Some(Event::HomunSkill { id: w(2), level: w(4), sp: w(6), range: w(8), upgradable: data[10] != 0 })
+                        }
+                        0x0b6b if data.len() >= 14 => {
+                            let l = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                            Some(Event::SummonHp { id: l(2), hp: l(6), max: Some(l(10)) })
+                        }
+                        0x0b6c if data.len() >= 12 => Some(Event::SummonHp { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), hp: u32::from_le_bytes([data[8], data[9], data[10], data[11]]), max: None }),
                         0x02a2 => parse_merc_param(&data).map(|(k, v)| Event::MercParam(k, v)),
                         0x0a23 => parse_achievements(&data).map(|(rank, list)| Event::Achievements { rank, list }),
                         0x0a24 => parse_achievement_update(&data).map(|(rank, ach)| Event::AchievementUpdate { rank, ach }),

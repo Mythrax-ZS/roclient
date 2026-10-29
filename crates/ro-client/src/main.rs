@@ -1795,6 +1795,33 @@ impl App {
                 Some(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
                 None => tracing::debug!(id, "server message"),
             },
+            HomunParam(k, v) => {
+                if let Some(h) = self.companions.homun.as_mut() {
+                    let u = v.clamp(0, u32::MAX as i64) as u32;
+                    match k {
+                        1 => h.exp = v,
+                        5 => h.hp = u,
+                        6 => h.max_hp = u,
+                        7 => h.sp = u,
+                        8 => h.max_sp = u,
+                        _ => {}
+                    }
+                }
+            }
+            HomunSkill { id, level, sp, range, upgradable } => {
+                if let Some(s) = self.companions.homun_skills.iter_mut().find(|s| s.id == id) {
+                    s.level = level;
+                    s.sp = sp;
+                    s.range = range;
+                    s.upgradable = upgradable;
+                }
+            }
+            SummonHp { id, hp, max } => {
+                if let Some(m) = self.units.get_mut(&id) {
+                    let max = max.map(|x| x as i32).or(m.hp.map(|h| h.1)).unwrap_or(hp as i32);
+                    m.hp = Some((hp as i32, max));
+                }
+            }
             MercParam(k, v) => {
                 if let Some(m) = self.companions.merc.as_mut() {
                     match k {
