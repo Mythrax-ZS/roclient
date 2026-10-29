@@ -78,6 +78,8 @@ pub enum Shape {
     /// A camera-facing patch of motes (effect\pok1.bmp) drifting along `drift` and slowly
     /// turning, `size` cells across (map fireflies).
     Motes { drift: Vec3, size: f32 },
+    /// A flat rectangle on the ground, `size` cells across (skill areas being cast).
+    Area { size: (f32, f32) },
 }
 
 /// A playing code-drawn effect.
@@ -194,6 +196,12 @@ impl ProcFx {
                 let corner = |x: f32, z: f32| self.pos + Vec3::new(x * c - z * s, 0.15, x * s + z * c);
                 let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color };
                 let (a, b, cc, d) = (v(corner(-r, -r), 0.0, 0.0), v(corner(r, -r), 1.0, 0.0), v(corner(r, r), 1.0, 1.0), v(corner(-r, r), 0.0, 1.0));
+                out.extend([a, b, cc, a, cc, d]);
+            }
+            Shape::Area { size } => {
+                let (hx, hz) = (size.0 * CELL / 2.0, size.1 * CELL / 2.0);
+                let v = |x: f32, z: f32, u: f32, vv: f32| Vertex { pos: (self.pos + Vec3::new(x, 0.2, z)).into(), uv: [u, vv], color };
+                let (a, b, cc, d) = (v(-hx, -hz, 0.0, 0.0), v(hx, -hz, 1.0, 0.0), v(hx, hz, 1.0, 1.0), v(-hx, hz, 0.0, 1.0));
                 out.extend([a, b, cc, a, cc, d]);
             }
         }

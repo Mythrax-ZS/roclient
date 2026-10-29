@@ -334,6 +334,8 @@ pub enum Event {
     /// ZC_PET_EVOLUTION_RESULT: 6 success; 1 no pet out, 2 not a pet egg, 4 missing
     /// materials, 5 equipped with an accessory, else failed.
     PetEvolved(u32),
+    /// ZC_SKILL_SCALE: a monster casting an area skill; the area shows until the cast ends.
+    SkillScale { id: u32, skill: u16, level: u16, x: u16, y: u16, cast_ms: u32 },
     /// ZC_MEMORIALDUNGEON_*: instance creation queue, status and notices.
     Instance(InstanceNote),
     /// ZC_NOTIFY_EXP2 (`@showexp`): experience gained; kind 1 base, 2 job; negative = lost.
@@ -1449,6 +1451,10 @@ impl MapSession {
                         // ZC_FASTMOVE: Snap / Fallen Angel / All in the Sky put a unit on a cell at once.
                         0x08d2 if data.len() >= 10 => Some(Event::Stop { id: l(&data, 2), x: u16::from_le_bytes([data[6], data[7]]), y: u16::from_le_bytes([data[8], data[9]]) }),
                         0x09fc if data.len() >= 6 => Some(Event::PetEvolved(l(&data, 2))),
+                        0x0a41 if data.len() >= 18 => {
+                            let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
+                            Some(Event::SkillScale { id: l(&data, 2), skill: w(6), level: w(8), x: w(10), y: w(12), cast_ms: l(&data, 14) })
+                        }
                         0x0a78 if data.len() >= 15 => {
                             let f = |i: usize| f32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
                             Some(Event::Camera { show: data[2] == 1, range: f(3), rotation: f(7), latitude: f(11) })

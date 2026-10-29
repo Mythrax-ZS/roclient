@@ -10,6 +10,7 @@ mod memorial;
 mod roulette;
 mod sale;
 mod petevo;
+mod skillscale;
 mod sense;
 mod pettalk;
 mod fx;
@@ -905,6 +906,9 @@ struct App {
     /// Pet, homunculus and mercenary.
     companions: companions::Companions,
     pet_evo: petevo::PetEvolution,
+    skill_scales: skillscale::SkillScales,
+    /// The skill-area texture, made on first use.
+    area_tex: Option<ro_render::TexId>,
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
@@ -2883,6 +2887,15 @@ impl App {
                 }
             }
             StarPlaceAsk(which) => self.windows.star_ask = Some(which),
+            // The area a monster's big spell will cover, on the ground for the cast (at least a
+            // moment, so an instant cast still flashes it).
+            SkillScale { skill, level, x, y, cast_ms, .. } => {
+                if let (Some(size), Some(pos), Some(r)) = (self.skill_scales.size(skill, level), self.cell_pos((x, y)), self.renderer.as_mut()) {
+                    let tex = *self.area_tex.get_or_insert_with(|| r.add_effect_texture(&skillscale::area_texture()));
+                    let shape = ro_render::Shape::Area { size };
+                    r.procs.push(ro_render::ProcFx { tex, shape, pos, color: [1.0, 0.18, 0.12], time_ms: 0.0, duration_ms: cast_ms.max(800) as f32 });
+                }
+            }
             PetEvolved(result) => {
                 // msgstringtable 2571..2576 explain the failures.
                 let text = match result {
@@ -6541,6 +6554,8 @@ fn main() -> anyhow::Result<()> {
         progress: Default::default(),
         companions: Default::default(),
         pet_evo: Default::default(),
+        skill_scales: Default::default(),
+        area_tex: None,
         mailbox: Default::default(),
         clan: Default::default(),
         merge: Default::default(),
@@ -6676,6 +6691,7 @@ fn main() -> anyhow::Result<()> {
         app.quests = quests::QuestLog::load(vfs);
         app.progress = progress::Progress::load(vfs);
         app.pet_evo = petevo::PetEvolution::load(vfs);
+        app.skill_scales = skillscale::SkillScales::load(vfs);
         msgstr::load(vfs);
         app.item_info = iteminfo::ItemInfo::load(vfs);
         match read(r"System\iteminfo.lub").map(|d| ro_game::items::ItemDb::from_lub(&d)) {
