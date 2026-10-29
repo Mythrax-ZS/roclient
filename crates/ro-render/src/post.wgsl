@@ -144,17 +144,21 @@ fn shaft_density(pos: vec3<f32>, t: f32) -> f32 {
     return smoothstep(0.66, 0.86, a * 0.65 + b * 0.35) * (0.3 + 1.1 * pulse * pulse);
 }
 
-// In-scattered shaft light along the view ray: march back from the visible surface
-// toward the eye through the lowest stretch of water.
-fn shafts(eye: vec3<f32>, dir: vec3<f32>, dist: f32, t: f32) -> f32 {
-    let span = min(dist, 160.0);
+// In-scattered shaft light along the view ray, through a fixed band of water in front of
+// the player's floor (from `near` to `near + 200`), cut short only by nearer geometry. What
+// lies deeper (chasm walls at any depth) doesn't change it, so it stays seamless.
+fn shafts(eye: vec3<f32>, dir: vec3<f32>, near: f32, dist: f32, t: f32) -> f32 {
+    let far = min(dist, near + 200.0);
+    if far <= near {
+        return 0.0;
+    }
     let steps = 16;
     var sum = 0.0;
     for (var i = 0; i < steps; i++) {
-        let s = eye + dir * (dist - span * (f32(i) + 0.5) / f32(steps));
+        let s = eye + dir * (near + (far - near) * (f32(i) + 0.5) / f32(steps));
         sum += shaft_density(s, t);
     }
-    return sum / f32(steps);
+    return sum / f32(steps) * (far - near) / 200.0;
 }
 
 // Marine snow: motes fixed in the water and sinking slowly. Three shells at different
@@ -197,8 +201,9 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
     let ndc = vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.5, 1.0);
     let far = p.inv_vp * ndc;
     let dir = normalize(far.xyz / far.w - p.eye.xyz);
-    // The void around rooms has no real distance: treat it as a little past the player.
-    let ray_len = select(depth, p.depth.x * 1.6, depth > 50000.0);
+    // The void around rooms and chasms has no real distance: it, and anything deeper than
+    // the water lets you see, is the same far murk, so the two blend without seams.
+    let ray_len = min(depth, p.depth.x * 3.0);
     if uw > 0.0 && depth < 50000.0 && inf.y < 0.5 {
         // Caustics dance over the floor and walls (not sprites): rebuild the world point
         // from the linear depth and light it by a pattern fixed to the world.
@@ -224,12 +229,20 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
     if uw > 0.0 {
         // Water swallows red first, then green, with distance; what's lost is replaced by
         // the deep blue-green the water scatters (Beer-Lambert per channel).
-        let d = select(depth, p.depth.x * 3.0, depth > 50000.0);
+        let d = ray_len;
         let transmit = exp(-vec3(0.0034, 0.0012, 0.0009) * d * uw);
         let deep = vec3(0.008, 0.045, 0.065);
         c = c * transmit + deep * (1.0 - transmit);
+        // The abyss: whatever lies well below the floor the player stands on (chasms, and the
+        // void around the map) sinks into the deep colour, so drop-offs read as depth rather
+        // than showing their stepped tile walls.
+        let cfar = p.inv_vp * vec4(0.0, 0.0, 0.5, 1.0);
+        let floor_y = p.eye.y + normalize(cfar.xyz / cfar.w - p.eye.xyz).y * p.depth.x;
+        let below = floor_y - (p.eye.y + dir.y * ray_len);
+        let abyss = select(1.0 - exp(-max(below, 0.0) * 0.02), 1.0, depth > 50000.0);
+        c = mix(c, deep * 0.8, abyss * 0.97 * uw);
         let light = vec3(0.30, 0.62, 0.70);
-        c += light * shafts(p.eye.xyz, dir, ray_len, secs) * 0.35 * uw;
+        c += light * shafts(p.eye.xyz, dir, p.depth.x * 0.6, ray_len, secs) * 0.45 * uw;
         c += vec3(0.55, 0.75, 0.8) * marine_snow(p.eye.xyz, dir, ray_len, secs) * 0.16 * uw;
     }
 
