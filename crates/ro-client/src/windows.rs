@@ -707,37 +707,63 @@ impl Windows {
                     let total_rows = shown.len().div_ceil(COLS).max(rows);
                     let (area, area_resp) = ui.allocate_exact_size(Vec2::new(20.0 + COLS as f32 * 32.0 + 16.0, rows as f32 * 32.0), egui::Sense::hover());
                     let p = ui.painter().clone();
-                    let strip = match tab {
-                        InvTab::Items => "tab_itm_01",
-                        InvTab::Equip => "tab_itm_02",
-                        InvTab::Etc => "tab_itm_03",
-                        InvTab::Fav => "tab_itm_01",
+                    // The art has three tabs (20x82); a fourth "fav" tab is stitched from
+                    // slices of the same images: tab borders, plain body rows and the end cap.
+                    let strip_rect = egui::Rect::from_min_size(area.min, Vec2::new(20.0, 109.0));
+                    let blit = |name: &str, src: (f32, f32), dst: (f32, f32)| {
+                        if let Some(t) = skin.texture(name) {
+                            let h = t.size_vec2().y;
+                            let uv = egui::Rect::from_min_max(egui::pos2(0.0, src.0 / h), egui::pos2(1.0, src.1 / h));
+                            let r = egui::Rect::from_min_max(strip_rect.min + Vec2::new(0.0, dst.0), strip_rect.min + Vec2::new(20.0, dst.1));
+                            p.image(t.id(), r, uv, Color32::WHITE);
+                        }
                     };
-                    let strip_rect = egui::Rect::from_min_size(area.min, Vec2::new(20.0, 82.0));
-                    skin.draw(&p, strip, strip_rect.min);
-                    // The art has three tabs; "fav" is drawn below them in the same style.
-                    let fav_rect = egui::Rect::from_min_size(strip_rect.left_bottom(), Vec2::new(20.0, 30.0));
-                    let on = tab == InvTab::Fav;
-                    if on {
-                        // Dim the strip's "item" tab so none of the three looks selected.
-                        p.rect_filled(egui::Rect::from_min_size(strip_rect.min, Vec2::new(20.0, 27.0)), 0.0, Color32::from_rgba_unmultiplied(214, 218, 230, 170));
+                    // Plain body rows repeat every 4 pixels (the dotted left edge).
+                    let body = |name: &str, src: f32, dst: (f32, f32)| {
+                        let mut y = dst.0;
+                        while y < dst.1 {
+                            let n = (dst.1 - y).min(4.0);
+                            blit(name, (src, src + n), (y, y + n));
+                            y += n;
+                        }
+                    };
+                    let fav = tab == InvTab::Fav;
+                    match tab {
+                        InvTab::Items => blit("tab_itm_01", (0.0, 75.0), (0.0, 75.0)),
+                        InvTab::Equip => blit("tab_itm_02", (0.0, 75.0), (0.0, 75.0)),
+                        InvTab::Etc => blit("tab_itm_03", (0.0, 75.0), (0.0, 75.0)),
+                        InvTab::Fav => {
+                            // All three unselected: item from the equip art, the rest from the item art.
+                            blit("tab_itm_02", (0.0, 22.0), (0.0, 22.0));
+                            blit("tab_itm_01", (48.0, 53.0), (22.0, 27.0));
+                            blit("tab_itm_01", (27.0, 75.0), (27.0, 75.0));
+                        }
                     }
-                    p.rect_filled(fav_rect.shrink2(Vec2::new(1.0, 0.0)), 2.0, if on { Color32::WHITE } else { Color32::from_rgb(226, 230, 242) });
-                    p.rect_stroke(fav_rect.shrink2(Vec2::new(1.0, 0.0)), 2.0, egui::Stroke::new(1.0, Color32::from_rgb(170, 176, 196)), egui::StrokeKind::Inside);
-                    let galley = p.layout_no_wrap("fav".into(), egui::FontId::proportional(11.0), if on { Color32::BLACK } else { Color32::from_rgb(110, 110, 120) });
-                    // Reads bottom-to-top like the art's labels.
-                    let at = egui::pos2(fav_rect.center().x - galley.size().y / 2.0, fav_rect.center().y + galley.size().x / 2.0);
-                    p.add(egui::epaint::TextShape::new(at, galley, Color32::BLACK).with_angle(-std::f32::consts::FRAC_PI_2));
-                    if ui.interact(fav_rect, ui.scope_id().with("inv_fav_tab"), egui::Sense::click()).clicked() {
-                        tab = InvTab::Fav;
-                        scroll = 0;
+                    // Border between etc and fav, then the fav body and the end cap.
+                    match tab {
+                        InvTab::Etc => blit("tab_itm_01", (22.0, 27.0), (75.0, 80.0)),
+                        InvTab::Fav => blit("tab_itm_03", (48.0, 53.0), (75.0, 80.0)),
+                        _ => blit("tab_itm_01", (48.0, 53.0), (75.0, 80.0)),
                     }
+                    if fav {
+                        body("tab_itm_03", 54.0, (80.0, 102.0));
+                        blit("tab_itm_03", (75.0, 82.0), (102.0, 109.0));
+                    } else {
+                        body("tab_itm_01", 54.0, (80.0, 102.0));
+                        blit("tab_itm_01", (75.0, 82.0), (102.0, 109.0));
+                    }
+                    // The label, rotated to read bottom-to-top like the art's.
+                    let galley = p.layout_no_wrap("fav".into(), egui::FontId::proportional(10.0), Color32::from_gray(60));
+                    let cx = strip_rect.min.x + if fav { 10.0 } else { 11.5 };
+                    let at = egui::pos2(cx - galley.size().y / 2.0, strip_rect.min.y + 91.0 + galley.size().x / 2.0);
+                    p.add(egui::epaint::TextShape::new(at, galley, Color32::from_gray(60)).with_angle(-std::f32::consts::FRAC_PI_2));
                     let resp = ui.interact(strip_rect, ui.scope_id().with("inv_tabs"), egui::Sense::click());
                     if let Some(at) = resp.clicked().then(|| resp.interact_pointer_pos()).flatten() {
-                        tab = match ((at.y - strip_rect.min.y) / (82.0 / 3.0)) as i32 {
+                        tab = match ((at.y - strip_rect.min.y) / 27.0) as i32 {
                             0 => InvTab::Items,
                             1 => InvTab::Equip,
-                            _ => InvTab::Etc,
+                            2 => InvTab::Etc,
+                            _ => InvTab::Fav,
                         };
                         scroll = 0;
                     }
