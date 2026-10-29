@@ -1,0 +1,79 @@
+{
+  "revision": "Weapon attack orientation, 2026-10-30",
+  "groups": [
+    5,
+    10,
+    11
+  ],
+  "source_convention": "The authored weapon tip points right; the cutting edge lies below the blade face. ACT rotation is clockwise on screen.",
+  "edge_side_correction": {
+    "directions": [
+      "SW",
+      "W",
+      "NW",
+      "N"
+    ],
+    "operation": "mirror=true; rotation=(effective_angle+180)%360",
+    "reason": "These attacks sweep counterclockwise from overhead toward lower-left. The previous edge side led with the spine. R(theta+180)*mirrorX equals R(theta)*mirrorY, preserving the tip axis while reversing the cutting-edge side.",
+    "unchanged_direction": "S attacks sweep clockwise toward lower-right and retain their edge side.",
+    "reflected_directions": {
+      "SE": "SW",
+      "E": "W",
+      "NE": "NW"
+    }
+  },
+  "hand_axis_corrections": [
+    {
+      "direction": "S",
+      "frame_1_based": 2,
+      "old_effective_angle": 225,
+      "new_effective_angle": 295
+    },
+    {
+      "direction": "S",
+      "frame_1_based": 3,
+      "old_effective_angle": 235,
+      "new_effective_angle": 285
+    },
+    {
+      "direction": "SW",
+      "frame_1_based": 2,
+      "old_effective_angle": 315,
+      "new_effective_angle": 300
+    },
+    {
+      "direction": "SW",
+      "frame_1_based": 3,
+      "old_effective_angle": 235,
+      "new_effective_angle": 285
+    },
+    {
+      "direction": "N",
+      "frame_1_based": 3,
+      "old_effective_angle": 270,
+      "new_effective_angle": 315
+    }
+  ],
+  "basis": "Visual review of all five authored six-pose attack sheets and decoded before/after composites. Adjusted winding/overhead blade axes to follow the stacked fists.",
+  "preserved": [
+    "source grip coordinates",
+    "scale 1.0",
+    "body SPR/ACT bytes",
+    "frame counts",
+    "frame delays",
+    "ready poses"
+  ],
+  "validation": {
+    "changed_authored_poses": 78,
+    "hand_origin_rounding_error_upper_bound_pixels": 0.707107,
+    "mirrored_hand_transform": "Numerically checked: horizontal reflection preserves Y and negates X.",
+    "compiled_layout": {
+      "actions": 104,
+      "frames": 304,
+      "paired_timelines": true
+    },
+    "gui_execution": "Root reviewed 22 offline captures using the existing release renderer and installed v2 overlay: both weapons ready/side/attack plus Muramasa windup/strike in all eight directions. Renderer matches decoded contacts and corrected hand/edge orientation. No live login."
+  },
+  "build_config_sha256": "1cf0fac4e0d62d79cf28239f1ff484d17425c4bb74fcd9df18aa5c1cc7c09e13",
+  "review_artifacts": "target/weapon-pose-audit/{S,SW,W,NW,N}.png; diagnostic outputs are not release inputs."
+}

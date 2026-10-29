@@ -2,7 +2,7 @@
   "schema_version": 1,
   "job_name": "Samurai",
   "appearance_working_name": "Ember Ronin",
-  "revision": "Selected black and red reference design with shorter, wider katana blade, 2026-10-30",
+  "revision": "Selected black and red reference design with corrected katana attack orientation, 2026-10-30",
   "source_package": "tools/samurai_assets/artwork",
   "origin": "Generated for this project with the built-in image-generation tool. The user-selected black and red reference supplies idle and ready poses unchanged; the other actions were restyled to match it using the previous corrected motion as reference.",
   "generation_prompts": [
@@ -12,13 +12,13 @@
     "tools/samurai_assets/artwork/source/katana.prompt.json",
     "tools/samurai_assets/artwork/source/katana.refinement.json"
   ],
-  "runtime_changes": "Body and all ACT placement/timing unchanged. Katana PNG sampled once to72x10pixels with58visiblepixels of length; main blade5pixels wide instead of3. Exposed blade shortened roughly25percent. Authored grip(14,5) and native ACT scale1.0 retained.",
+  "runtime_changes": "Body art, body ACT, frame timing, source grips and weapon scale unchanged. Starter katana artwork and dimensions unchanged. Attack weapon ACT corrects cutting-edge orientation and five winding/overhead hand-axis angles using the shared build metadata.",
   "head_included": true,
   "hair_included": true,
   "weapon_included_in_body": false,
   "sex": "male",
-  "art_status": "Reviewed in decoded contacts and offline client captures. Three attack groups share one six-frame swing. The south walk combines repair and main-sheet poses with minor shading variation. Female and separate head/headgear art are not supplied.",
-  "build_config_sha256": "2b09f20ecdaf42ea652e5a7254b6d82f00dc93619270699424d24a1024767f3a",
+  "art_status": "Body and starter blade artwork retain prior visual reviews. Current attack poses were reviewed in decoded before/after composites; current runtime validation is recorded separately. Three attack groups share one six-frame swing. Female and separate head/headgear art are not supplied.",
+  "build_config_sha256": "1cf0fac4e0d62d79cf28239f1ff484d17425c4bb74fcd9df18aa5c1cc7c09e13",
   "body_images": 119,
   "actions": 104,
   "timeline_frames": 304,
@@ -27,21 +27,34 @@
     1126
   ],
   "validation": {
+    "strict_spr_act_validation": "Passed: 104 actions, 304 frames, matching body/weapon timelines.",
+    "hand_origins_and_mirroring": "Numerical checks passed; source grips preserved within nearest-pixel rounding.",
+    "decoded_pose_review": "Five authored attack directions, all six frames, compared before/after; mirrors checked numerically.",
+    "all_action_frame_counts_and_delays_match_previous_revision": true,
+    "body_files_unchanged_from_reference_revision": true,
+    "runtime_gui_checks": "Current captures exercise shared corrected poses through both legendary weapons and Muramasa windup/strike in all eight directions. Actual renderer matches decoded contacts, hand axes and cutting-edge orientation. Starter ACT separately verified against rebuilt bytes; no separate current starter capture. See legendary_provenance.json for the 22-capture scope.",
+    "compiler_tests_passed": 17,
+    "samurai_client_tests_passed": 6,
+    "installed_starter_act_matches_rebuild": true
+  },
+  "sha256": {
+    "data/sprite/custom/samurai/ember_ronin.spr": "c5c3ea78995c90bdf4c820d2c6e252814d87313ab1c086dcf55e2686d5577aad",
+    "data/sprite/custom/samurai/ember_ronin.act": "534d734911b30e8ab7730d859795864fac8b5617463f2a8d5e36c58957758275",
+    "data/sprite/custom/samurai/katana.spr": "82bb15bdf204d4d5bfccbe0510a8e2b6212a13e7dcd4d9fd0adc57e0409b0079",
+    "data/sprite/custom/samurai/katana.act": "e4b3d0199ec0adfa3f5aedd7629b35a7a142f3db92256c45ea1f6434778468dd"
+  },
+  "selected_reference_sha256": "e28a3499c25bb932e968ab6a9535898dff4f2bbb328ee1526558f9f03dd496ce",
+  "prior_revision_validation": {
     "samurai_client_tests_passed": 4,
     "strict_spr_act_validation": "passed: all references, paired timelines and source clipping reviewed",
     "all_action_frame_counts_and_delays_match_previous_revision": true,
     "rebuild_matches_installed_bytes": true,
     "offline_captures": "15 captures on Prontera: all eight walk directions, idle, north ready, south/north attack, southwest sit, northeast cast and southwest fall. Existing release client used; no live account login.",
     "compiler_tests_passed": 17,
-    "katana_offline_captures": "Six final captures on prt_fild08 at185,335,2000x1125: south/west ready and south/east/north attack atdistance300; southready atdistance420. Before/after comparison includes uprightattack0. No live login.",
+    "katana_offline_captures": "Six final captures on prt_fild08 at185,335,2000x1125: south/west ready and south/east/north attack atdistance 300; southready atdistance420. Before/after comparison includes uprightattack0. No live login.",
     "body_files_unchanged_from_reference_revision": true,
-    "katana_decoded_review": "All8ready directions and48attackposes: attached grips, unclipped blade tips,5pixel main blade width; ACT unchanged."
+    "katana_decoded_review": "All8ready directions and48attackposes: attached grips, unclipped blade tips,5pixel main blade width; ACT unchanged.",
+    "scope": "Evidence from before the current attack orientation change; retained as history, not a claim of current runtime coverage."
   },
-  "sha256": {
-    "data/sprite/custom/samurai/ember_ronin.spr": "c5c3ea78995c90bdf4c820d2c6e252814d87313ab1c086dcf55e2686d5577aad",
-    "data/sprite/custom/samurai/ember_ronin.act": "534d734911b30e8ab7730d859795864fac8b5617463f2a8d5e36c58957758275",
-    "data/sprite/custom/samurai/katana.spr": "82bb15bdf204d4d5bfccbe0510a8e2b6212a13e7dcd4d9fd0adc57e0409b0079",
-    "data/sprite/custom/samurai/katana.act": "375ddddcdda0042da547641a612247047fe55ed5d7f032a49dab0eefad60d7b2"
-  },
-  "selected_reference_sha256": "e28a3499c25bb932e968ab6a9535898dff4f2bbb328ee1526558f9f03dd496ce"
+  "weapon_pose_audit": "tools/samurai_assets/artwork/weapon_pose_audit.json"
 }

@@ -16,13 +16,23 @@ in that sampled canvas. Every armed ACT pose uses scale 1.0; the former 0.75
 scale made the old thin blade disappear into a needle-like line in-game.
 `source/katana.prompt.json` records the original generation; the exact edits
 and sampling parameters are in `source/katana.refinement.json`. The final
-shape was checked at 2000-by-1125 resolution and camera distances 300 and 420.
+shape was checked in the prior revision at 2000-by-1125 resolution and camera
+distances 300 and 420. The current attack orientation revision changes its ACT,
+while preserving the starter katana's source PNG and size.
 
 The build preserves the accepted animation contract: 104 directional actions,
 304 timeline frames, eight walking poses at 100 ms each, and paired body/weapon
 timelines. Five source directions are S, SW, W, NW and N; NE, E and SE use ACT
 mirroring. The three attack groups share a six-pose cycle. The forward walk
 uses selected passing/contact repair poses in its recorded chronology.
+
+The attack revision corrects the cutting-edge side for SW, W, NW and N, and
+their reflected directions. The source blade points right with its edge below;
+horizontal mirroring plus a 180-degree rotation reverses the edge side without
+reversing the tip direction. Five winding/overhead poses also align the blade
+with the stacked hands. S retains its clockwise cutting orientation. The compact
+review record is `weapon_pose_audit.json`; all grip coordinates and body art stay
+unchanged. Runtime captures from earlier revisions do not validate these changes.
 
 `build.json` records explicit source rectangles, body origins, uniform sheet
 calibration and weapon grips. Whole-sheet calibration and the shared divisor
@@ -46,3 +56,27 @@ walk phases, hand grips, rear-facing weapon occlusion and source clipping.
 The complete package has 119 body images. All 104 action frame counts and delays
 were checked against the previous accepted animation; they are unchanged.
 `selection_manifest.json` lists the selected inputs and runtime checksums.
+
+## Kusanagi and Muramasa source revision
+
+The selected legendary weapon sources are `source/legendary/kusanagi-v2.png`
+and `source/legendary/muramasa-v2.png`, with exact built-in image-generation
+instructions in the matching `*-v2.prompt.json` files. They use shorter grips,
+quieter ornament, clearer metal faces and gently curved katana silhouettes.
+Kusanagi has 58 visible pixels of length and a main blade face about 4–5 pixels
+wide; Muramasa has 60 visible pixels of length and a face about 5–6 pixels wide.
+Both use scale 1.0 and the shared corrected attack metadata. The original
+`kusanagi.png`, `muramasa.png` and their prompts remain historical references;
+they are no longer selected runtime inputs.
+
+`legendary_weapons.json` specifies sampling rectangles and grip coordinates.
+`source/legendary/sampling_review.json` records the native-size review. Rebuild
+the weapons, inventory/collection art and floor sprites together:
+
+```powershell
+py tools/samurai_assets/compile_weapons.py tools/samurai_assets/artwork/build.json tools/samurai_assets/artwork/legendary_weapons.json --output target/legendary-weapons-v2
+```
+
+The compiler writes a staging overlay and decoded previews under that output
+directory. [Legendary provenance](../../../overlays/samurai/legendary_provenance.json)
+distinguishes current validation from checks performed before this revision.

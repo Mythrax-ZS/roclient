@@ -15,6 +15,10 @@ The game job is **Samurai** (4500); **Ember Ronin** remains the asset filename.
   retains its animation phase across tiles and turns.
 - NE/E/SE mirror the authored NW/W/SW views, including layer positions and weapon
   rotation. Mirroring also reverses costume details.
+- Attack groups 5, 10 and 11 correct the cutting-edge side for SW/W/NW/N and
+  their reflected directions, while S keeps its clockwise cutting orientation.
+  Five winding/overhead poses also align the blade with the hand axis. The shared
+  metadata applies to the starter katana, Kusanagi and Muramasa.
 - The weapon follows the body's action, frame index and delay. Its offsets are
   relative to the actor's ground origin; do not apply a head-anchor offset.
 - Katana layers are present in ready and attack groups 4, 5, 10 and 11.
@@ -96,15 +100,25 @@ The overlay includes separate equipped SPR/ACT pairs, 32-pixel inventory icons,
 in either hand mechanically; the current client displays the main-hand weapon.
 The existing stock Muramasa (1164) remains a separate item.
 
+The selected weapon art is the `*-v2.png` pair in the source directory below.
+Shorter grips, simpler ornament and stronger blade faces preserve readability
+at normal gameplay zoom. Kusanagi has 58 visible pixels of length and a main
+blade face about 4–5 pixels wide; Muramasa has 60 visible pixels and a face about
+5–6 pixels wide. The older unversioned PNGs and prompts are retained only as
+historical references. Weapon sizes and ACT scales remain independent of the
+inventory/collection image sizes.
+
 Rebuild their art from the client root:
 
 ```powershell
-py tools/samurai_assets/compile_weapons.py tools/samurai_assets/artwork/build.json tools/samurai_assets/artwork/legendary_weapons.json --output target/legendary-weapons
+py tools/samurai_assets/compile_weapons.py tools/samurai_assets/artwork/build.json tools/samurai_assets/artwork/legendary_weapons.json --output target/legendary-weapons-v2
 ```
 
-The staging overlay is `target/legendary-weapons/overlay`; each weapon directory
+The staging overlay is `target/legendary-weapons-v2/overlay`; each weapon directory
 also contains decoded contacts and an animated preview. The generated PNGs and
 exact built-in imagegen prompts are in `tools/samurai_assets/artwork/source/legendary`.
 [legendary_provenance.json](legendary_provenance.json) records their source and
-runtime hashes. Restart the rebuilt client after installation. Reload the
-server item database, then use `@item 900001 1` or `@item 900002 1` for testing.
+runtime hashes and separates prior-revision checks from current validation.
+Restart the client after installing updated sprite files. Item stats are
+unchanged by this visual revision; `@item 900001 1` and `@item 900002 1` create
+the existing weapons for testing.

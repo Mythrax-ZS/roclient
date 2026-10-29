@@ -2487,7 +2487,7 @@
               -17.7731,
               -63.5294
             ],
-            "rotation": 225,
+            "rotation": 295,
             "scale": [
               1,
               1
@@ -2498,7 +2498,7 @@
               -5.105,
               -79.0336
             ],
-            "rotation": 235,
+            "rotation": 285,
             "scale": [
               1,
               1
@@ -2544,66 +2544,72 @@
               -4.6055,
               -47.0149
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               8.8273,
               -63.3262
             ],
-            "rotation": 315,
+            "rotation": 120,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -12.8571,
               -79.4456
             ],
-            "rotation": 235,
+            "rotation": 105,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               0.7676,
               -38.3795
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               0.5757,
               -33.5821
             ],
-            "rotation": 145,
+            "rotation": 325,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -6.9083,
               -44.9041
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ],
         "W": [
@@ -2612,66 +2618,72 @@
               -15.8058,
               -49.4628
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               10.9711,
               -64.1529
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -8.1818,
               -80.3306
             ],
-            "rotation": 305,
+            "rotation": 125,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -19.5248,
               -31.6116
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               1.3017,
               -29.7521
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -13.0165,
               -47.6033
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ],
         "NW": [
@@ -2680,66 +2692,72 @@
               -13.0837,
               -56.696
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -17.0485,
               -64.8238
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -6.1454,
               -90.0
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -23.7885,
               -41.4317
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -22.0044,
               -31.5198
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -13.4802,
               -56.8943
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ],
         "N": [
@@ -2748,66 +2766,72 @@
               -0.5672,
               -48.9706
             ],
-            "rotation": 315,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               16.8277,
               -70.3361
             ],
-            "rotation": 315,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -1.3235,
               -88.6765
             ],
-            "rotation": 270,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -22.6891,
               -41.9748
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -21.1765,
               -34.6008
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -0.3782,
               -48.4034
             ],
-            "rotation": 315,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ]
       }
@@ -3189,7 +3213,7 @@
               -17.7731,
               -63.5294
             ],
-            "rotation": 225,
+            "rotation": 295,
             "scale": [
               1,
               1
@@ -3200,7 +3224,7 @@
               -5.105,
               -79.0336
             ],
-            "rotation": 235,
+            "rotation": 285,
             "scale": [
               1,
               1
@@ -3246,66 +3270,72 @@
               -4.6055,
               -47.0149
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               8.8273,
               -63.3262
             ],
-            "rotation": 315,
+            "rotation": 120,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -12.8571,
               -79.4456
             ],
-            "rotation": 235,
+            "rotation": 105,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               0.7676,
               -38.3795
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               0.5757,
               -33.5821
             ],
-            "rotation": 145,
+            "rotation": 325,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -6.9083,
               -44.9041
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ],
         "W": [
@@ -3314,66 +3344,72 @@
               -15.8058,
               -49.4628
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               10.9711,
               -64.1529
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -8.1818,
               -80.3306
             ],
-            "rotation": 305,
+            "rotation": 125,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -19.5248,
               -31.6116
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               1.3017,
               -29.7521
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -13.0165,
               -47.6033
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ],
         "NW": [
@@ -3382,66 +3418,72 @@
               -13.0837,
               -56.696
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -17.0485,
               -64.8238
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -6.1454,
               -90.0
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -23.7885,
               -41.4317
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -22.0044,
               -31.5198
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -13.4802,
               -56.8943
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ],
         "N": [
@@ -3450,66 +3492,72 @@
               -0.5672,
               -48.9706
             ],
-            "rotation": 315,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               16.8277,
               -70.3361
             ],
-            "rotation": 315,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -1.3235,
               -88.6765
             ],
-            "rotation": 270,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -22.6891,
               -41.9748
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -21.1765,
               -34.6008
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -0.3782,
               -48.4034
             ],
-            "rotation": 315,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ]
       }
@@ -3698,7 +3746,7 @@
               -17.7731,
               -63.5294
             ],
-            "rotation": 225,
+            "rotation": 295,
             "scale": [
               1,
               1
@@ -3709,7 +3757,7 @@
               -5.105,
               -79.0336
             ],
-            "rotation": 235,
+            "rotation": 285,
             "scale": [
               1,
               1
@@ -3755,66 +3803,72 @@
               -4.6055,
               -47.0149
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               8.8273,
               -63.3262
             ],
-            "rotation": 315,
+            "rotation": 120,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -12.8571,
               -79.4456
             ],
-            "rotation": 235,
+            "rotation": 105,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               0.7676,
               -38.3795
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               0.5757,
               -33.5821
             ],
-            "rotation": 145,
+            "rotation": 325,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -6.9083,
               -44.9041
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ],
         "W": [
@@ -3823,66 +3877,72 @@
               -15.8058,
               -49.4628
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               10.9711,
               -64.1529
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -8.1818,
               -80.3306
             ],
-            "rotation": 305,
+            "rotation": 125,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -19.5248,
               -31.6116
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               1.3017,
               -29.7521
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -13.0165,
               -47.6033
             ],
-            "rotation": 270,
+            "rotation": 90,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ],
         "NW": [
@@ -3891,66 +3951,72 @@
               -13.0837,
               -56.696
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -17.0485,
               -64.8238
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -6.1454,
               -90.0
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -23.7885,
               -41.4317
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -22.0044,
               -31.5198
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -13.4802,
               -56.8943
             ],
-            "rotation": 235,
+            "rotation": 55,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ],
         "N": [
@@ -3959,66 +4025,72 @@
               -0.5672,
               -48.9706
             ],
-            "rotation": 315,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               16.8277,
               -70.3361
             ],
-            "rotation": 315,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -1.3235,
               -88.6765
             ],
-            "rotation": 270,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -22.6891,
               -41.9748
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -21.1765,
               -34.6008
             ],
-            "rotation": 135,
+            "rotation": 315,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           },
           {
             "grip": [
               -0.3782,
               -48.4034
             ],
-            "rotation": 315,
+            "rotation": 135,
             "scale": [
               1,
               1
-            ]
+            ],
+            "mirror": true
           }
         ]
       }

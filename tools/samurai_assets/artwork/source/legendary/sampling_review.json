@@ -1,82 +1,84 @@
 {
   "kusanagi": {
+    "png": "source/legendary/kusanagi-v2.png",
     "rect": [
-      24,
-      312,
-      1488,
-      624
+      32,
+      208,
+      1952,
+      592
     ],
-    "downsample": 24,
+    "downsample": 32,
     "source_grip": [
-      14,
+      9,
       6
     ],
     "source_size": [
-      1774,
-      887
+      1983,
+      793
     ],
     "source_visible_bbox": [
-      40,
-      339,
-      1431,
-      580
+      68,
+      244,
+      1915,
+      545
     ],
     "native_size": [
-      61,
-      13
+      60,
+      12
     ],
     "native_visible_bbox": [
       1,
       1,
       59,
-      11
+      10
     ],
-    "sha256": "e9187d20953db85d8885c679583d3c69fb9adee1cd4609ecafde4a793846950e",
+    "sha256": "75910d1f459bbd2ecacc50623c2574ccba3f8ef26fcf93ed10bf4c7fd9e4999c",
     "main_blade_width_range": [
-      5,
-      6
+      4,
+      5
     ],
-    "main_blade_width_median": 6,
+    "main_blade_width_median": 4,
     "native_visible_edge_contacts": []
   },
   "muramasa": {
+    "png": "source/legendary/muramasa-v2.png",
     "rect": [
-      0,
-      270,
-      1620,
-      540
+      96,
+      200,
+      2144,
+      584
     ],
-    "downsample": 27,
+    "downsample": 32,
     "source_grip": [
-      16,
+      10,
       5
     ],
     "source_size": [
-      1961,
-      802
+      2172,
+      724
     ],
     "source_visible_bbox": [
-      28,
-      295,
-      1577,
-      510
+      135,
+      236,
+      2047,
+      539
     ],
     "native_size": [
-      60,
-      10
+      64,
+      12
     ],
     "native_visible_bbox": [
       1,
       1,
-      58,
-      9
+      61,
+      11
     ],
-    "sha256": "126d386a3ee2029d5ca5f463f7a157acce7d5a1199e55b75dc6aec928f959d9f",
+    "sha256": "bd56ff254785a056011dee7f16a88c5d2ef8ee48b2a5e10a19090006bd9cdec8",
     "main_blade_width_range": [
-      4,
+      5,
       6
     ],
-    "main_blade_width_median": 5,
+    "main_blade_width_median": 6.0,
     "native_visible_edge_contacts": []
   }
 }

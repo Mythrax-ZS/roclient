@@ -1,0 +1,38 @@
+{
+  "mode": "built-in image_gen",
+  "date": "2026-10-30",
+  "name": "muramasa",
+  "revision": "v2",
+  "reference": "User's original Muramasa Transformed.png from Downloads/art.zip; original illustration as sole visual reference",
+  "generation_prompt": "Use case: style-transfer.\nCreate ONE Ragnarok Online weapon sprite of Muramasa using the supplied illustration as the sole design reference. Preserve its dark violet blade, crimson inner curl, red edge, red-black wrapped handle and red/gold fittings. Translate it into AUTHENTIC LOW RESOLUTION GAME PIXEL ART. This is a tiny game asset with big square pixels, NOT a high resolution pixel-styled painting.\nDraw as though the ENTIRE sword is only 60 pixels long, and the final transparent image is a nearest-neighbor 24x enlargement of that 60-pixel drawing. There must be only about SIXTY square pixel steps from pommel to tip. Use at most 16 flat opaque colors. Each color cluster consists of large squares; no gradients, no subtle micro-colors, no thin antialiasing lines. No texture or dithering.\nOne flat side-view katana, hilt left, blade right, centered horizontally. Total 60 native pixels: 12px short one-handed grip, 4px guard/collar, 44px exposed blade. Solid blade face six native pixels wide. Parallel spine and cutting edge with gentle curvature, crisp angular pointed kissaki. Do not use a scimitar belly, hook or oversized two-hand grip.\nThe dark purple steel face is visibly MID-VALUE plum with two simple flat planes; deep crimson curl occupies only the base third of the blade. The narrow edge is muted crimson with tiny copper highlights. A continuous dark plum contour gives a solid readable silhouette. The grip has only three or four large red wrap diamonds, compact gold collar, simple burgundy guard. No dangling ribbons or tassels. Keep the weapon compact and substantial.\nTransparent background, true alpha0 outside the solid sprite. No flames, glow, bloom, sparks, aura, red halo, background, characters, text or labels. Show the complete sword with ample transparent margins in a wide landscape canvas.",
+  "refinement_prompt": "Use case: precise-object-edit. Change ONLY the thickness of the blade in this Muramasa game sprite. Preserve the sword length, handle, compact guard, horizontal orientation, red/black/plum/gold design, entire canvas and true transparent background.\nThe current blade is much too thin. TRIPLE its middle vertical thickness, making a wide substantial solid blade. Keep its top edge where it is. Move its lower edge DOWN by about 170 pixels along the middle of the blade. The center blade should now be about 260 image pixels thick. Do not lengthen the sword. Keep the upper and lower edges nearly parallel with a modest curvature and sharp angular point at the original tip location.\nFill this increased thickness with a broad mid-value plum steel face in two flat shade bands. Preserve the crimson curl near the guard and narrow red cutting edge, but make the copper highlight only one thin row. No giant orange/yellow stripe, no wavy flames. Keep the blade a dark-plum katana.\nStrict enlarged low-resolution pixel clusters: no more than 16 flat colors, large solid square blocks, no smooth shading or micro-detail, no semitransparent halos. All empty pixels must be alpha0. No text, background or extra objects.",
+  "output": "muramasa-v2.png",
+  "source_pixels": "Selected generated RGBA output copied unchanged; crop/nearest-neighbor sampling previews are separate diagnostic files.",
+  "generation_note": "Rejected initial attempts based on v1 source because they retained its overly thin and bright-edge appearance. Selected original-reference redraw with one targeted blade-width refinement.",
+  "sampling": {
+    "rect": [
+      96,
+      200,
+      2144,
+      584
+    ],
+    "downsample": 32,
+    "source_grip": [
+      10,
+      5
+    ],
+    "native_canvas": [
+      64,
+      12
+    ],
+    "visible_bounds_alpha128": [
+      1,
+      1,
+      61,
+      11
+    ],
+    "blade_center_thickness": 6,
+    "visible_length": 60
+  },
+  "limitations": "Generator did not produce a literal16-color palette; source is unmodified. Test native pixel readability in final game captures."
+}
