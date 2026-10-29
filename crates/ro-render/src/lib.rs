@@ -153,6 +153,11 @@ pub struct Renderer {
     /// Direction sprite shadows are cast in this frame: the sun, bent away from a strong
     /// nearby light source (eased so it swings smoothly).
     cast_dir: glam::Vec3,
+    /// Seconds since the sun last rose (day began), for the moving sun.
+    day_clock: f32,
+    /// Where in the day the clock started: mid-morning on login, sunrise after a night.
+    day_start: f32,
+    was_night: bool,
     last_frame: std::time::Instant,
     /// Code-drawn effects playing this frame; the client advances and removes them.
     pub procs: Vec<ProcFx>,
@@ -524,6 +529,9 @@ impl Renderer {
             night_t: 0.0,
             last_frame: std::time::Instant::now(),
             cast_dir: glam::Vec3::new(-0.5, -0.7, -0.5).normalize(),
+            day_clock: 0.0,
+            day_start: 0.3,
+            was_night: false,
             procs: vec![],
             effects: vec![],
             effect_pipeline,
@@ -567,13 +575,26 @@ impl Renderer {
     /// `sun_elevation` so shadows stretch out like HD-2D dioramas.
     fn shadow_dir(&self) -> glam::Vec3 {
         let d = glam::Vec3::from(self.lighting.direction);
-        let elev = self.post_settings.sun_elevation;
+        let mut elev = self.post_settings.sun_elevation;
         if elev <= 0.0 {
             return d;
         }
-        let h = glam::Vec2::new(d.x, d.z).try_normalize().unwrap_or(glam::Vec2::new(0.6, 0.8));
+        let mut h = glam::Vec2::new(d.x, d.z).try_normalize().unwrap_or(glam::Vec2::new(0.6, 0.8));
+        // Moving sun: the map's bearing is noon; morning and evening swing it 70° either way
+        // and lower it, so shadows lengthen toward sunrise and sunset.
+        if let Some(p) = self.day_progress() {
+            let turn = glam::Vec2::from_angle(((p - 0.5) * 140.0).to_radians());
+            h = turn.rotate(h);
+            elev = (elev * (0.35 + 0.65 * (p * std::f32::consts::PI).sin())).max(10.0);
+        }
         let (s, c) = elev.to_radians().sin_cos();
         glam::Vec3::new(h.x * c, -s, h.y * c)
+    }
+
+    /// 0 at sunrise .. 1 at sunset, when the sun moves (it repeats if day lasts longer).
+    fn day_progress(&self) -> Option<f32> {
+        let secs = self.post_settings.sun_cycle_minutes * 60.0;
+        (secs > 0.0).then(|| (self.day_clock / secs + self.day_start).fract())
     }
 
     /// Where sprite shadows point: the sun's direction, turned away from the map lights near
@@ -814,6 +835,15 @@ impl Renderer {
         self.last_frame = now;
         let goal = if self.night { 1.0 } else { 0.0 };
         self.night_t += (goal - self.night_t).clamp(-dt * 0.5, dt * 0.5);
+        // The sun rises when day returns and climbs while it lasts.
+        if self.was_night && !self.night {
+            self.day_clock = 0.0;
+            self.day_start = 0.0;
+        }
+        self.was_night = self.night;
+        if !self.night {
+            self.day_clock += dt.min(1.0);
+        }
         let (day_light, day_post) = (self.lighting, self.post_settings);
         if self.night_t > 0.0 {
             let n = self.night_t;
@@ -856,6 +886,11 @@ impl Renderer {
         // Ease the shadow direction toward this frame's light (about a quarter second).
         let goal = self.light_cast_dir();
         self.cast_dir = self.cast_dir.lerp(goal, (dt * 4.0).min(1.0)).try_normalize().unwrap_or(goal);
+        // Shadows fade out as the sun sets and back in as it rises (and wraps).
+        if let Some(p) = self.day_progress() {
+            let edge = |x: f32| (x / 0.06).clamp(0.0, 1.0);
+            self.post_settings.shadow_strength *= edge(p) * edge(1.0 - p);
+        }
         let targets = targets.unwrap_or(&self.targets);
         let aspect = size.0 as f32 / size.1 as f32;
         let cam = &self.camera;

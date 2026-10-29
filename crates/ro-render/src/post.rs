@@ -29,6 +29,9 @@ pub struct PostSettings {
     pub shadow_softness: f32,
     /// Sun height for sprite shadows in degrees (lower = longer shadows); 0 uses the map's.
     pub sun_elevation: f32,
+    /// Minutes for the sun to cross the sky outdoors, from the map's own bearing swung
+    /// 70° either way (0 keeps it still). It sets with the server's night and rises at day.
+    pub sun_cycle_minutes: f32,
     /// 0..1: how much map light, sun shadow and point lights tint sprites.
     pub sprite_light: f32,
     /// Sun-coloured rim on sprite edges facing the sun.
@@ -61,6 +64,7 @@ impl Default for PostSettings {
             shadow_strength: 0.7,
             shadow_softness: 1.5,
             sun_elevation: 35.0,
+            sun_cycle_minutes: 60.0,
             sprite_light: 0.8,
             rim_light: 0.35,
             point_lights: 1.0,

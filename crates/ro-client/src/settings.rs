@@ -39,6 +39,7 @@ pub struct Visual {
     pub vignette: f32,
     pub shadows: f32,
     pub sun_elevation: f32,
+    pub sun_cycle: f32,
     pub warmth: f32,
     pub saturation: f32,
     pub contrast: f32,
@@ -61,6 +62,7 @@ impl Default for Visual {
             vignette: p.vignette,
             shadows: p.shadow_strength,
             sun_elevation: p.sun_elevation,
+            sun_cycle: p.sun_cycle_minutes,
             warmth: p.warmth,
             saturation: p.saturation,
             contrast: p.contrast,
@@ -84,6 +86,7 @@ impl Visual {
             vignette: self.vignette,
             shadow_strength: self.shadows,
             sun_elevation: self.sun_elevation,
+            sun_cycle_minutes: self.sun_cycle,
             warmth: self.warmth,
             saturation: self.saturation,
             contrast: self.contrast,
@@ -163,6 +166,9 @@ impl Settings {
                 ui.end_row();
                 ui.add_enabled_ui(v.hd2d, |ui| ui.label("Sun height"));
                 ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.sun_elevation, 15.0..=85.0).suffix("°"));
+                ui.end_row();
+                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Sun cycle")).response.on_hover_text("Minutes for the sun to cross the sky; 0 keeps it still");
+                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.sun_cycle, 0.0..=180.0).suffix(" min"));
                 ui.end_row();
                 ui.add_enabled_ui(v.hd2d, |ui| ui.label("Vignette"));
                 ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.vignette, 0.0..=1.0));
