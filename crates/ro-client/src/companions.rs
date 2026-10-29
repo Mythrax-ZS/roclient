@@ -47,6 +47,8 @@ pub struct Companions {
     pub merc_skills: Vec<CompanionSkill>,
     pub elem: Option<Elemental>,
     rename: String,
+    /// Evolutions open to our pet: (evolved egg, its name, materials as (name, held, needed)).
+    pub evolutions: Vec<(u32, String, Vec<(String, u32, u32)>)>,
 }
 
 /// The pet's hunger in words, as the original shows it.
@@ -149,6 +151,28 @@ impl Companions {
                                     self.rename.clear();
                                 }
                             });
+                        }
+                        // Evolution: open once the pet is Loyal, for the listed materials.
+                        if !self.evolutions.is_empty() {
+                            ui.separator();
+                            ui.label(RichText::new("Pet Evolution").strong());
+                            let loyal = p.intimacy >= 910;
+                            if !loyal {
+                                ui.label(RichText::new("Pet can only be evolved when intimacy is Loyal.").color(crate::classic::ink(Color32::GRAY)));
+                            }
+                            for (egg, name, mats) in &self.evolutions {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(name).color(crate::classic::ink(Color32::from_rgb(255, 220, 120))));
+                                    let ready = loyal && p.accessory == 0 && mats.iter().all(|(_, have, need)| have >= need);
+                                    if ui.add_enabled(ready, egui::Button::new("Evolve")).clicked() {
+                                        out = Some(CompanionAction::Send(CompanionRequest::PetEvolve(*egg)));
+                                    }
+                                });
+                                for (m, have, need) in mats {
+                                    let color = if have >= need { Color32::from_gray(200) } else { Color32::from_rgb(230, 110, 110) };
+                                    ui.label(RichText::new(format!("    {m}  {have} / {need}")).color(crate::classic::ink(color)));
+                                }
+                            }
                         }
                     }
                 },

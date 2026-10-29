@@ -9,6 +9,7 @@ mod captcha;
 mod memorial;
 mod roulette;
 mod sale;
+mod petevo;
 mod sense;
 mod pettalk;
 mod fx;
@@ -903,6 +904,7 @@ struct App {
     progress: progress::Progress,
     /// Pet, homunculus and mercenary.
     companions: companions::Companions,
+    pet_evo: petevo::PetEvolution,
     /// RODEX mail.
     mailbox: mail::Mailbox,
     clan: clan::Clan,
@@ -2881,6 +2883,30 @@ impl App {
                 }
             }
             StarPlaceAsk(which) => self.windows.star_ask = Some(which),
+            PetEvolved(result) => {
+                // msgstringtable 2571..2576 explain the failures.
+                let text = match result {
+                    6 => "Your pet has evolved.".to_string(),
+                    r => msgstr::get(2571 + r.min(5) as usize, &[]).unwrap_or_else(|| "Pet evolution failed.".into()),
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, text);
+            }
+            Camera { show: true, .. } => {
+                if let Some(r) = self.renderer.as_ref() {
+                    let c = &r.camera;
+                    let text = format!("Camera: range {:.1}, rotation {:.1}, latitude {:.1}", c.distance, c.yaw.to_degrees(), -c.pitch.to_degrees());
+                    self.hud.push_chat(ro_net::ChatKind::System, text);
+                }
+            }
+            Camera { range, rotation, latitude, .. } => {
+                if let Some(r) = self.renderer.as_mut() {
+                    if range > 0.0 {
+                        r.camera.distance = range.clamp(ro_render::Camera::MIN_DISTANCE, ro_render::Camera::MAX_DISTANCE);
+                    }
+                    r.camera.yaw = rotation.to_radians();
+                    r.camera.pitch = (-latitude).to_radians().clamp(25f32.to_radians(), 75f32.to_radians());
+                }
+            }
             RentalExpired { index, item } => {
                 let name = self.item_db.as_ref().map_or_else(|| format!("Item #{item}"), |d| d.name(item, true));
                 self.inventory.remove(index, u16::MAX);
@@ -4106,6 +4132,18 @@ impl App {
                     _ => None,
                 },
             };
+            // /viewpointvalue shows the camera values; /setcamera range rotation latitude sets them.
+            if text.trim() == "/viewpointvalue" {
+                let _ = tx.send(ro_net::Command::Camera { show: true, range: 0.0, rotation: 0.0, latitude: 0.0 });
+                return;
+            }
+            if let Some(args) = text.trim().strip_prefix("/setcamera ") {
+                let v: Vec<f32> = args.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+                if let [range, rotation, latitude] = v[..] {
+                    let _ = tx.send(ro_net::Command::Camera { show: false, range, rotation, latitude });
+                }
+                return;
+            }
             if text.trim() == "/limitedsale" {
                 let _ = tx.send(ro_net::Command::Sale(self.account_id, ro_net::SaleRequest::Open));
                 return;
@@ -4674,6 +4712,17 @@ impl App {
                     }
                     Some(("captcha", a)) => {
                         self.send(ro_net::Command::Captcha(ro_net::CaptchaRequest::Answer(a.to_string())));
+                        None
+                    }
+                    // chat:<text> says it (GM commands mid-script); petevolve:<egg> asks to evolve.
+                    Some(("chat", text)) => {
+                        self.submit_chat(text.to_string());
+                        None
+                    }
+                    Some(("petevolve", egg)) => {
+                        if let Ok(egg) = egg.parse() {
+                            self.send(ro_net::Command::Companion(ro_net::CompanionRequest::PetEvolve(egg)));
+                        }
                         None
                     }
                     // write:<text> answers a Graffiti / Talkie Box message prompt.
@@ -5796,6 +5845,15 @@ impl App {
                 }
                 let target = self.attack.map(|a| a.0).or_else(|| { let me = self.player.as_ref()?.walker.cell; self.units.iter().filter(|(_, m)| m.kind == 5).filter(|(_, m)| (m.walker.cell.0 - me.0).abs().max((m.walker.cell.1 - me.1).abs()) <= 14).min_by_key(|(_, m)| (m.walker.cell.0 - me.0).pow(2) + (m.walker.cell.1 - me.1).pow(2)).map(|(id, _)| *id) });
                 self.sense.show(ui.ctx());
+                // What our pet can evolve into, with the materials we hold.
+                self.companions.evolutions = match (&self.companions.pet, self.companions.open) {
+                    (Some(p), true) => {
+                        let name = |id: u32| self.item_db.as_ref().map_or_else(|| format!("Item #{id}"), |d| d.name(id, true));
+                        let have = |id: u32| self.inventory.items.values().filter(|i| i.id == id).map(|i| i.amount as u32).sum::<u32>();
+                        self.pet_evo.for_class(p.class).iter().map(|(egg, mats)| (*egg, name(*egg), mats.iter().map(|&(m, n)| (name(m), have(m), n)).collect())).collect()
+                    }
+                    _ => vec![],
+                };
                 if let Some(a) = self.companions.show(ui.ctx(), target) {
                     self.companion_action = Some(a);
                 }
@@ -6482,6 +6540,7 @@ fn main() -> anyhow::Result<()> {
         stores: Default::default(),
         progress: Default::default(),
         companions: Default::default(),
+        pet_evo: Default::default(),
         mailbox: Default::default(),
         clan: Default::default(),
         merge: Default::default(),
@@ -6616,6 +6675,7 @@ fn main() -> anyhow::Result<()> {
         app.buffs = buffs::Buffs::load(vfs);
         app.quests = quests::QuestLog::load(vfs);
         app.progress = progress::Progress::load(vfs);
+        app.pet_evo = petevo::PetEvolution::load(vfs);
         msgstr::load(vfs);
         app.item_info = iteminfo::ItemInfo::load(vfs);
         match read(r"System\iteminfo.lub").map(|d| ro_game::items::ItemDb::from_lub(&d)) {

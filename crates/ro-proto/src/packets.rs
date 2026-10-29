@@ -145,6 +145,25 @@ impl Encode for Bare {
     }
 }
 
+/// CZ_VIEW_CAMERAINFO: /viewpointvalue (show 1) or /setcamera <range> <rotation> <latitude>;
+/// the server answers through @camerainfo.
+pub struct CameraInfo {
+    pub show: bool,
+    pub range: f32,
+    pub rotation: f32,
+    pub latitude: f32,
+}
+
+impl Encode for CameraInfo {
+    fn encode(&self, d: &mut BytesMut) {
+        d.put_u16_le(0x0a77);
+        d.put_u8(if self.show { 1 } else { 0 });
+        d.put_f32_le(self.range);
+        d.put_f32_le(self.rotation);
+        d.put_f32_le(self.latitude);
+    }
+}
+
 /// CZ_AGREE_STARPLACE: yes to Feeling's "save this map" (0 sun, 1 moon, 2 stars).
 pub struct StarPlace(pub u8);
 

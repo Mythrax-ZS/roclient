@@ -329,6 +329,11 @@ pub enum Event {
     StarPlaceAsk(u8),
     /// Bargain sales: items on sale, their stock, and the GM's sale tool.
     Sale(SaleNote),
+    /// ZC_VIEW_CAMERAINFO: show our camera values (`show`), or set the camera (`camerainfo`).
+    Camera { show: bool, range: f32, rotation: f32, latitude: f32 },
+    /// ZC_PET_EVOLUTION_RESULT: 6 success; 1 no pet out, 2 not a pet egg, 4 missing
+    /// materials, 5 equipped with an accessory, else failed.
+    PetEvolved(u32),
     /// ZC_MEMORIALDUNGEON_*: instance creation queue, status and notices.
     Instance(InstanceNote),
     /// ZC_NOTIFY_EXP2 (`@showexp`): experience gained; kind 1 base, 2 job; negative = lost.
@@ -756,6 +761,8 @@ pub enum Command {
     ProgressDone,
     /// Yes to Feeling's "save this map as your place" (CZ_AGREE_STARPLACE).
     StarPlace(u8),
+    /// /viewpointvalue (show) or /setcamera (CZ_VIEW_CAMERAINFO).
+    Camera { show: bool, range: f32, rotation: f32, latitude: f32 },
     /// The bargain sale tool (our account id with each request).
     Sale(u32, SaleRequest),
     /// Destroy our memorial dungeon (CZ_MEMORIALDUNGEON_COMMAND 3).
@@ -923,6 +930,7 @@ impl MapSession {
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::ProgressDone) => self.send(Bare(0x02f1)).await?,
                     Some(Command::StarPlace(which)) => self.send(ro_proto::packets::StarPlace(which)).await?,
+                    Some(Command::Camera { show, range, rotation, latitude }) => self.send(ro_proto::packets::CameraInfo { show, range, rotation, latitude }).await?,
                     Some(Command::MemorialDestroy) => self.send(MemorialCommand(3)).await?,
                     Some(Command::Roulette(r)) => self.send(r).await?,
                     Some(Command::Captcha(r)) => self.send(r).await?,
@@ -1438,7 +1446,15 @@ impl MapSession {
                         0x02da if data.len() >= 3 => Some(Event::ShowEquip(data[2] != 0)),
                         0x020e if data.len() >= 32 => Some(Event::StarSkill { name: ro_proto::packets::get_fixed_str(&mut &data[2..26], 24), id: l(&data, 26), star: data[30], result: data[31] }),
                         0x0253 if data.len() >= 3 => Some(Event::StarPlaceAsk(data[2])),
+                        // ZC_FASTMOVE: Snap / Fallen Angel / All in the Sky put a unit on a cell at once.
+                        0x08d2 if data.len() >= 10 => Some(Event::Stop { id: l(&data, 2), x: u16::from_le_bytes([data[6], data[7]]), y: u16::from_le_bytes([data[8], data[9]]) }),
+                        0x09fc if data.len() >= 6 => Some(Event::PetEvolved(l(&data, 2))),
+                        0x0a78 if data.len() >= 15 => {
+                            let f = |i: usize| f32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                            Some(Event::Camera { show: data[2] == 1, range: f(3), rotation: f(7), latitude: f(11) })
+                        }
                         0x01b1 if data.len() >= 7 =>
+
 
  Some(Event::ShowDigit { kind: data[2], value: l(&data, 3) as i32 }),
                         0x02cb if data.len() >= 65 => Some(Event::Instance(InstanceNote::Queued { name: ro_proto::packets::get_fixed_str(&mut &data[2..63], 61), place: u16::from_le_bytes([data[63], data[64]]) })),

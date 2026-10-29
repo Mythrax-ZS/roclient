@@ -193,6 +193,8 @@ pub enum CompanionRequest {
     PetMenu(u8),
     /// CZ_RENAME_PET.
     PetRename(String),
+    /// CZ_PET_EVOLUTION: evolve the pet into this egg (the server checks the materials).
+    PetEvolve(u32),
     /// CZ_COMMAND_MER: 0 info, 1 feed, 2 delete.
     HomMenu(u8),
     /// CZ_RENAME_MER.
@@ -221,6 +223,11 @@ impl Encode for CompanionRequest {
             CompanionRequest::PetRename(n) => {
                 d.put_u16_le(0x01a5);
                 name24(d, n);
+            }
+            CompanionRequest::PetEvolve(egg) => {
+                d.put_u16_le(0x09fb);
+                d.put_u16_le(8);
+                d.put_u32_le(*egg);
             }
             CompanionRequest::HomMenu(c) => {
                 d.put_u16_le(0x022d);
@@ -263,6 +270,7 @@ mod tests {
         for (r, n) in [
             (CompanionRequest::PetMenu(1), 3),
             (CompanionRequest::PetRename("Poe".into()), 26),
+            (CompanionRequest::PetEvolve(9069), 8),
             (CompanionRequest::HomMenu(1), 5),
             (CompanionRequest::Attack { id: 1, target: 2 }, 11),
             (CompanionRequest::Return(1), 6),
