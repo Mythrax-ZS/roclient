@@ -128,6 +128,9 @@ pub struct Renderer {
     sprite_layout: wgpu::BindGroupLayout,
     sheets: Vec<sprite::Sheet>,
     ui_renderer: egui_wgpu::Renderer,
+    /// UI textures egui freed last frame: destroyed only once that frame was submitted,
+    /// since its draw commands could still use them.
+    ui_free: Vec<egui::TextureId>,
     /// UI to draw over the next frame (set by the caller each frame).
     ui: Option<UiFrame>,
     /// Actors drawn each frame; the caller updates positions, actions and times.
@@ -502,6 +505,7 @@ impl Renderer {
             sprite_layout,
             sheets: vec![],
             ui_renderer,
+            ui_free: Vec::new(),
             ui: None,
             actors: vec![],
             warps: vec![],
@@ -1027,6 +1031,10 @@ impl Renderer {
         };
         self.post.record(&self.device, &self.queue, &mut enc, &targets.post, view, &self.post_settings, &frame);
 
+        // The previous frame has been submitted by now; its freed UI textures can go.
+        for id in std::mem::take(&mut self.ui_free) {
+            self.ui_renderer.free_texture(&id);
+        }
         // UI on top of the resolved frame.
         if let Some(ui) = self.ui.take() {
             for (id, delta) in &ui.textures.set {
@@ -1051,9 +1059,7 @@ impl Renderer {
                     .forget_lifetime();
                 self.ui_renderer.render(&mut pass, &ui.primitives, &screen);
             }
-            for id in &ui.textures.free {
-                self.ui_renderer.free_texture(id);
-            }
+            self.ui_free.extend(ui.textures.free.iter().copied());
         }
         let cmd = enc.finish();
         (self.lighting, self.post_settings) = (day_light, day_post);
