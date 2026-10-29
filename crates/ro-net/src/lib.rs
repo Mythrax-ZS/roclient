@@ -299,6 +299,8 @@ pub enum Event {
     UnitOption { id: u32, option: u32 },
     /// ZC_EMOTION: a unit showed an emote.
     Emotion { id: u32, kind: u8 },
+    /// ZC_PET_ACT: an emotion id, or a pettalktable line (see pettalk.rs).
+    PetAct { id: u32, value: i32 },
     /// ZC_ACK_WHISPER: 0 sent, 1 not online, 2 ignored by them, 3 they ignore everyone.
     WhisperResult(u8),
     /// ZC_SKILL_POSTDELAY: a skill can't be used again for this long.
@@ -1221,6 +1223,7 @@ impl MapSession {
                             let (skill, src, cell) = parse_ground_skill(&data);
                             Some(Event::SkillAt { skill, src, cell })
                         }
+                        0x01aa if data.len() >= 10 => Some(Event::PetAct { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), value: i32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
                         0x00c0 if data.len() >= 7 => Some(Event::Emotion { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), kind: data[6] }),
                         0x09df if data.len() >= 3 => Some(Event::WhisperResult(data[2])),
                         0x09f8 => Some(Event::Quests(parse_quest_list(&data))),

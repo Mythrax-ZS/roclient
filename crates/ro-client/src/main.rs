@@ -4,6 +4,7 @@
 //!   ro-client              open the renderer window
 
 mod audio;
+mod pettalk;
 mod fx;
 mod gamepad;
 mod guild;
@@ -947,6 +948,7 @@ struct App {
     /// Warp portals in view (drawn as an effect, not a sprite), by unit id.
     warps: std::collections::HashMap<u32, (u16, u16)>,
     class_names: std::collections::HashMap<i16, String>,
+    pet_talk: pettalk::PetTalk,
     look_tables: ro_game::looks::LookTables,
     /// Loaded actor templates by sprite key (None: not available, don't retry).
     sprites: std::collections::HashMap<String, Option<ro_render::Actor>>,
@@ -2397,6 +2399,16 @@ impl App {
                 let who = if homun { "homunculus" } else { "pet" };
                 let text = if ok { format!("Your {who} ate {name}.") } else { format!("You don't have any {name} to feed your {who}.") };
                 self.hud.push_chat(ro_net::ChatKind::System, text);
+            }
+            PetAct { id, value } => {
+                if value < 10_000 {
+                    self.handle(Emotion { id, kind: value as u8 });
+                } else if let Some(name) = self.units.get(&id).map(|m| m.name.clone()) {
+                    let names = &self.class_names;
+                    if let Some(line) = self.pet_talk.line(value, |c| names.get(&c).cloned()) {
+                        self.hud.push_chat(ro_net::ChatKind::Public, format!("{name} : {line}"));
+                    }
+                }
             }
             CastCancel(id) => {
                 self.casts.remove(&id);
@@ -5858,6 +5870,7 @@ fn main() -> anyhow::Result<()> {
         units: Default::default(),
         warps: Default::default(),
         class_names: Default::default(),
+        pet_talk: Default::default(),
         look_tables: Default::default(),
         sprites: Default::default(),
         ready_at: None,
@@ -5885,6 +5898,7 @@ fn main() -> anyhow::Result<()> {
         ui_scale: 1.0, // from settings below
     };
     app.class_names = app.vfs.as_ref().map(load_class_names).unwrap_or_default();
+    app.pet_talk = app.vfs.as_ref().map(pettalk::PetTalk::load).unwrap_or_default();
     app.guild.client_dir = app.client_dir.clone();
     app.hat_files = app.vfs.as_ref().map(fx::hat_effects).unwrap_or_default();
     app.ui_scale = app.settings.ui_scale;
