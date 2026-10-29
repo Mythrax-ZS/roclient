@@ -252,6 +252,57 @@ pub fn map_emitters(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::V
     out
 }
 
+/// The map's wind effects: RSW objects with id 2343 (EF_WIND_EFFECT, `positions` in RSW
+/// order) paired with `_<map>_windEffectInfo` entries the same way as emitters.
+pub fn map_winds(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, map: &str, positions: &[glam::Vec3]) -> Vec<ro_render::Wind> {
+    if positions.is_empty() {
+        return vec![];
+    }
+    let Some(data) = [format!("data\\luafiles514\\lua files\\effecttool\\{map}.lub"), format!("data\\lua files\\effecttool\\{map}.lub")].iter().find_map(|p| vfs.read(p).ok().flatten()) else {
+        return vec![];
+    };
+    let Ok(chunk) = ro_formats::lub::eval(&data) else { return vec![] };
+    let Some(table) = chunk.globals.get(&format!("_{}_windEffectInfo", map.replace('@', ""))) else { return vec![] };
+    use ro_formats::lub::Value;
+    let num = |v: Option<&Value>| if let Some(Value::Number(n)) = v { Some(*n as f32) } else { None };
+    let mut out = vec![];
+    for (i, &pos) in positions.iter().enumerate() {
+        let Some(e) = chunk.field_index(table, i as u32) else { continue };
+        let list = |key: &str| -> Vec<f32> { chunk.field(e, key).map(|t| chunk.entries(t).iter().filter_map(|(_, v)| num(Some(v))).collect()).unwrap_or_default() };
+        let one = |key: &str, d: f32| num(chunk.field(e, key)).unwrap_or(d);
+        let texture = match chunk.field(e, "texture") {
+            Some(Value::Str(s)) => s.replace("\\\\", "\\"),
+            _ => continue,
+        };
+        let Some(tex) = fx.texture_dyn(r, vfs, &texture) else { continue };
+        // Stored ARGB (BrowEdit: "the lub color format is argb").
+        let c = list("color");
+        let color = if c.len() >= 4 { [c[1] / 255.0, c[2] / 255.0, c[3] / 255.0, c[0] / 255.0] } else { [1.0; 4] };
+        let rot = list("rotateVector");
+        let count = one("particleNum", 0.0).max(0.0) as u32;
+        let seeds = (0..count).map(|k| {
+            let h = |g: f32| ((k as f32 * 12.9898 + g * 78.233 + i as f32 * 3.7).sin() * 43758.547).fract().abs();
+            (h(1.0), h(2.0))
+        }).collect();
+        out.push(ro_render::Wind {
+            pos,
+            count,
+            color,
+            radius: one("radius", 5.0),
+            thickness: one("thickness", 1.0),
+            height: one("height", 0.0),
+            speed: one("speed", 1.0),
+            full_angle: one("fullAngle", 360.0),
+            rotate: [rot.first().copied().unwrap_or(0.0), rot.get(1).copied().unwrap_or(0.0)],
+            src: one("srcMode", 5.0) as u8,
+            dst: one("destMode", 2.0) as u8,
+            tex,
+            seeds,
+        });
+    }
+    out
+}
+
 #[derive(Default)]
 pub struct FxLib {
     /// Textures by path under data\texture\ (particle emitters name them at run time).

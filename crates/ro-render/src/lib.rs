@@ -21,7 +21,7 @@ pub use scene::{SceneBuilder, SceneMesh};
 pub use upscale::{is_sprite_path, AssetClass, Quality as UpscaleQuality, UpscaleSettings, Upscaler};
 pub use water::{flag as water_flag, Foam, WaterMesh, WaterQuality, WaterSettings};
 pub use effect::{ProcFx, Shape, TexId};
-pub use particle::{Emitter, EmitterDef};
+pub use particle::{Emitter, EmitterDef, Wind};
 pub use fx::{Fx, FxId};
 pub use post::PostSettings;
 pub use sprite::{Actor, Dir, SheetId};
@@ -658,9 +658,9 @@ impl Renderer {
 
     /// Uploads a texture for code-drawn effects (light columns, ground circles).
     /// Replaces the map's particle emitters (textures from `add_effect_texture`).
-    pub fn set_emitters(&mut self, emitters: Vec<Emitter>) {
+    pub fn set_emitters(&mut self, emitters: Vec<Emitter>, winds: Vec<Wind>) {
         let now = self.started.elapsed().as_secs_f32();
-        self.particles.set(&self.device, emitters, now);
+        self.particles.set(&self.device, emitters, winds, now);
     }
 
     pub fn add_effect_texture(&mut self, img: &Rgba) -> TexId {

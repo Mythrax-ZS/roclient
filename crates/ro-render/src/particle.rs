@@ -48,6 +48,30 @@ pub struct Emitter {
     pub def: EmitterDef,
 }
 
+/// A wind effect (RSW EF_WIND_EFFECT, 2343, `_<map>_windEffectInfo`): `count` ribbons, each
+/// a band `thickness` wide swept over an arc of `full_angle` degrees around a circle of
+/// `radius`, stacked up through `height`, turning (a revolution per 6 s at speed 1) and
+/// fading in and out over 8 × alpha seconds, tilted by `rotate` (degrees about x, then z).
+/// Follows BrowEdit's lubwind shader.
+#[derive(Clone, Debug)]
+pub struct Wind {
+    pub pos: Vec3,
+    pub count: u32,
+    /// Linear 0..1 RGBA (the lub stores it ARGB; converted by the caller).
+    pub color: [f32; 4],
+    pub radius: f32,
+    pub thickness: f32,
+    pub height: f32,
+    pub speed: f32,
+    pub full_angle: f32,
+    pub rotate: [f32; 2],
+    pub src: u8,
+    pub dst: u8,
+    pub tex: TexId,
+    /// Per-ribbon random seeds (phase of the fade and of the turn).
+    pub seeds: Vec<(f32, f32)>,
+}
+
 struct Particle {
     start: Vec3,
     vel: Vec3,
@@ -73,6 +97,7 @@ pub(crate) struct Particles {
     samples: u32,
     pipelines: HashMap<Key, wgpu::RenderPipeline>,
     live: Vec<Live>,
+    winds: Vec<Wind>,
     rng: u64,
 }
 
@@ -103,7 +128,7 @@ impl Particles {
     pub fn new(device: &wgpu::Device, globals: &wgpu::BindGroupLayout, texture: &wgpu::BindGroupLayout, samples: u32) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("particles"), source: wgpu::ShaderSource::Wgsl(include_str!("particle.wgsl").into()) });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("particles"), bind_group_layouts: &[Some(globals), Some(texture)], ..Default::default() });
-        Self { shader, layout, samples, pipelines: HashMap::new(), live: vec![], rng: 0x9e3779b97f4a7c15 }
+        Self { shader, layout, samples, pipelines: HashMap::new(), live: vec![], winds: vec![], rng: 0x9e3779b97f4a7c15 }
     }
 
     fn pipeline(&self, device: &wgpu::Device, (src, dst, z): Key) -> wgpu::RenderPipeline {
@@ -140,7 +165,15 @@ impl Particles {
 
     /// Replaces the map's emitters (pre-warmed, so a map never starts empty) and builds a
     /// pipeline for each blend they use.
-    pub fn set(&mut self, device: &wgpu::Device, emitters: Vec<Emitter>, now: f32) {
+    pub fn set(&mut self, device: &wgpu::Device, emitters: Vec<Emitter>, winds: Vec<Wind>, now: f32) {
+        for w in &winds {
+            let key = (w.src, w.dst, true);
+            if !self.pipelines.contains_key(&key) {
+                let p = self.pipeline(device, key);
+                self.pipelines.insert(key, p);
+            }
+        }
+        self.winds = winds;
         self.live = emitters.into_iter().map(|e| Live { e, particles: vec![], next: now }).collect();
         for i in 0..self.live.len() {
             let d = &self.live[i].e.def;
@@ -252,6 +285,41 @@ impl Particles {
                 groups.entry(((d.src, d.dst, d.zenable), tex.0)).or_default().extend([p0, p1, p2, p0, p2, p3]);
             }
         }
+        for w in &self.winds {
+            if w.pos.distance(focus) > range || w.count < 2 {
+                continue;
+            }
+            let duration = 8.0 * w.color[3];
+            if duration <= 0.0 {
+                continue;
+            }
+            let (rx, rz) = (w.rotate[0].to_radians(), -w.rotate[1].to_radians());
+            let out = groups.entry(((w.src, w.dst, true), w.tex.0)).or_default();
+            const SEGMENTS: usize = 20;
+            for (i, &(s1, s2)) in w.seeds.iter().enumerate() {
+                let t = (now + duration * s1).rem_euclid(duration);
+                let half = duration * 0.5;
+                let alpha = if t < half { t / half } else { (duration - t) / half };
+                let turn = (s2 + now / 6.0 * w.speed).rem_euclid(1.0);
+                let lift = i as f32 / (w.count as f32 - 1.0) * w.height;
+                let color = [w.color[0], w.color[1], w.color[2], w.color[3] * alpha];
+                let point = |along: f32, edge: f32| -> Vec3 {
+                    let angle = along * w.full_angle.to_radians() + turn * std::f32::consts::TAU;
+                    let r = w.radius + if edge < 0.0 { w.thickness } else { 0.0 };
+                    let (mut x, mut y, mut z) = (angle.cos() * r, edge * w.thickness + lift, angle.sin() * r);
+                    (y, z) = (y * rx.cos() - z * rx.sin(), y * rx.sin() + z * rx.cos());
+                    (x, y) = (x * rz.cos() - y * rz.sin(), x * rz.sin() + y * rz.cos());
+                    // BrowEdit's world mirrors z relative to ours.
+                    w.pos + Vec3::new(x, y, -z)
+                };
+                for k in 0..SEGMENTS {
+                    let (a, b) = (k as f32 / SEGMENTS as f32, (k + 1) as f32 / SEGMENTS as f32);
+                    let v = |along: f32, edge: f32| Vertex { pos: point(along, edge).into(), uv: [1.0 - along, if edge < 0.0 { 0.0 } else { 1.0 }], color };
+                    let (bl, br, tl, tr) = (v(a, 0.0), v(b, 0.0), v(a, -1.0), v(b, -1.0));
+                    out.extend([bl, br, tl, tl, br, tr]);
+                }
+            }
+        }
         groups.into_iter().map(|((k, t), v)| (k, TexId(t), v)).collect()
     }
 
@@ -260,7 +328,7 @@ impl Particles {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.live.is_empty()
+        self.live.is_empty() && self.winds.is_empty()
     }
 }
 
