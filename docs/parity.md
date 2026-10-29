@@ -55,7 +55,7 @@ Ticked items are handled and tested in game against the local server.
 - [x] Taming (ZC_START_CAPTURE / TRYCAPTURE_MONSTER)
 - [x] ZC_FEED_PET, ZC_FEED_MER (chat result)
 - [x] ZC_PET_ACT (pettalktable.xml lines in chat, emotions)
-- [x] ZC_SUMMON_HP_INIT / UPDATE, ZC_HO_PAR_CHANGE2, ZC_HOSKILLINFO_UPDATE (untested in game)
+- [x] ZC_SUMMON_HP_INIT / UPDATE, ZC_HO_PAR_CHANGE2, ZC_HOSKILLINFO_UPDATE (summon bar tested with ABR Battle Warrior)
 - [ ] Elementals (ZC_EL_INIT, ZC_EL_PAR_CHANGE)
 
 ## Social

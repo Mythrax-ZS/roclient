@@ -2445,7 +2445,7 @@ impl App {
                     }
                 }
             }
-            SkillFailed { skill, cause } => {
+            SkillFailed { skill, cause, amount, item } => {
                 let name = self.skills.iter().find(|s| s.id == skill).map(|s| self.skill_names.display(&s.name)).unwrap_or_else(|| "Skill".into());
                 let why = match cause {
                     1 => "not enough SP",
@@ -2491,6 +2491,12 @@ impl App {
                 if let Some(p) = self.player.as_mut() {
                     p.pose = None;
                 }
+                let why = if cause == 71 && item != 0 {
+                    let item_name = self.item_db.as_ref().map_or_else(|| format!("Item #{item}"), |d| d.name(item, true));
+                    format!("requires {amount} {item_name}")
+                } else {
+                    why.to_string()
+                };
                 self.hud.push_chat(ro_net::ChatKind::System, format!("{name}: {why}."));
             }
             SkillUsed { skill, src, target } => {

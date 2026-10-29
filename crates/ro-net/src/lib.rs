@@ -288,7 +288,7 @@ pub enum Event {
     /// ZC_DISPEL: the unit's cast was interrupted.
     CastCancel(u32),
     /// Our skill was refused (see `parse_skill_fail` causes).
-    SkillFailed { skill: u16, cause: u8 },
+    SkillFailed { skill: u16, cause: u8, amount: i32, item: u32 },
     /// A non-damaging skill went off (heal, buff...).
     SkillUsed { skill: u16, src: u32, target: u32 },
     /// A damaging skill hit (animated like an attack).
@@ -1229,7 +1229,8 @@ impl MapSession {
                         0x0b1a => Some(Event::Casting(parse_cast(&data))),
                         0x0110 => {
                             let (skill, cause) = parse_skill_fail(&data);
-                            Some(Event::SkillFailed { skill, cause })
+                            let l = |i: usize| data.get(i..i + 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+                            Some(Event::SkillFailed { skill, cause, amount: l(4) as i32, item: l(8) })
                         }
                         0x01de => {
                             let (skill, act) = parse_skill_hit(&data);
