@@ -3878,6 +3878,12 @@ impl App {
                         }
                         None
                     }
+                    // An unknown /command is not said aloud.
+                    None if text.starts_with('/') => {
+                        let name = text.split_whitespace().next().unwrap_or(&text);
+                        note = Some((ro_net::ChatKind::System, format!("{name}: unknown command.")));
+                        None
+                    }
                     None => Some(ro_net::Command::Chat(text)),
                 },
             };
