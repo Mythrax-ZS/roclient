@@ -21,7 +21,7 @@ pub use scene::{SceneBuilder, SceneMesh};
 pub use upscale::{is_sprite_path, AssetClass, Quality as UpscaleQuality, UpscaleSettings, Upscaler};
 pub use water::{flag as water_flag, Foam, WaterMesh, WaterQuality, WaterSettings};
 pub use effect::{ProcFx, Shape, TexId};
-pub use particle::{Emitter, EmitterDef, Waterfall, Wind};
+pub use particle::{Emitter, EmitterDef, Glow, Waterfall, Wind};
 pub use fx::{Fx, FxId};
 pub use post::PostSettings;
 pub use sprite::{Actor, Dir, SheetId};
@@ -661,6 +661,10 @@ impl Renderer {
     pub fn set_emitters(&mut self, emitters: Vec<Emitter>, winds: Vec<Wind>, waterfalls: Vec<Waterfall>) {
         let now = self.started.elapsed().as_secs_f32();
         self.particles.set(&self.device, emitters, winds, waterfalls, now);
+    }
+
+    pub fn set_glows(&mut self, glows: Vec<Glow>) {
+        self.particles.set_glows(&self.device, glows);
     }
 
     pub fn add_effect_texture(&mut self, img: &Rgba) -> TexId {

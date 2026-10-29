@@ -226,7 +226,7 @@ struct LoadedMap {
     lights: Vec<ro_render::PointLight>,
     water: Option<(ro_render::WaterMesh, Vec<Option<ro_render::Rgba>>)>,
     /// Ambient effect emitters (EF_* id, world position): torches, bubbles, fireflies.
-    effects: Vec<(i32, glam::Vec3, f32)>,
+    effects: Vec<(i32, glam::Vec3, f32, [f32; 4])>,
 }
 
 /// `up` upscales ground, water and model textures (never sprites, which load elsewhere).
@@ -315,7 +315,7 @@ fn load_map(vfs: &ro_vfs::Vfs, name: &str, up: &ro_render::Upscaler) -> anyhow::
             range: l.range,
         })
         .collect();
-    let effects = rsw.effects.iter().map(|e| (e.id, glam::Vec3::new(e.pos[0] + gnd.width as f32 * gnd.zoom / 2.0, -e.pos[1], e.pos[2] + gnd.height as f32 * gnd.zoom / 2.0), e.delay)).collect();
+    let effects = rsw.effects.iter().map(|e| (e.id, glam::Vec3::new(e.pos[0] + gnd.width as f32 * gnd.zoom / 2.0, -e.pos[1], e.pos[2] + gnd.height as f32 * gnd.zoom / 2.0), e.delay, e.params)).collect();
     Ok(LoadedMap { mesh, images, water, lighting: ro_render::Lighting::from_rsw(&rsw.light), lights, effects })
 }
 
@@ -1102,15 +1102,20 @@ impl App {
                 let animated_spots: Vec<glam::Vec3> = map.effects.iter().filter(|e| e.0 == 1073).map(|e| e.1).collect();
                 emitters.extend(fx::map_emitters(&mut self.fx, r, vfs, name, &animated_spots, true));
                 let spots: Vec<(i32, glam::Vec3)> = map.effects.iter().map(|e| (e.0, e.1)).collect();
+                let placed: Vec<(i32, glam::Vec3, [f32; 4])> = map.effects.iter().map(|e| (e.0, e.1, e.3)).collect();
                 emitters.extend(fx::map_torches(&mut self.fx, r, vfs, &spots));
                 emitters.extend(fx::map_smoke(&mut self.fx, r, vfs, &spots));
                 tracing::info!(objects = emitter_spots.len(), emitters = emitters.len(), "map particle emitters");
                 let wind_spots: Vec<glam::Vec3> = map.effects.iter().filter(|e| e.0 == 2343).map(|e| e.1).collect();
                 let winds = fx::map_winds(&mut self.fx, r, vfs, name, &wind_spots);
                 tracing::info!(objects = wind_spots.len(), winds = winds.len(), "map wind effects");
-                let waterfalls = fx::map_waterfalls(&mut self.fx, r, vfs, &spots);
+                let waterfalls = fx::map_waterfalls(&mut self.fx, r, vfs, &placed);
+                emitters.extend(fx::map_spray(&mut self.fx, r, vfs, &placed));
+                let glows = fx::map_glows(&mut self.fx, r, vfs, &placed);
+                tracing::info!(glows = glows.len(), "map glows");
+                r.set_glows(glows);
                 r.set_emitters(emitters, winds, waterfalls);
-                self.map_fx = map.effects.into_iter().enumerate().map(|(i, (id, pos, delay))| fx::MapEmitter::new(id, pos, delay, i)).collect();
+                self.map_fx = map.effects.into_iter().enumerate().map(|(i, (id, pos, delay, _))| fx::MapEmitter::new(id, pos, delay, i)).collect();
                 tracing::info!(emitters = self.map_fx.len(), drawn = self.map_fx.iter().filter(|e| e.visual.is_some()).count(), first = ?self.map_fx.first().map(|e| (e.pos, e.every_ms)), "map effects");
                 let gat = vfs
                     .read(&format!("data\\{name}.gat"))

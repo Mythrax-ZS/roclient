@@ -87,9 +87,23 @@ pub struct Waterfall {
     pub pos: Vec3,
     /// 36 for the large kinds, 18 for the small ones.
     pub width: f32,
-    /// Turned 90° (the sheet spans z instead of x).
-    pub vertical: bool,
+    /// Turn about the vertical axis (radians): 0 spans x, 90° spans z.
+    pub yaw: f32,
     pub textures: [TexId; 3],
+}
+
+/// A map glow (EF_GLOW1..12, EF_MAP_GREENLIGHT): an additive camera-facing disc of
+/// `effect\glowNN.bmp` that breathes slowly; the ray burst (EF_GLOW4) also turns.
+#[derive(Clone, Debug)]
+pub struct Glow {
+    pub pos: Vec3,
+    pub radius: f32,
+    pub color: [f32; 4],
+    pub tex: TexId,
+    /// Turn speed (radians per second).
+    pub spin: f32,
+    /// Phase of the breathing, so neighbours don't pulse in step.
+    pub phase: f32,
 }
 
 struct Particle {
@@ -120,6 +134,7 @@ pub(crate) struct Particles {
     live: Vec<Live>,
     winds: Vec<Wind>,
     waterfalls: Vec<Waterfall>,
+    glows: Vec<Glow>,
     rng: u64,
 }
 
@@ -150,7 +165,7 @@ impl Particles {
     pub fn new(device: &wgpu::Device, globals: &wgpu::BindGroupLayout, texture: &wgpu::BindGroupLayout, samples: u32) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("particles"), source: wgpu::ShaderSource::Wgsl(include_str!("particle.wgsl").into()) });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("particles"), bind_group_layouts: &[Some(globals), Some(texture)], ..Default::default() });
-        Self { shader, layout, samples, pipelines: HashMap::new(), live: vec![], winds: vec![], waterfalls: vec![], rng: 0x9e3779b97f4a7c15 }
+        Self { shader, layout, samples, pipelines: HashMap::new(), live: vec![], winds: vec![], waterfalls: vec![], glows: vec![], rng: 0x9e3779b97f4a7c15 }
     }
 
     fn pipeline(&self, device: &wgpu::Device, (src, dst, z, linear): Key) -> wgpu::RenderPipeline {
@@ -356,7 +371,8 @@ impl Particles {
             }
             const SEG: f32 = 40.0;
             let color = [1.0, 1.0, 1.0, 80.0 / 255.0];
-            let (across, depth_axis) = if w.vertical { (Vec3::Z, Vec3::X) } else { (Vec3::X, Vec3::Z) };
+            let turn = Mat3::from_rotation_y(-w.yaw);
+            let (across, depth_axis) = (turn * Vec3::X, turn * Vec3::Z);
             // The emitter sits at the pool: the sheets rise 160 units to the lip, their texture
             // scrolling down (roBrowser builds them in RO's y-down space).
             let base = w.pos;
@@ -385,7 +401,36 @@ impl Particles {
                 }
             }
         }
+        for g in &self.glows {
+            if g.pos.distance(focus) > range {
+                continue;
+            }
+            let fwd = (g.pos - eye).normalize_or_zero();
+            let right = fwd.cross(Vec3::Y).normalize_or(Vec3::X);
+            let up = right.cross(fwd);
+            let turn = g.spin * now;
+            let (s, c) = turn.sin_cos();
+            let (right, up) = (right * c + up * s, up * c - right * s);
+            let breathe = 0.8 + 0.2 * (now * 1.3 + g.phase).sin();
+            let color = [g.color[0], g.color[1], g.color[2], g.color[3] * breathe];
+            let (a, b) = (right * g.radius, up * g.radius);
+            // Drawn a radius toward the eye so the model it lights (a crystal, a lamp) doesn't
+            // swallow it, while walls in front still hide it.
+            let centre = g.pos - fwd * g.radius;
+            let v = |q: Vec3, u: f32, vv: f32| Vertex { pos: q.into(), uv: [u, vv], color };
+            let (p0, p1, p2, p3) = (v(centre - a - b, 0.0, 1.0), v(centre + a - b, 1.0, 1.0), v(centre + a + b, 1.0, 0.0), v(centre - a + b, 0.0, 0.0));
+            groups.entry(((5, 2, true, false), g.tex.0)).or_default().extend([p0, p1, p2, p0, p2, p3]);
+        }
         groups.into_iter().map(|((k, t), v)| (k, TexId(t), v)).collect()
+    }
+
+    /// Replaces the map's glows.
+    pub fn set_glows(&mut self, device: &wgpu::Device, glows: Vec<Glow>) {
+        if !glows.is_empty() && !self.pipelines.contains_key(&(5, 2, true, false)) {
+            let p = self.pipeline(device, (5, 2, true, false));
+            self.pipelines.insert((5, 2, true, false), p);
+        }
+        self.glows = glows;
     }
 
     pub fn pipeline_for(&self, key: &Key) -> Option<&wgpu::RenderPipeline> {
@@ -393,7 +438,7 @@ impl Particles {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.live.is_empty() && self.winds.is_empty() && self.waterfalls.is_empty()
+        self.live.is_empty() && self.winds.is_empty() && self.waterfalls.is_empty() && self.glows.is_empty()
     }
 }
 

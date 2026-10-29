@@ -344,20 +344,83 @@ pub fn map_smoke(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs,
         .collect()
 }
 
+/// EF_WATERFALL_ANI (821): spray churning at the foot of a falls, drifting up as mist. The
+/// first parameter is the width of the churn (70 or 100).
+pub fn map_spray(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, effects: &[(i32, glam::Vec3, [f32; 4])]) -> Vec<ro_render::Emitter> {
+    let spots: Vec<(glam::Vec3, f32)> = effects.iter().filter(|e| e.0 == 821).map(|e| (e.1, e.2[0].max(20.0))).collect();
+    if spots.is_empty() {
+        return vec![];
+    }
+    let Some(tex) = fx.sprite_texture(r, vfs, "굴뚝연기") else { return vec![] };
+    spots
+        .into_iter()
+        .map(|(pos, width)| ro_render::Emitter {
+            pos: pos - glam::Vec3::new(0.0, 10.0, 0.0),
+            def: ro_render::EmitterDef {
+                dir1: [-0.6, -1.2, -0.6],
+                dir2: [0.6, -2.4, 0.6],
+                gravity: [0.0; 3],
+                radius: [width * 0.2, 1.0, width * 0.2],
+                color: [0.95, 0.98, 1.0, 0.35],
+                rate: [4.0, 6.0],
+                size: [6.0, 9.0],
+                life: [2.5, 4.0],
+                speed: 4.0,
+                src: 5,
+                dst: 6,
+                max: 24,
+                zenable: true,
+                billboard: true,
+                rotate: [0.0; 3],
+                tex,
+                frames: vec![],
+                linear: false,
+                grow: 2.5,
+            },
+        })
+        .collect()
+}
+
 /// Waterfalls (EF_WATERFALL 349 .. EF_WATERFALL_SMALL_T2_90 356): large or small, plain
 /// (`waterfall1x.tga`) or dark (`waterfall3x.tga`), along x or turned 90°.
-pub fn map_waterfalls(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, effects: &[(i32, glam::Vec3)]) -> Vec<ro_render::Waterfall> {
+pub fn map_waterfalls(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, effects: &[(i32, glam::Vec3, [f32; 4])]) -> Vec<ro_render::Waterfall> {
     let mut out = vec![];
-    for &(id, pos) in effects {
-        if !(349..=356).contains(&id) {
-            continue;
-        }
-        let k = id - 349;
-        let (small, vertical, dark) = (k & 2 != 0, k & 1 != 0, k >= 4);
+    for &(id, pos, _) in effects {
+        let (width, yaw, dark) = match id {
+            349..=356 => {
+                let k = id - 349;
+                (if k & 2 != 0 { 18.0 } else { 36.0 }, if k & 1 != 0 { 90f32.to_radians() } else { 0.0 }, k >= 4)
+            }
+            _ => continue,
+        };
         let set = if dark { 3 } else { 1 };
         let tex: Vec<_> = (1..=3).filter_map(|n| fx.texture_dyn(r, vfs, &format!("effect\\waterfall{set}{n}.tga"))).collect();
         let Ok(textures) = <[ro_render::TexId; 3]>::try_from(tex) else { continue };
-        out.push(ro_render::Waterfall { pos, width: if small { 18.0 } else { 36.0 }, vertical, textures });
+        out.push(ro_render::Waterfall { pos, width, yaw, textures });
+    }
+    out
+}
+
+/// Map glows: EF_GLOW1 (693) yellow, EF_GLOW2 (694) green, EF_GLOW4 (695) a turning green
+/// ray burst, EF_GLOW11 (701) a large blue sphere, EF_GLOW12 (702) a small violet one and
+/// EF_MAP_GREENLIGHT (710) a larger green sphere, each `effect\glowNN.bmp` drawn additively.
+/// The first parameter is the diameter.
+pub fn map_glows(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, effects: &[(i32, glam::Vec3, [f32; 4])]) -> Vec<ro_render::Glow> {
+    let mut out = vec![];
+    for (i, &(id, pos, params)) in effects.iter().enumerate() {
+        let (file, color, scale, spin) = match id {
+            693 => ("glow01", [1.0, 1.0, 1.0, 0.85], 1.0, 0.0),
+            694 => ("glow02", [1.0, 1.0, 1.0, 0.85], 1.0, 0.0),
+            695 => ("glow04", [1.0, 1.0, 1.0, 0.9], 1.2, 0.6),
+            701 => ("glow11", [0.55, 0.75, 1.0, 0.9], 1.6, 0.0),
+            702 => ("glow12", [1.0, 1.0, 1.0, 0.85], 1.0, 0.0),
+            710 => ("glow11", [0.5, 1.0, 0.6, 0.9], 1.8, 0.0),
+            _ => continue,
+        };
+        let Some(tex) = fx.texture_dyn(r, vfs, &format!("effect\\{file}.bmp")) else { continue };
+        let size = if params[0] > 0.0 { params[0] } else { 10.0 };
+        let phase = (i as f32 * 2.399).rem_euclid(std::f32::consts::TAU);
+        out.push(ro_render::Glow { pos, radius: size * 0.5 * scale, color, tex, spin, phase });
     }
     out
 }
