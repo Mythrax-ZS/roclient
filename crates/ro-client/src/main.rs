@@ -284,7 +284,8 @@ fn load_map(vfs: &ro_vfs::Vfs, name: &str, up: &ro_render::Upscaler) -> anyhow::
     // Ground textures come first in the mesh's list, then the models'.
     let classes = (0..mesh.textures.len()).map(|i| if i < mesh.ground_textures { ro_render::AssetClass::Ground } else { ro_render::AssetClass::Model });
     let images = up.apply_all(classes.zip(mesh.textures.iter().cloned()).zip(load_textures(&mesh.textures)).map(|((c, n), img)| (c, n, img)).collect());
-    let water = rsw.water.as_ref().map(|w| {
+    // RSW 2.6+ moved the water into the GND (1.8+).
+    let water = rsw.water.or(gnd.water).as_ref().map(|w| {
         let mesh = ro_render::WaterMesh::build(&gnd, w);
         let images = up.apply_all(mesh.textures.iter().cloned().zip(load_textures(&mesh.textures)).map(|(n, img)| (ro_render::AssetClass::Ground, n, img)).collect());
         (mesh, images)

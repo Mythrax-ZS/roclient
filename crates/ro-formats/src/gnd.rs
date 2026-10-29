@@ -38,6 +38,11 @@ pub struct Gnd {
     pub lightmaps: Lightmaps,
     pub surfaces: Vec<Surface>,
     pub cubes: Vec<Cube>,
+    /// GND 1.8+ carries the map's water (RSW 2.6+ no longer does): the main settings, then
+    /// a grid of zones with their own levels (and, from 1.9, their own wave settings).
+    pub water: Option<crate::rsw::Water>,
+    /// (columns, rows, per-zone water, row-major).
+    pub water_zones: Option<(u32, u32, Vec<crate::rsw::Water>)>,
 }
 
 /// Baked per-surface lighting: an 8x8 shadow (brightness) map plus an RGB color map.
@@ -120,9 +125,25 @@ impl Gnd {
             };
             cubes.push(Cube { heights, top, front, right });
         }
-        // GND 1.8+ appends water settings; not needed for the mesh.
+        // GND 1.8+: water settings, then a grid of zones (1.8: a level each; 1.9: all fields).
+        let (mut water, mut water_zones) = (None, None);
+        if version >= (1, 8) {
+            let read = |r: &mut Reader, level: f32| -> Result<crate::rsw::Water> {
+                Ok(crate::rsw::Water { level, kind: r.i32()?, wave_height: r.f32()?, wave_speed: r.f32()?, wave_pitch: r.f32()?, anim_speed: r.i32()? })
+            };
+            let level = r.f32()?;
+            let w = read(&mut r, level)?;
+            let (cols, rows) = (r.u32()?, r.u32()?);
+            let mut zones = Vec::with_capacity((cols * rows) as usize);
+            for _ in 0..cols.saturating_mul(rows).min(4096) {
+                let level = r.f32()?;
+                zones.push(if version >= (1, 9) { read(&mut r, level)? } else { crate::rsw::Water { level, ..w } });
+            }
+            water = Some(w);
+            water_zones = Some((cols, rows, zones));
+        }
 
-        Ok(Self { version, width, height, zoom, textures, lightmaps, surfaces, cubes })
+        Ok(Self { version, width, height, zoom, textures, lightmaps, surfaces, cubes, water, water_zones })
     }
 }
 

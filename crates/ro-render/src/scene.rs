@@ -317,7 +317,7 @@ impl<'a> SceneBuilder<'a> {
             * Mat4::from_rotation_y(inst.rot[1].to_radians())
             * Mat4::from_scale(Vec3::from(inst.scale));
 
-        let matrices = node_matrices(rsm);
+        let matrices = if rsm.is_rsm2() { node_matrices_v2(rsm) } else { node_matrices(rsm) };
         let white = self.atlas.white();
         let tex: Vec<usize> = rsm.textures.iter().map(|t| self.texture(t)).collect();
 
@@ -381,6 +381,65 @@ impl<'a> SceneBuilder<'a> {
             heights: g.cubes.iter().map(|c| c.heights.map(|h| -h)).collect(),
         }
     }
+}
+
+/// Per-node vertex matrices in RO space for RSM2 (2.2 / 2.3), at the first animation frame,
+/// following BrowEdit's reading of the format:
+/// - a node's local transform is its 3x3 base matrix (relative to its parent's, so the
+///   parent's is undone), or its first rotation key when it has rotation keys;
+/// - scaled by its first scale key, if any;
+/// - moved to its position (first position key, else its own position relative to the
+///   parent's, in the parent's base frame);
+/// - nested under its parent.
+///
+/// RSM2 is modelled y-up, unlike RSM 1.x and the map (y-down), and is not re-centred: its
+/// root position is already the placement point.
+fn node_matrices_v2(rsm: &Rsm) -> Vec<Mat4> {
+    let base = |n: &ro_formats::rsm::Node| Mat4::from_mat3(Mat3::from_cols_array(&n.mat3));
+    let by_name: HashMap<&str, usize> = rsm.nodes.iter().enumerate().map(|(i, n)| (n.name.as_str(), i)).collect();
+    let mut global: Vec<Option<Mat4>> = vec![None; rsm.nodes.len()];
+
+    fn at_zero<T: Copy>(keys: &[(i32, T)]) -> Option<T> {
+        keys.iter().take_while(|(t, _)| *t <= 0).last().map(|(_, v)| *v)
+    }
+
+    fn resolve(i: usize, rsm: &Rsm, by_name: &HashMap<&str, usize>, global: &mut Vec<Option<Mat4>>, base: &dyn Fn(&ro_formats::rsm::Node) -> Mat4, depth: usize) -> Mat4 {
+        if let Some(m) = global[i] {
+            return m;
+        }
+        let n = &rsm.nodes[i];
+        let parent = by_name.get(n.parent.as_str()).copied().filter(|&p| p != i && depth < 64);
+        let mut local = if !n.rot_keys.is_empty() {
+            let q = at_zero(&n.rot_keys).unwrap_or([0.0, 0.0, 0.0, 1.0]);
+            Mat4::from_quat(Quat::from_array(q).normalize())
+        } else {
+            match parent {
+                Some(p) => base(&rsm.nodes[p]).inverse() * base(n),
+                None => base(n),
+            }
+        };
+        if let Some(s) = at_zero(&n.scale_keys) {
+            local *= Mat4::from_scale(Vec3::from(s));
+        }
+        let position = match (at_zero(&n.pos_keys), parent) {
+            (Some(p), _) => Vec3::from(p),
+            (None, Some(p)) => {
+                let pn = &rsm.nodes[p];
+                base(pn).inverse().transform_vector3(Vec3::from(n.offset) - Vec3::from(pn.offset))
+            }
+            (None, None) => Vec3::from(n.offset),
+        };
+        let local = Mat4::from_translation(position) * local;
+        let m = match parent {
+            Some(p) => resolve(p, rsm, by_name, global, base, depth + 1) * local,
+            None => local,
+        };
+        global[i] = Some(m);
+        m
+    }
+
+    let flip = Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0));
+    (0..rsm.nodes.len()).map(|i| flip * resolve(i, rsm, &by_name, &mut global, &base, 0)).collect()
 }
 
 /// Per-node vertex matrices in RO space, following the RSM 1.x hierarchy.
