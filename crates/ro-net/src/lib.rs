@@ -218,6 +218,10 @@ pub enum Event {
     /// An NPC shop asks: buy or sell?
     ShopDeal(u32),
     ShopBuyList(Vec<ShopItem>),
+    /// A cashshop / itemshop / pointshop NPC opened: our currency, Kafra points, its goods.
+    PointShop { cash: u32, kafra: u32, items: Vec<ShopItem> },
+    /// A cash-point purchase answered: balances after it, error (0 = bought).
+    PointShopResult { cash: u32, kafra: u32, error: u16 },
     ShopSellList(Vec<SellOffer>),
     ShopResult { buy: bool, ok: bool },
     TradeRequested { name: String, id: u32, level: u16 },
@@ -783,6 +787,8 @@ pub enum Command {
     ProgressDone,
     /// /who: how many players are online (CZ_REQ_USER_COUNT).
     Who,
+    /// An NPC shop window closed (CZ_NPC_TRADE_QUIT); the server holds us busy until then.
+    ShopClosed,
     /// /memo: save this spot as a Warp Portal destination (CZ_REMEMBER_WARPPOINT).
     Memo,
     /// Yes to Feeling's "save this map as your place" (CZ_AGREE_STARPLACE).
@@ -961,6 +967,7 @@ impl MapSession {
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::ProgressDone) => self.send(Bare(0x02f1)).await?,
                     Some(Command::Who) => self.send(Bare(0x00c1)).await?,
+                    Some(Command::ShopClosed) => self.send(Bare(0x09d4)).await?,
                     Some(Command::Memo) => self.send(Bare(0x011d)).await?,
                     Some(Command::StarPlace(which)) => self.send(ro_proto::packets::StarPlace(which)).await?,
                     Some(Command::Adopt(r)) => self.send(r).await?,
@@ -1023,6 +1030,8 @@ impl MapSession {
                         0x00f8 => Some(Event::StorageClosed),
                         0x00c4 => Some(Event::ShopDeal(parse_deal_type(&data))),
                         0x0b77 => Some(Event::ShopBuyList(parse_buy_list(&data))),
+                        0x0287 => parse_cash_shop(&data).map(|(cash, kafra, items)| Event::PointShop { cash, kafra, items }),
+                        0x0289 => parse_cash_shop_result(&data).map(|(cash, kafra, error)| Event::PointShopResult { cash, kafra, error }),
                         0x00c7 => Some(Event::ShopSellList(parse_sell_list(&data))),
                         0x00ca | 0x00cb => Some(Event::ShopResult { buy: opcode == 0x00ca, ok: data[2] == 0 }),
                         0x01f4 => {

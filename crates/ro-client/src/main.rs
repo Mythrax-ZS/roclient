@@ -2317,6 +2317,36 @@ impl App {
                 self.social.shop = Some(social::Shop::Buy { items, cart: Default::default() });
                 self.load_shop_icons();
             }
+            PointShop { cash, kafra, items } => {
+                self.dialog = None;
+                if let Some(id) = self.auto_buy.take() {
+                    tracing::info!(id, "buying with points");
+                    self.send(ro_net::Command::Shop(ro_net::ShopRequest::CashBuy { kafra: 0, items: vec![(id, 1)] }));
+                }
+                self.social.shop = Some(social::Shop::Cash { items, cart: Default::default(), cash, kafra, use_kafra: 0 });
+                self.load_shop_icons();
+            }
+            PointShopResult { cash: c, kafra: k, error } => {
+                if let Some(social::Shop::Cash { cash, kafra, cart, use_kafra, .. }) = self.social.shop.as_mut() {
+                    (*cash, *kafra) = (c, k);
+                    if error == 0 {
+                        cart.clear();
+                        *use_kafra = 0;
+                    }
+                }
+                let text = match error {
+                    0 => "The deal has successfully completed.",
+                    1 => "The purchase has failed because the NPC does not exist.",
+                    3 => "You are over your Weight Limit.",
+                    4 => "You cannot purchase items while you are in a trade.",
+                    5 => "The purchase has failed because the item information was incorrect.",
+                    6 => "You do not have enough points.",
+                    7 => "You can purchase up to 10 items.",
+                    8 => "Some items could not be purchased.",
+                    _ => "The purchase has failed.",
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, text.into());
+            }
             ShopSellList(offers) => {
                 if let Some(id) = self.auto_sell.take() {
                     let list: Vec<(u16, u16)> = offers
@@ -3713,7 +3743,7 @@ impl App {
 
     fn load_shop_icons(&mut self) {
         let ids: Vec<u32> = match &self.social.shop {
-            Some(social::Shop::Buy { items, .. }) => items.iter().map(|i| i.id).collect(),
+            Some(social::Shop::Buy { items, .. } | social::Shop::Cash { items, .. }) => items.iter().map(|i| i.id).collect(),
             _ => vec![],
         };
         self.load_icons_for(&ids);
@@ -5250,6 +5280,23 @@ impl App {
                     }
                     Some(("cashshop", _)) => {
                         self.toggle_cash_shop();
+                        None
+                    }
+                    // talk:Name talks to that NPC once it is in view; pointbuy:item:amount buys
+                    // from the cashshop / itemshop / pointshop NPC that is open.
+                    Some(("talk", name)) => {
+                        self.talk_to = Some(name.to_string());
+                        None
+                    }
+                    Some(("shopclose", _)) => {
+                        self.social.shop = None;
+                        self.send(ro_net::Command::ShopClosed);
+                        None
+                    }
+                    Some(("pointbuy", spec)) => {
+                        if let Some((id, n)) = spec.split_once(':').and_then(|(i, n)| Some((i.parse().ok()?, n.parse().ok()?))) {
+                            self.send(ro_net::Command::Shop(ro_net::ShopRequest::CashBuy { kafra: 0, items: vec![(id, n)] }));
+                        }
                         None
                     }
                     Some(("cashtab", n)) => {

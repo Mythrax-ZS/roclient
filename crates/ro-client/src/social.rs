@@ -13,6 +13,9 @@ pub enum Shop {
     Choose { npc: u32 },
     Buy { items: Vec<ShopItem>, cart: BTreeMap<u32, u16> },
     Sell { offers: Vec<SellOffer>, cart: BTreeMap<u16, u16> },
+    /// A cashshop / itemshop / pointshop NPC: prices in its currency (`cash` held), with
+    /// `use_kafra` of a purchase paid from Kafra points.
+    Cash { items: Vec<ShopItem>, cart: BTreeMap<u32, u16>, cash: u32, kafra: u32, use_kafra: u32 },
 }
 
 #[derive(Default)]
@@ -170,6 +173,7 @@ impl Social {
             Shop::Choose { .. } => "Shop",
             Shop::Buy { .. } => "Buy",
             Shop::Sell { .. } => "Sell",
+            Shop::Cash { .. } => "Shop",
         };
         crate::classic::show(ctx, egui::Window::new(title).open(&mut open).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO), &title, true, |ui| match shop {
             Shop::Choose { npc } => {
@@ -210,6 +214,41 @@ impl Social {
                     }
                 });
             }
+            Shop::Cash { items, cart, cash, kafra, use_kafra } => {
+                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                    egui::Grid::new("cash_buy").num_columns(4).spacing(Vec2::new(8.0, 4.0)).show(ui, |ui| {
+                        for it in items.iter() {
+                            icon(ui, c.icons, it.id);
+                            ui.label(name(c.db, it.id));
+                            ui.label(RichText::new(format!("{} P", it.price)).color(crate::classic::ink(Color32::from_rgb(140, 210, 255))));
+                            let n = cart.entry(it.id).or_insert(0);
+                            ui.add(egui::DragValue::new(n).range(0..=99));
+                            ui.end_row();
+                        }
+                    });
+                });
+                cart.retain(|_, n| *n > 0);
+                let total: u64 = items.iter().map(|i| i.price as u64 * *cart.get(&i.id).unwrap_or(&0) as u64).sum();
+                ui.separator();
+                if *kafra > 0 {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Use Kafra points ({kafra})"));
+                        ui.add(egui::DragValue::new(use_kafra).range(0..=(*kafra).min(total as u32)));
+                    });
+                }
+                *use_kafra = (*use_kafra).min(total as u32);
+                ui.horizontal(|ui| {
+                    let affordable = total <= *cash as u64 + *use_kafra as u64;
+                    let color = if affordable { Color32::LIGHT_GRAY } else { Color32::from_rgb(255, 120, 100) };
+                    ui.label(RichText::new(format!("Total {total} P  (you have {cash} P)")).color(crate::classic::ink(color)));
+                    if ui.add_enabled(!cart.is_empty() && affordable, egui::Button::new("Buy")).clicked() {
+                        out.push(Command::Shop(ShopRequest::CashBuy { kafra: *use_kafra, items: cart.iter().map(|(id, n)| (*id, *n)).collect() }));
+                    }
+                    if ui.button("Close").clicked() {
+                        close = true;
+                    }
+                });
+            }
             Shop::Sell { offers, cart } => {
                 egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                     egui::Grid::new("sell").num_columns(4).spacing(Vec2::new(8.0, 4.0)).show(ui, |ui| {
@@ -240,6 +279,7 @@ impl Social {
             }
         });
         if close || !open {
+            out.push(Command::ShopClosed);
             self.shop = None;
         }
     }

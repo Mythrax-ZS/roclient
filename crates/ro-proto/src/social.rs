@@ -78,6 +78,29 @@ pub fn parse_sell_list(data: &[u8]) -> Vec<SellOffer> {
         .collect()
 }
 
+/// ZC_PC_CASH_POINT_ITEMLIST (0x0287): a cashshop / itemshop / pointshop NPC's goods, with
+/// what we hold of its currency (and Kafra points): (currency, kafra points, items).
+pub fn parse_cash_shop(data: &[u8]) -> Option<(u32, u32, Vec<ShopItem>)> {
+    let mut b = data.get(4..12)?;
+    let (cash, kafra) = (b.get_u32_le(), b.get_u32_le());
+    let items = data[12..]
+        .chunks_exact(13)
+        .map(|mut b| {
+            let price = b.get_u32_le();
+            let discount_price = b.get_u32_le();
+            let kind = b.get_u8();
+            ShopItem { id: b.get_u32_le(), price, discount_price, kind }
+        })
+        .collect();
+    Some((cash, kafra, items))
+}
+
+/// ZC_PC_CASH_POINT_UPDATE (0x0289): (currency, kafra points, error; 0 = bought).
+pub fn parse_cash_shop_result(data: &[u8]) -> Option<(u32, u32, u16)> {
+    let mut b = data.get(2..12)?;
+    Some((b.get_u32_le(), b.get_u32_le(), b.get_u16_le()))
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ShopRequest {
     /// Answer ZC_SELECT_DEALTYPE: buy (true) or sell.
@@ -86,6 +109,9 @@ pub enum ShopRequest {
     Buy(Vec<(u32, u16)>),
     /// (inventory index, amount) pairs.
     Sell(Vec<(u16, u16)>),
+    /// CZ_PC_BUY_CASH_POINT_ITEM: (item id, amount) pairs from a cash-point shop, paying
+    /// `kafra` of the price in Kafra points.
+    CashBuy { kafra: u32, items: Vec<(u32, u16)> },
 }
 
 impl Encode for ShopRequest {
@@ -112,7 +138,37 @@ impl Encode for ShopRequest {
                 }
                 put_var(d, 0x00c9, &body);
             }
+            ShopRequest::CashBuy { kafra, items } => {
+                let mut body = kafra.to_le_bytes().to_vec();
+                body.extend_from_slice(&(items.len() as u16).to_le_bytes());
+                for (id, amount) in items {
+                    body.extend_from_slice(&amount.to_le_bytes());
+                    body.extend_from_slice(&id.to_le_bytes());
+                }
+                put_var(d, 0x0288, &body);
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod cash_shop_tests {
+    use super::*;
+
+    #[test]
+    fn cash_shop_round_trip() {
+        let mut p = vec![0x87, 0x02, 25, 0];
+        p.extend(500u32.to_le_bytes());
+        p.extend(30u32.to_le_bytes());
+        p.extend(100u32.to_le_bytes());
+        p.extend(100u32.to_le_bytes());
+        p.push(0);
+        p.extend(12210u32.to_le_bytes());
+        let (cash, kafra, items) = parse_cash_shop(&p).unwrap();
+        assert_eq!((cash, kafra, items.len(), items[0].id, items[0].price), (500, 30, 1, 12210, 100));
+        let mut d = BytesMut::new();
+        ShopRequest::CashBuy { kafra: 5, items: vec![(12210, 2)] }.encode(&mut d);
+        assert_eq!(&d[..], &[0x88, 0x02, 16, 0, 5, 0, 0, 0, 1, 0, 2, 0, 0xb2, 0x2f, 0, 0]);
     }
 }
 
