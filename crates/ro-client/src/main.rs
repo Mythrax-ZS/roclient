@@ -1053,6 +1053,8 @@ struct App {
     auto_pickup: bool,
     /// `--talk name`: talk to the first NPC with this name once in view (scripted test).
     talk_to: Option<String>,
+    /// --front-rename / --front-move: the character they act on, once the list arrives.
+    front_hook: Option<u32>,
     /// Script minimap marks (viewpoint): (npc, mark id) -> (cell, colour, blinking until).
     viewpoints: std::collections::HashMap<(u32, u8), ((f32, f32), egui::Color32, Option<std::time::Instant>)>,
     /// Party and guild members elsewhere on the map: id -> (cell, guild?).
@@ -1466,6 +1468,28 @@ impl App {
                 }
                 if matches!(event, Characters { .. }) && std::env::args().any(|a| a == "--front-create") {
                     front.open_create();
+                }
+                // --front-rename NAME / --front-move SLOT: rename or move the last character once.
+                let args: Vec<String> = std::env::args().collect();
+                let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1).cloned());
+                match &event {
+                    Characters { chars, .. } if self.front_hook.is_none() => {
+                        if let Some(c) = chars.iter().max_by_key(|c| c.slot) {
+                            self.front_hook = Some(c.char_id);
+                            if let Some(name) = after("--front-rename") {
+                                self.queued_commands.push(ro_net::Command::Char(ro_net::CharRequest::CheckName { account_id: 0, char_id: c.char_id, name }));
+                            }
+                            if let Some(to) = after("--front-move").and_then(|s| s.parse().ok()) {
+                                self.queued_commands.push(ro_net::Command::Char(ro_net::CharRequest::MoveSlot { from: c.slot as u16, to }));
+                            }
+                        }
+                    }
+                    CharNameOk(true) => {
+                        if let (Some(char_id), Some(name)) = (self.front_hook, after("--front-rename")) {
+                            self.queued_commands.push(ro_net::Command::Char(ro_net::CharRequest::Rename { char_id, name }));
+                        }
+                    }
+                    _ => {}
                 }
                 return;
             }
@@ -3566,7 +3590,7 @@ impl App {
                 }
             }
             // Login and character-select replies (handled by the screens above).
-            LoginFailed(_) | Servers(_) | Characters { .. } | CharCreated(_) | CharCreateFailed(_) | CharDeleteStarted { .. } | CharDeleted { .. } | CharDeleteCanceled { .. } => {}
+            LoginFailed(_) | Servers(_) | Characters { .. } | CharCreated(_) | CharCreateFailed(_) | CharDeleteStarted { .. } | CharDeleted { .. } | CharDeleteCanceled { .. } | CharNameOk(_) | CharRenamed(_) | CharMoved { .. } | CharsBlocked(_) => {}
             Disconnected(reason) => {
                 tracing::error!("disconnected: {reason}");
                 self.status = Some(format!("disconnected: {reason}"));
@@ -6811,7 +6835,7 @@ fn main() -> anyhow::Result<()> {
     // account; otherwise the login and character screens drive the session.
     const SCRIPTED: [&str; 10] = ["--capture", "--do", "--say", "--attack", "--talk", "--walk", "--windows", "--deal", "--accept", "--auto-trade"];
     // `--front` keeps the screens for captures; `--front-login` also submits the configured login.
-    let front_test = args.iter().any(|a| matches!(a.as_str(), "--front" | "--front-login" | "--front-create" | "--front-make" | "--front-start"));
+    let front_test = args.iter().any(|a| matches!(a.as_str(), "--front" | "--front-login" | "--front-create" | "--front-make" | "--front-start" | "--front-rename" | "--front-move"));
     let auto = !front_test && (cfg.auto_login || args.iter().any(|a| SCRIPTED.contains(&a.as_str())));
     let (cfg_user, cfg_pass) = (cfg.username.clone(), cfg.password.clone());
     let session = ro_net::SessionConfig {
@@ -6981,6 +7005,7 @@ fn main() -> anyhow::Result<()> {
         auto_pickup: false,
         script: arg("--do").map(|s| s.split(",").map(str::to_string).collect()).unwrap_or_default(),
         talk_to: arg("--talk"),
+        front_hook: None,
         viewpoints: Default::default(),
         member_pos: Default::default(),
         spirits: Default::default(),
@@ -7031,7 +7056,7 @@ fn main() -> anyhow::Result<()> {
     app.guild.client_dir = app.client_dir.clone();
     app.hat_files = app.vfs.as_ref().map(fx::hat_effects).unwrap_or_default();
     app.ui_scale = app.settings.ui_scale;
-    if args.iter().any(|a| matches!(a.as_str(), "--front-login" | "--front-create" | "--front-make" | "--front-start")) {
+    if args.iter().any(|a| matches!(a.as_str(), "--front-login" | "--front-create" | "--front-make" | "--front-start" | "--front-rename" | "--front-move")) {
         app.queued_commands.push(ro_net::Command::Login { user: cfg_user.clone(), pass: cfg_pass.clone() });
     }
     app.cursor_sprite = app.vfs.as_ref().and_then(|v| hud::CursorSprite::load(&app.egui_ctx, v));

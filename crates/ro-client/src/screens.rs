@@ -46,6 +46,12 @@ pub struct Front {
     /// Pending deletions: char id -> when it can be confirmed.
     deleting: HashMap<u32, std::time::Instant>,
     birthdate: String,
+    /// Renaming: (char id, name typed, the name the server accepted).
+    renaming: Option<(u32, String, Option<String>)>,
+    /// Moving the character in this slot: the next slot clicked is where it goes.
+    moving: Option<u8>,
+    /// Characters the server blocks, and when they can play again.
+    blocked: HashMap<u32, String>,
     // Character creation.
     name: String,
     male: bool,
@@ -95,6 +101,9 @@ impl Front {
             page: 0,
             deleting: HashMap::new(),
             birthdate: String::new(),
+            renaming: None,
+            moving: None,
+            blocked: HashMap::new(),
             name: String::new(),
             male: true,
             hair: 1,
@@ -198,7 +207,15 @@ impl Front {
                 self.screen = Screen::Servers(list.clone());
             }
             Characters { chars, slots } => {
+                // A list sent again after a rename or slot move keeps the selection and message.
+                let refresh = matches!(self.screen, Screen::Select) && !self.chars.is_empty();
                 self.busy = false;
+                self.renaming = None;
+                self.moving = None;
+                if refresh {
+                    self.chars = chars.clone();
+                    return true;
+                }
                 self.message = None;
                 self.chars = chars.clone();
                 self.slots = (*slots).max(SLOTS_PER_PAGE);
@@ -261,6 +278,38 @@ impl Front {
                     self.message = Some((why.into(), true));
                 }
             }
+            CharNameOk(ok) => {
+                self.busy = false;
+                if let Some((_, typed, accepted)) = self.renaming.as_mut() {
+                    if *ok {
+                        *accepted = Some(typed.trim().to_string());
+                        self.message = Some(("That name is available.".into(), false));
+                    } else {
+                        self.message = Some(("That name cannot be used.".into(), true));
+                    }
+                }
+            }
+            CharRenamed(result) => {
+                self.busy = false;
+                self.renaming = None;
+                let why = match result {
+                    0 => "The character's name has been changed.",
+                    1 => "This character's name has already been changed.",
+                    4 => "Another character is using that name.",
+                    5 => "Leave your guild to change this character's name.",
+                    6 => "Leave your party to change this character's name.",
+                    7 => "That name is too long.",
+                    8 => "That name contains characters that cannot be used.",
+                    9 => "Name changes are not allowed.",
+                    _ => "The name could not be changed.",
+                };
+                self.message = Some((why.into(), *result != 0));
+            }
+            CharMoved { ok, .. } => {
+                self.busy = false;
+                self.message = Some(if *ok { ("The character has been moved.".into(), false) } else { ("The character could not be moved there.".into(), true) });
+            }
+            CharsBlocked(list) => self.blocked = list.iter().cloned().collect(),
             CharDeleteCanceled { char_id, result } => {
                 self.busy = false;
                 if *result == 1 {
@@ -467,6 +516,8 @@ impl Front {
                                     ui.label(RichText::new(&ch.name).strong());
                                     if self.deleting.contains_key(&ch.char_id) {
                                         ui.label(RichText::new("deleting").color(Color32::from_rgb(235, 120, 100)).size(11.0));
+                                    } else if self.blocked.contains_key(&ch.char_id) {
+                                        ui.label(RichText::new("blocked").color(Color32::from_rgb(235, 120, 100)).size(11.0));
                                     }
                                 }
                                 (None, _) => {
@@ -478,8 +529,14 @@ impl Front {
                         .response
                         .interact(egui::Sense::click());
                     if resp.clicked() {
+                        match self.moving.take() {
+                            Some(from) if from != slot && !self.busy => {
+                                self.busy = true;
+                                action = Some(Action::Send(Command::Char(CharRequest::MoveSlot { from: from as u16, to: slot as u16 })));
+                            }
+                            _ => self.message = None,
+                        }
                         self.selected = slot;
-                        self.message = None;
                     }
                     if resp.double_clicked() {
                         match &ch {
@@ -559,10 +616,44 @@ impl Front {
                                     self.busy = true;
                                     action = Some(Action::Send(Command::Char(CharRequest::ReserveDelete(ch.char_id))));
                                 }
+                                // Shown only when the server allows them (rename count, char_move_enabled).
+                                if ch.can_rename && ui.button("Change Name").clicked() {
+                                    self.renaming = Some((ch.char_id, String::new(), None));
+                                    self.message = None;
+                                }
+                                if ch.moves > 0 && ui.button("Move Slot").on_hover_text(format!("{} move(s) left", ch.moves)).clicked() {
+                                    self.moving = Some(ch.slot);
+                                    self.message = Some(("Click the slot to move this character to.".into(), false));
+                                }
                                 if ui.button("Logout").clicked() {
                                     action = Some(Action::Logout);
                                 }
                             });
+                            if let Some(until) = self.blocked.get(&ch.char_id) {
+                                ui.label(RichText::new(format!("This character is blocked until {until}.")).color(Color32::from_rgb(235, 120, 100)));
+                            }
+                            if let Some((id, typed, accepted)) = self.renaming.as_mut().filter(|r| r.0 == ch.char_id) {
+                                ui.horizontal(|ui| {
+                                    ui.label("New name");
+                                    if ui.add(egui::TextEdit::singleline(typed).desired_width(160.0).char_limit(23)).changed() {
+                                        *accepted = None;
+                                    }
+                                    match accepted.clone() {
+                                        None => {
+                                            if ui.add_enabled(typed.trim().len() >= 4 && !self.busy, egui::Button::new("Check")).clicked() {
+                                                self.busy = true;
+                                                action = Some(Action::Send(Command::Char(CharRequest::CheckName { account_id: 0, char_id: *id, name: typed.trim().to_string() })));
+                                            }
+                                        }
+                                        Some(name) => {
+                                            if ui.add_enabled(!self.busy, egui::Button::new(format!("Rename to {name}"))).on_hover_text("A character can only be renamed once.").clicked() {
+                                                self.busy = true;
+                                                action = Some(Action::Send(Command::Char(CharRequest::Rename { char_id: *id, name })));
+                                            }
+                                        }
+                                    }
+                                });
+                            }
                         }
                     }
                 }

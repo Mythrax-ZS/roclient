@@ -334,6 +334,10 @@ pub struct CharInfo {
     pub sex: u8,
     /// Seconds until a pending deletion can be confirmed; 0 when none is pending.
     pub delete_date: u32,
+    /// The server lets this character be renamed (chr_name_changeCnt).
+    pub can_rename: bool,
+    /// Slot moves left (chr_slot_changeCnt; 0: moving is off).
+    pub moves: u32,
 }
 
 pub fn parse_char_info(mut b: &[u8]) -> CharInfo {
@@ -367,9 +371,11 @@ pub fn parse_char_info(mut b: &[u8]) -> CharInfo {
     b.advance(2);
     let map = get_fixed_str(&mut b, 16);
     let delete_date = b.get_u32_le();
-    b.advance(4 * 3);
+    b.advance(4); // robe palette
+    let moves = b.get_u32_le();
+    let can_rename = b.get_u32_le() != 0;
     let sex = b.get_u8();
-    CharInfo { char_id, base_exp, zeny, job_level, hp, max_hp, sp, max_sp, job, head, base_level, speed, look, name, slot, hair_color, map, sex, delete_date }
+    CharInfo { char_id, base_exp, zeny, job_level, hp, max_hp, sp, max_sp, job, head, base_level, speed, look, name, slot, hair_color, map, sex, delete_date, can_rename, moves }
 }
 
 /// 0x006b: 3 + 20 bytes of header data, then characters.
@@ -1005,6 +1011,24 @@ pub enum CharRequest {
     Delete { char_id: u32, birthdate: String },
     /// CH_DELETE_CHAR3_CANCEL (0x082b).
     CancelDelete(u32),
+    /// CH_REQ_IS_VALID_CHARNAME (0x028d): may this character take the name?
+    CheckName { account_id: u32, char_id: u32, name: String },
+    /// CH_REQ_CHANGE_CHARNAME (0x08fc): rename it (after the check).
+    Rename { char_id: u32, name: String },
+    /// CH_REQ_CHANGE_CHARACTER_SLOT (0x08d4).
+    MoveSlot { from: u16, to: u16 },
+}
+
+/// HC_BLOCK_CHARACTER (0x020d): characters that cannot be played yet, with when they free up.
+pub fn parse_blocked_chars(data: &[u8]) -> Vec<(u32, String)> {
+    data.get(4..)
+        .unwrap_or_default()
+        .chunks_exact(24)
+        .map(|mut c| {
+            let id = c.get_u32_le();
+            (id, get_fixed_str(&mut c, 20))
+        })
+        .collect()
 }
 
 impl Encode for CharRequest {
@@ -1035,6 +1059,23 @@ impl Encode for CharRequest {
             CharRequest::CancelDelete(id) => {
                 d.put_u16_le(0x082b);
                 d.put_u32_le(*id);
+            }
+            CharRequest::CheckName { account_id, char_id, name } => {
+                d.put_u16_le(0x028d);
+                d.put_u32_le(*account_id);
+                d.put_u32_le(*char_id);
+                put_fixed_str(d, name, 24);
+            }
+            CharRequest::Rename { char_id, name } => {
+                d.put_u16_le(0x08fc);
+                d.put_u32_le(*char_id);
+                put_fixed_str(d, name, 24);
+            }
+            CharRequest::MoveSlot { from, to } => {
+                d.put_u16_le(0x08d4);
+                d.put_u16_le(*from);
+                d.put_u16_le(*to);
+                d.put_u16_le(0);
             }
         }
     }

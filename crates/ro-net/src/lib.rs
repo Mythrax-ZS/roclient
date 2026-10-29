@@ -82,6 +82,8 @@ pub struct CharSession {
     /// Character slots on the account (shown on the select screen).
     pub slots: u8,
     account_id: u32,
+    /// HC_BLOCK_CHARACTER at login: (char id, when it can play again).
+    pub blocked: Vec<(u32, String)>,
 }
 
 pub async fn enter_char(server: &CharServerInfo, auth: &AcceptLogin) -> anyhow::Result<CharSession> {
@@ -98,11 +100,13 @@ pub async fn enter_char(server: &CharServerInfo, auth: &AcceptLogin) -> anyhow::
 
     let mut characters = Vec::new();
     let mut slots = 9;
+    let mut blocked = vec![];
     loop {
         match next(&mut conn).await? {
             Frame::Raw(_) => {}
             Frame::Packet { opcode: id::HC_REFUSE_ENTER, data } => bail!("char server refused, error {}", data[2]),
             Frame::Packet { opcode: id::HC_ACCEPT_ENTER, data } => characters.extend(parse_hc_accept_enter(&data)),
+            Frame::Packet { opcode: id::HC_BLOCK_CHARACTER, data } => blocked = parse_blocked_chars(&data),
             Frame::Packet { opcode: id::HC_CHARLIST_NOTIFY, data } => {
                 // Pages of three slots.
                 slots = (u32::from_le_bytes(data[2..6].try_into()?) * 3).clamp(3, 15) as u8;
@@ -127,7 +131,7 @@ pub async fn enter_char(server: &CharServerInfo, auth: &AcceptLogin) -> anyhow::
     }
     characters.sort_by_key(|c| c.slot);
     characters.dedup_by_key(|c| c.char_id);
-    Ok(CharSession { conn, characters, slots, account_id: auth.account_id })
+    Ok(CharSession { conn, characters, slots, account_id: auth.account_id, blocked })
 }
 
 impl CharSession {
@@ -722,6 +726,14 @@ pub enum Event {
     CharDeleteStarted { char_id: u32, result: i32, seconds: u32 },
     CharDeleted { char_id: u32, result: i32 },
     CharDeleteCanceled { char_id: u32, result: i32 },
+    /// HC_ACK_IS_VALID_CHARNAME: the new name may be used.
+    CharNameOk(bool),
+    /// HC_ACK_CHANGE_CHARNAME: 0 renamed (the list follows), else why not.
+    CharRenamed(u32),
+    /// HC_ACK_CHANGE_CHARACTER_SLOT: moved (the list follows), and moves left.
+    CharMoved { ok: bool, moves: u16 },
+    /// HC_BLOCK_CHARACTER: (char id, "YYYY-MM-DD HH:MM:SS" it can play again).
+    CharsBlocked(Vec<(u32, String)>),
     /// Back at character select after Esc > Character Select (Characters follows).
     LeftGame,
     Disconnected(String),
@@ -1775,13 +1787,21 @@ async fn front_end(
             }
         };
         let _ = events.send(Event::Characters { chars: chars.characters.clone(), slots: chars.slots });
-        // Character select screen.
+        if !chars.blocked.is_empty() {
+            let _ = events.send(Event::CharsBlocked(chars.blocked.clone()));
+        }
+        // Character select screen. After a rename or slot move the server sends the list
+        // again: its pages are gathered here and replace the old one.
+        let mut relist: Option<Vec<CharInfo>> = None;
         let mut keepalive = tokio::time::interval(Duration::from_secs(10));
         loop {
             tokio::select! {
                 _ = keepalive.tick() => chars.ping().await?,
                 cmd = cmds.recv() => match cmd {
                     None => return Ok(None),
+                    Some(Command::Char(CharRequest::CheckName { char_id, name, .. })) => {
+                        chars.conn.send(CharRequest::CheckName { account_id: chars.account_id, char_id, name }).await?
+                    }
                     Some(Command::Char(req)) => chars.conn.send(req).await?,
                     Some(Command::SelectChar(slot)) => {
                         let Some(character) = chars.characters.iter().find(|c| c.slot == slot).cloned() else { continue };
@@ -1813,6 +1833,36 @@ async fn front_end(
                     Frame::Packet { opcode: 0x082c, data } => {
                         let (char_id, result, _) = parse_delete_reply(&data);
                         let _ = events.send(Event::CharDeleteCanceled { char_id, result });
+                    }
+                    Frame::Packet { opcode: 0x028e, data } if data.len() >= 4 => {
+                        let _ = events.send(Event::CharNameOk(data[2] != 0 || data[3] != 0));
+                    }
+                    Frame::Packet { opcode: 0x08fd, data } if data.len() >= 6 => {
+                        let _ = events.send(Event::CharRenamed(u32::from_le_bytes([data[2], data[3], data[4], data[5]])));
+                    }
+                    Frame::Packet { opcode: 0x0b70, data } if data.len() >= 8 => {
+                        let _ = events.send(Event::CharMoved { ok: data[4] == 0 && data[5] == 0, moves: u16::from_le_bytes([data[6], data[7]]) });
+                    }
+                    Frame::Packet { opcode: id::HC_BLOCK_CHARACTER, data } => {
+                        let _ = events.send(Event::CharsBlocked(parse_blocked_chars(&data)));
+                    }
+                    Frame::Packet { opcode: id::HC_ACCEPT_ENTER, data } => relist = Some(parse_hc_accept_enter(&data)),
+                    Frame::Packet { opcode: id::HC_CHARLIST_NOTIFY, .. } => {
+                        relist.get_or_insert_with(Vec::new);
+                        chars.conn.send(ChCharlistReq).await?;
+                    }
+                    Frame::Packet { opcode: id::HC_ACK_CHARINFO_PER_PAGE, data } => {
+                        let page = parse_charinfo_page(&data);
+                        let done = page.len() != 3;
+                        let list = relist.get_or_insert_with(Vec::new);
+                        list.extend(page);
+                        if done {
+                            let mut list = relist.take().unwrap_or_default();
+                            list.sort_by_key(|c| c.slot);
+                            list.dedup_by_key(|c| c.char_id);
+                            chars.characters = list;
+                            let _ = events.send(Event::Characters { chars: chars.characters.clone(), slots: chars.slots });
+                        }
                     }
                     f => ignored("char select", &f),
                 },
