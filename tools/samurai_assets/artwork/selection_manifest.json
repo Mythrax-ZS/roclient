@@ -29,7 +29,7 @@
     "build.json": "2b09f20ecdaf42ea652e5a7254b6d82f00dc93619270699424d24a1024767f3a",
     "master_audit.json": "7b589392b84d7d90bd20c073badad3f1ed3dc458ed5736d17a561face6a36fb4",
     "prompts_root.json": "5534a6cc57e7550837bb0009cce73a6d2b69fd17d4ecbea67b40dd69c0b74581",
-    "README.md": "904abf4bfb0caae6aee8d8816147de09186df3f3a9f49b667bb43b6dbc637a9e",
+    "README.md": "48e54d594de95a4dc629ca565ff9c755e8769cdda4021cee6adf535d7a6ce334",
     "source/attack/attack_audit.json": "5426270d8e7c0939a9ba5330f33362f61e034ddfb4cf5e033c847fd280edb43a",
     "source/attack/attack_N.png": "861b2f97c12447b0a5ab42846e5326d19efb6171df5676d56794f4141a199b94",
     "source/attack/attack_N.prompt.json": "0f740bb94100e65a92832709fd4e8246e9defd632e19580ff507e6e7b411444c",
@@ -42,8 +42,9 @@
     "source/attack/attack_W.png": "a932fd7d38910e1ee6675b16e27287ea1b20908d05498dcc0d56d6ca84720660",
     "source/attack/attack_W.prompt.json": "38085b87903e205dee67019c93086ed0541458981d1b41674cc9ddbfcd0360da",
     "source/idle_ready.png": "e28a3499c25bb932e968ab6a9535898dff4f2bbb328ee1526558f9f03dd496ce",
-    "source/katana.png": "68e3988be6f4a0647b3a1aa827935237f2c1f4bb2b5cc67276c59cc8d72ce635",
+    "source/katana.png": "90778e602e27754d46e9a2c3a0653ea1bed6d6303bea76225983773fe0456927",
     "source/katana.prompt.json": "a0c40f4a315217a3bbba4852b7f6a44080d7993eaedae23d3f49d5118a38f248",
+    "source/katana.refinement.json": "5054dcc02e60fc6b98018db843cfcb6aad40d0634788d1e2cdebbec289f3e427",
     "source/utility/utility_N.png": "b701d0d65c00bf6116bc13aced93a8321e7982a914463a7e5ee540cd318678a7",
     "source/utility/utility_N.prompt.json": "899902b59b2c3e98dea950b60c1ac031138f5924c9d9789d27f4fb11b903a8f9",
     "source/utility/utility_NW.png": "73bc83bed1d2ecf726d8f269ca249afb7d1cd1b059350ea20289788524eeab49",
@@ -67,7 +68,7 @@
   "compiled_runtime_sha256": {
     "ember_ronin.spr": "c5c3ea78995c90bdf4c820d2c6e252814d87313ab1c086dcf55e2686d5577aad",
     "ember_ronin.act": "534d734911b30e8ab7730d859795864fac8b5617463f2a8d5e36c58957758275",
-    "katana.spr": "a4d1ed230dfdeb906eb72714fea82709a3da4f1f50791d347c975548b26ba19b",
+    "katana.spr": "82bb15bdf204d4d5bfccbe0510a8e2b6212a13e7dcd4d9fd0adc57e0409b0079",
     "katana.act": "375ddddcdda0042da547641a612247047fe55ed5d7f032a49dab0eefad60d7b2"
   },
   "animation_contract": {

@@ -9,10 +9,14 @@ match that design with imagegen.
 The full-body images include head and hair. The katana remains a separate
 layer. `source/katana.png` is the generated curved silver blade with a red and
 black wrapped hilt. Its authored rectangle is sampled once into a 72-by-10
-pixel canvas, with about 69 visible pixels of length. The grip is at (14, 5)
+pixel canvas, with 58 visible pixels of length and a main blade about 5 pixels
+wide. The exposed blade is roughly 25% shorter than the first version, and its
+width increased from about 3 pixels. The grip is at (14, 5)
 in that sampled canvas. Every armed ACT pose uses scale 1.0; the former 0.75
 scale made the old thin blade disappear into a needle-like line in-game.
-`source/katana.prompt.json` records the exact prompt and sampling parameters.
+`source/katana.prompt.json` records the original generation; the exact edits
+and sampling parameters are in `source/katana.refinement.json`. The final
+shape was checked at 2000-by-1125 resolution and camera distances 300 and 420.
 
 The build preserves the accepted animation contract: 104 directional actions,
 304 timeline frames, eight walking poses at 100 ms each, and paired body/weapon

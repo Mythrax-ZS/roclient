@@ -2,16 +2,17 @@
   "schema_version": 1,
   "job_name": "Samurai",
   "appearance_working_name": "Ember Ronin",
-  "revision": "Selected black and red reference design with native-scale katana, 2026-10-30",
+  "revision": "Selected black and red reference design with shorter, wider katana blade, 2026-10-30",
   "source_package": "tools/samurai_assets/artwork",
   "origin": "Generated for this project with the built-in image-generation tool. The user-selected black and red reference supplies idle and ready poses unchanged; the other actions were restyled to match it using the previous corrected motion as reference.",
   "generation_prompts": [
     "tools/samurai_assets/artwork/prompts_root.json",
     "tools/samurai_assets/artwork/source/utility/*.prompt.json",
     "tools/samurai_assets/artwork/source/attack/*.prompt.json",
-    "tools/samurai_assets/artwork/source/katana.prompt.json"
+    "tools/samurai_assets/artwork/source/katana.prompt.json",
+    "tools/samurai_assets/artwork/source/katana.refinement.json"
   ],
-  "runtime_changes": "Body compiled from selected RGBA sources with uniform sheet calibration and authored origins. Katana PNG sampled once to72x10pixels with about69visiblepixels of length; authored grip(14,5), native ACT scale1.0, existing hand positions and angles retained.",
+  "runtime_changes": "Body and all ACT placement/timing unchanged. Katana PNG sampled once to72x10pixels with58visiblepixels of length; main blade5pixels wide instead of3. Exposed blade shortened roughly25percent. Authored grip(14,5) and native ACT scale1.0 retained.",
   "head_included": true,
   "hair_included": true,
   "weapon_included_in_body": false,
@@ -32,13 +33,14 @@
     "rebuild_matches_installed_bytes": true,
     "offline_captures": "15 captures on Prontera: all eight walk directions, idle, north ready, south/north attack, southwest sit, northeast cast and southwest fall. Existing release client used; no live account login.",
     "compiler_tests_passed": 17,
-    "katana_offline_captures": "Six captures on Prontera: south/west/north ready, south/east/north attacks. New blade readable and attached. Existing release client, no live login.",
-    "body_files_unchanged_from_reference_revision": true
+    "katana_offline_captures": "Six final captures on prt_fild08 at185,335,2000x1125: south/west ready and south/east/north attack atdistance300; southready atdistance420. Before/after comparison includes uprightattack0. No live login.",
+    "body_files_unchanged_from_reference_revision": true,
+    "katana_decoded_review": "All8ready directions and48attackposes: attached grips, unclipped blade tips,5pixel main blade width; ACT unchanged."
   },
   "sha256": {
     "data/sprite/custom/samurai/ember_ronin.spr": "c5c3ea78995c90bdf4c820d2c6e252814d87313ab1c086dcf55e2686d5577aad",
     "data/sprite/custom/samurai/ember_ronin.act": "534d734911b30e8ab7730d859795864fac8b5617463f2a8d5e36c58957758275",
-    "data/sprite/custom/samurai/katana.spr": "a4d1ed230dfdeb906eb72714fea82709a3da4f1f50791d347c975548b26ba19b",
+    "data/sprite/custom/samurai/katana.spr": "82bb15bdf204d4d5bfccbe0510a8e2b6212a13e7dcd4d9fd0adc57e0409b0079",
     "data/sprite/custom/samurai/katana.act": "375ddddcdda0042da547641a612247047fe55ed5d7f032a49dab0eefad60d7b2"
   },
   "selected_reference_sha256": "e28a3499c25bb932e968ab6a9535898dff4f2bbb328ee1526558f9f03dd496ce"

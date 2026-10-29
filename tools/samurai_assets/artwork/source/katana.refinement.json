@@ -1,0 +1,42 @@
+{
+  "mode": "built-in image_gen",
+  "date": "2026-10-30",
+  "use_case": "precise-object-edit",
+  "input": "source/katana.png at client commit 812b98f",
+  "edits": [
+    {
+      "prompt": "Use case: precise-object-edit. Edit target: attached horizontal black/red-hilt katana game sprite. The user requests a SHORTER, WIDER BLADE. Change only the exposed silver blade to the RIGHT of the red/gold collar: shorten its length about25percent and increase its thickness about75percent throughout the first three quarters, then taper to a clean pointed katana tip. Keep its gently curved single-edged katana identity and bright broad silver face with a thin dark steel spine; make the blade readable at small RPG sprite size. Preserve the entire red-and-black diamond-wrapped hilt, gold guard, pommel and red/gold collar unchanged in position, size, colors and shape. Do not enlarge the handle or the whole sword. Preserve exact flat side view, hilt to left, tip to right, pixel-art style and horizontal hilt axis. Keep SAME1774x887canvas and hilt coordinates as input: pommel aroundx60, goldguard aroundx500, blade beginsaroundx560; newtip aroundx1430 instead ofx1723. New blade thickness roughly120pixels instead of70; broad silver midtone should cover most of that width. The sword should fit comfortably withiny352..600. Rest of canvas genuinely transparent alpha0, preserve transparency, no shadow,glow,background,text,grid,hands,scabbard or extraobjects. Render ONE complete shorter wider katana. This is a production edit, preserve the hilt layout and add no unrelated detail.",
+      "purpose": "Shorten the exposed blade without changing handle registration."
+    },
+    {
+      "prompt": "Use case: precise-object-edit. This is a production katana game sprite refinement. Preserve the attached image's shortened blade LENGTH, tipposition, horizontal orientation, handle, gold guard, red/gold collar and entire1774x887canvas. Change ONLY the silver blade's WIDTH: make the main silver blade approximately50percent thicker than this input, with about150-160pixels of solid visible thickness across its central two thirds, narrowing only in the final tipquarter. It must read as a solid substantial blade at small in-game size, not a slender wire. Most width should be readable light/mid silver, with a thin darker spine and clean bright lower edge. Retain a gently curved single cutting edge and pointed katana tip. Keep hilt exactly the same size and position aroundx60..560,y420..520; do not move or rescale the sword or lengthen the blade. Keep shortenedtipnearx1460; do notreturn toearlierlongblade. Newbladecanextend downward toabouty590; preserve originaltopspine and bladeconnectionatguard. Same black/reddiamondwrap,goldhardware,pixelartstyle. All otherpixels/layout unchanged. Genuine transparentalpha0 background, no glow,shadow,text,border,grid,scabbard,hand or extraobjects. Output ONE complete sword.",
+      "purpose": "Widen the blade further after checking the native gameplay size."
+    }
+  ],
+  "output": "source/katana.png",
+  "sampling": {
+    "rect": [
+      32,
+      352,
+      1760,
+      576
+    ],
+    "downsample": 24,
+    "source_grip": [
+      14,
+      5
+    ],
+    "act_scale": [
+      1,
+      1
+    ]
+  },
+  "review": {
+    "visible_total_length": 58,
+    "previous_total_length": 69,
+    "main_blade_width": 5,
+    "previous_main_blade_width": 3,
+    "body_and_act_unchanged": true,
+    "normal_gameplay_capture": "2000x1125, distance300, pitch50, prt_fild08 at185,335; also checked distance420"
+  }
+}
