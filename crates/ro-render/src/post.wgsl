@@ -170,26 +170,48 @@ fn shafts(eye: vec3<f32>, dir: vec3<f32>, near: f32, dist: f32, t: f32) -> f32 {
     return sum / f32(steps) * (far - near) / 200.0;
 }
 
-// Marine snow: motes fixed in the water and sinking slowly. Three shells at different
-// distances along the view ray each look up a world grid, so motes keep their place (and
-// parallax) as the camera moves.
-fn marine_snow(eye: vec3<f32>, dir: vec3<f32>, dist: f32, t: f32) -> f32 {
+fn hash3(p: vec3<f32>) -> vec4<f32> {
+    let q = vec4(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)), dot(p, vec3(63.7, 197.3, 41.9)));
+    return fract(sin(q) * 43758.5453);
+}
+
+// Marine snow: real points in the water. The view ray walks the cells of a 3D grid that
+// sinks slowly; each cell may hold one mote, drawn where the ray passes close to it. Motes
+// stay round from any angle, shrink with distance, keep their place as the camera moves,
+// and hide behind geometry.
+fn marine_snow(eye: vec3<f32>, dir: vec3<f32>, near: f32, far: f32, t: f32) -> f32 {
+    let cell = 9.0;
+    // The grid sinks and drifts with a slow current.
+    let flow = vec3(t * 0.5, t * 1.3, t * 0.3);
+    let o = (eye + dir * near + flow) / cell;
+    var c = floor(o);
+    let stp = sign(dir);
+    let inv = 1.0 / max(abs(dir), vec3(1e-5));
+    var tmax = (select(o - c, c + 1.0 - o, stp > vec3(0.0))) * inv;
+    let span = (far - near) / cell;
     var s = 0.0;
-    for (var l = 0; l < 3; l++) {
-        let fl = f32(l);
-        let pos = eye + dir * dist * (0.52 + 0.15 * fl);
-        let cell_size = 6.0 + fl * 2.0;
-        // Sinking: the pattern slides down (y), and drifts with a slow current.
-        let w = vec2(pos.x + t * 0.6, pos.z + (pos.y + t * 1.4) * 0.7) / cell_size;
-        let cell = floor(w);
-        let f = fract(w);
-        let h = hash2(cell + fl * 37.0);
-        let wob = vec2(sin(t * (0.6 + h.x) + h.y * 6.28), cos(t * (0.45 + h.y) + h.x * 6.28)) * 0.1;
-        let d = length(f - (h * 0.7 + 0.15 + wob));
-        let size = (0.05 + 0.05 * h.x) / (1.0 + fl * 0.4);
-        s += smoothstep(size, size * 0.2, d) * step(0.55, h.y) * (0.6 - 0.15 * fl);
+    for (var i = 0; i < 40; i++) {
+        let h = hash3(c);
+        if h.w > 0.84 {
+            let pt = (c + 0.15 + h.xyz * 0.7) * cell - flow;
+            let rel = pt - eye;
+            let along = dot(rel, dir);
+            if along > near && along < far {
+                let d = length(rel - dir * along);
+                let r = 0.18 + 0.17 * h.x;
+                s += smoothstep(r, r * 0.2, d) * (0.35 + 0.65 * h.y);
+            }
+        }
+        let m = min(tmax.x, min(tmax.y, tmax.z));
+        if m > span {
+            break;
+        }
+        // Step into the neighbouring cell across the nearest face.
+        let mask = vec3<f32>(tmax <= vec3(m));
+        c += stp * mask;
+        tmax += inv * mask;
     }
-    return s;
+    return min(s, 1.5);
 }
 
 @fragment
@@ -257,7 +279,7 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
         let open_len = mix(ray_len, p.depth.x * 3.0, abyss);
         let light = vec3(0.30, 0.62, 0.70);
         c += light * shafts(p.eye.xyz, dir, p.depth.x * 0.6, open_len, secs) * 0.45 * uw;
-        c += vec3(0.55, 0.75, 0.8) * marine_snow(p.eye.xyz, dir, min(open_len, p.depth.x * 1.3), secs) * 0.16 * uw;
+        c += vec3(0.55, 0.75, 0.8) * marine_snow(p.eye.xyz, dir, p.depth.x * 0.35, min(open_len, p.depth.x * 1.3), secs) * 0.2 * uw;
     }
 
     c *= p.grade.x;
