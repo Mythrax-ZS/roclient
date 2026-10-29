@@ -58,6 +58,10 @@ impl State {
                 if let Some(item) = self.items.get_mut(&index) { item.equipped = slots; }
                 println!("EQUIP index={index} slots={slots:#x}");
             }
+            Event::Unequipped { index, ok, .. } => {
+                ensure!(ok, "unequip refused for inventory index {index}");
+                if let Some(item) = self.items.get_mut(&index) { item.equipped = 0; }
+            }
             Event::Skills(skills) => self.skills = skills.into_iter().map(|s| (s.id, s)).collect(),
             Event::SkillAdded(skill) => { self.skills.insert(skill.id, skill); }
             Event::SkillUpdate { id, level, sp, range, upgradable } => {
@@ -71,6 +75,7 @@ impl State {
             }
             Event::Stats(s) => {
                 self.stats.insert(49, s.hit as i64);
+                self.stats.insert(52, s.crit as i64);
                 self.stats.insert(53, (s.aspd.0 + s.aspd.1) as i64);
             }
             Event::StatusIcon { id, kind, on, remain_ms } if id == self.account && (2000..=2004).contains(&kind) => {
@@ -174,6 +179,78 @@ impl Test {
         self.cast(skill, self.state.account).await?;
         ensure!(self.state.buffs.contains(&efst), "skill {skill} did not apply EFST {efst}; failures {:?}", self.state.failed);
         println!("PASS skill {skill} applies status {efst}");
+        Ok(())
+    }
+
+    async fn equip(&mut self, index: u16, location: u32) -> Result<()> {
+        self.send(Command::Item(ItemRequest::Equip { index, location }))?;
+        self.pump(450).await?;
+        ensure!(self.state.items.get(&index).is_some_and(|i| i.equipped & location != 0),
+            "item {index} did not equip in hand {location}");
+        Ok(())
+    }
+
+    async fn clear_hands(&mut self) -> Result<()> {
+        let equipped: Vec<_> = self.state.items.values().filter(|i| i.equipped & 34 != 0).map(|i| i.index).collect();
+        for index in equipped {
+            self.send(Command::Item(ItemRequest::Unequip { index }))?;
+            self.pump(250).await?;
+        }
+        ensure!(!self.state.items.values().any(|i| i.equipped & 34 != 0), "hands did not become empty");
+        Ok(())
+    }
+
+    /// Exercise item scripts through the real equipment and skill packets.
+    async fn legendary_weapons(&mut self) -> Result<()> {
+        self.chat("@samuraireset").await?;
+        self.chat("@samuraiblades").await?;
+        self.clear_hands().await?;
+        let kusanagi = self.state.items.values().find(|i| i.id == 900001).context("Kusanagi missing")?.index;
+        let muramasa = self.state.items.values().find(|i| i.id == 900002).context("Muramasa missing")?.index;
+        let (hp, sp, hit, crit) = (self.state.stat(6)?, self.state.stat(8)?, self.state.stat(49)?, self.state.stat(52)?);
+
+        self.equip(kusanagi, 2).await?;
+        ensure!(self.state.stat(49)? == hit + 15, "Kusanagi HIT bonus mismatch");
+        ensure!(self.state.stat(52)? == crit + 8, "Kusanagi CRIT bonus mismatch");
+        ensure!((self.state.stat(8)? - sp * 105 / 100).abs() <= 1, "Kusanagi Max SP bonus mismatch");
+        ensure!(self.state.stat(6)? == hp, "Kusanagi unexpectedly changed Max HP");
+        println!("PASS Kusanagi equips with +15 HIT, +8 CRIT and +5% Max SP");
+
+        for (skill, icon, expected_cost) in [(7002, 2000, 25), (7003, 2001, 29)] {
+            self.chat("@heal").await?;
+            let before = self.state.stat(7)?;
+            self.buff(skill, icon).await?;
+            ensure!(before - self.state.stat(7)? == expected_cost,
+                "Kusanagi skill {skill} SP cost {}, expected {expected_cost}", before - self.state.stat(7)?);
+        }
+        println!("PASS Kusanagi reduces Guard/Reflection SP costs to 25/29");
+        self.chat("@samuraireset").await?;
+
+        self.equip(muramasa, 32).await?;
+        ensure!(self.state.stat(49)? == hit + 15 && self.state.stat(52)? == crit + 13,
+            "paired weapons HIT/CRIT bonuses mismatch");
+        ensure!((self.state.stat(6)? - hp * 95 / 100).abs() <= 1, "Muramasa Max HP penalty mismatch");
+        ensure!((self.state.stat(8)? - sp * 105 / 100).abs() <= 1, "paired weapons Max SP mismatch");
+        println!("PASS Kusanagi right/Muramasa left preserve both bonuses and apply -5% Max HP");
+
+        self.clear_hands().await?;
+        self.equip(muramasa, 2).await?;
+        ensure!(self.state.stat(52)? == crit + 5 && self.state.stat(49)? == hit,
+            "Muramasa alone CRIT/HIT bonuses mismatch");
+        ensure!(self.state.stat(8)? == sp && (self.state.stat(6)? - hp * 95 / 100).abs() <= 1,
+            "Muramasa alone HP/SP bonuses mismatch");
+        self.equip(kusanagi, 32).await?;
+        ensure!(self.state.stat(49)? == hit + 15 && self.state.stat(52)? == crit + 13,
+            "reversed weapon hands changed HIT/CRIT bonuses");
+        ensure!((self.state.stat(6)? - hp * 95 / 100).abs() <= 1 && (self.state.stat(8)? - sp * 105 / 100).abs() <= 1,
+            "reversed weapon hands changed HP/SP bonuses");
+        println!("PASS Muramasa right/Kusanagi left also equip with matching bonuses");
+
+        self.clear_hands().await?;
+        ensure!(self.state.stat(6)? == hp && self.state.stat(8)? == sp
+            && self.state.stat(49)? == hit && self.state.stat(52)? == crit,
+            "weapon bonuses did not disappear after unequipping");
+        println!("PASS unequipping both legendary weapons restores all baseline stats");
         Ok(())
     }
 }
@@ -336,6 +413,7 @@ async fn main() -> Result<()> {
     test.cast(7008, dummy).await?;
     ensure!(test.state.hits[before..].iter().any(|(id, right, left)| *id == 7008 && right + left > 0), "Wrath did not damage dummy below 30% HP");
     println!("PASS Wrath Unbound rejects 30% HP and deals damage below threshold");
+    test.legendary_weapons().await?;
     println!("SAMURAI_INTEGRATION_PASS");
     drop(test);
     task.await??;

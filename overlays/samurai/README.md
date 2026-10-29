@@ -1,13 +1,13 @@
 # Samurai appearance assets
 
-This overlay supplies the male Samurai body and its separately equipped katana.
+This overlay supplies the male Samurai body and its separately equipped katanas.
 The game job is **Samurai** (4500); **Ember Ronin** remains the asset filename.
 
 ## Rendering contract
 
 - The body includes the head and ponytail. Do not add stock heads, hair,
   headgear, garment or shield layers. Its colors are authored into the sprite.
-- Both ACT files contain 104 actions. Directions are S, SW, W, NW, N, NE, E, SE;
+- The body and each weapon ACT contain 104 actions. Directions are S, SW, W, NW, N, NE, E, SE;
   the action index is `group * 8 + direction`.
 - Use human player actions: idle 0, walk 1, sit 2, pickup 3, ready 4,
   attack 5, hurt 6, freeze 7, death 8, freeze 9, attack 10/11, cast 12.
@@ -23,10 +23,11 @@ The game job is **Samurai** (4500); **Ember Ronin** remains the asset filename.
   wrapped hilt occupy 58 pixels of the 72-by-10 source canvas, with a main blade
   about 5 pixels wide. The blade was shortened and widened for gameplay zoom; do not
   restore the old 0.75 scale, which made the thin blade hard to read in-game.
-- Equipped swords with view 2, 3 or 49 use the matching katana. Dual wielding is a
+- Equipped swords with view 2, 3 or 49 use the starter katana. Custom views 9001
+  and 9002 select Kusanagi and Muramasa. Dual wielding is a
   server mechanic; separate offhand and katar artwork are not supplied.
-- Both pairs use SPR 2.1 truecolor RGBA and ACT 2.5. Keep the four files together
-  when replacing an asset revision.
+- All pairs use SPR 2.1 truecolor RGBA and ACT 2.5. Weapon pairs must match the
+  body's action layout and authored grip positions.
 
 ## Reference design revision
 
@@ -74,3 +75,36 @@ placement are reproducible from the metadata.
 `System/samurai_iteminfo.lua` supplies item 900000, **Samurai Initiate's Katana**.
 It references the installed game's stock Katana item/collection icons; those
 icons are not redistributed in this overlay.
+
+## Kusanagi and Muramasa
+
+| Item ID | Name | Client view | Role |
+| --- | --- | --- | --- |
+| 900001 | Kusanagi | 9001 | Divinity: precision, critical strikes and efficient SP use |
+| 900002 | Muramasa | 9002 | Cursed: stronger attacks and Bleeding, with reduced Max HP |
+
+Both are Samurai-only one-handed swords, weapon level 4, one slot, required
+base level 99, refineable and Neutral element. The server owns their stats and
+effects; see [the server specification](../../../rathena/doc/custom_jobs/samurai.md).
+Their gameplay design uses the Divinity/Cursed themes from the earlier shared
+ChatGPT conversation. The private Discord message was not accessible; no extra
+origin story is asserted. The user's gold/blue and red/black images define
+their visual identities.
+
+The overlay includes separate equipped SPR/ACT pairs, 32-pixel inventory icons,
+128-pixel collection art and floor-drop sprites. Either weapon can be equipped
+in either hand mechanically; the current client displays the main-hand weapon.
+The existing stock Muramasa (1164) remains a separate item.
+
+Rebuild their art from the client root:
+
+```powershell
+py tools/samurai_assets/compile_weapons.py tools/samurai_assets/artwork/build.json tools/samurai_assets/artwork/legendary_weapons.json --output target/legendary-weapons
+```
+
+The staging overlay is `target/legendary-weapons/overlay`; each weapon directory
+also contains decoded contacts and an animated preview. The generated PNGs and
+exact built-in imagegen prompts are in `tools/samurai_assets/artwork/source/legendary`.
+[legendary_provenance.json](legendary_provenance.json) records their source and
+runtime hashes. Restart the rebuilt client after installation. Reload the
+server item database, then use `@item 900001 1` or `@item 900002 1` for testing.

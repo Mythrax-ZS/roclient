@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "revision": "Kusanagi and Muramasa, 2026-10-30",
+  "generation_mode": "built-in image_gen",
+  "gameplay_source": "https://chatgpt.com/share/6ae32624-5d04-83ea-97ca-d6037adb630c",
+  "source_scope": "The recovered shared conversation establishes Divinity/Kusanagi and Cursed/Muramasa skill themes. The private Discord message and deeper project backstory were not readable; no additional canon is claimed.",
+  "visual_references": "User supplied gold/blue Kusanagi and red/black Muramasa illustrations; matching originals are Kusanagi.png and Muramasa Transformed.png in art.zip.",
+  "manifest": "tools/samurai_assets/artwork/legendary_weapons.json",
+  "generation_prompts": [
+    "tools/samurai_assets/artwork/source/legendary/kusanagi.prompt.json",
+    "tools/samurai_assets/artwork/source/legendary/muramasa.prompt.json"
+  ],
+  "compiler": "tools/samurai_assets/compile_weapons.py",
+  "items": [
+    {
+      "id": 900001,
+      "view": 9001,
+      "name": "Kusanagi",
+      "resource": "samurai_kusanagi"
+    },
+    {
+      "id": 900002,
+      "view": 9002,
+      "name": "Muramasa",
+      "resource": "samurai_muramasa"
+    }
+  ],
+  "validation": {
+    "samurai_client_tests_passed": 6,
+    "release_client_build": "passed",
+    "server_run_once": "zero errors/warnings",
+    "isolated_integration": "SAMURAI_INTEGRATION_PASS; stats, both hand orders, unequip restoration, actual Guard/Reflection SP costs25/29",
+    "visual_review": "Both weapons: all8ready directions and48attack poses;32/128pixel item pictures and floor sprites",
+    "offline_captures": "Six final captures, prt_fild08,2000x1125,distance300: ready/side/attack for each weapon; no live login",
+    "balance_limits": "Initial gameplay balance. Random Bleeding frequency and skill damage percentages not statistically measured.",
+    "visual_limits": "Main-hand weapon is rendered; a separately animated offhand blade is not supplied."
+  },
+  "source_sha256": {
+    "source/legendary/kusanagi.png": "e9187d20953db85d8885c679583d3c69fb9adee1cd4609ecafde4a793846950e",
+    "source/legendary/kusanagi.prompt.json": "3cda81324be313a23720931c34c071cd9b4cb3e12a65f08a154408a89574e540",
+    "source/legendary/muramasa.png": "126d386a3ee2029d5ca5f463f7a157acce7d5a1199e55b75dc6aec928f959d9f",
+    "source/legendary/muramasa.prompt.json": "f9e7bc6f505f0f4408f1f92fbd45d2cc5a6a6901c04307bc1269dc9541d2d31a",
+    "source/legendary/sampling_review.json": "2f5d1f5d5e84da5c46fd1b8c32cc5d7baa3f6295bd4098eb2de362cd348ad600"
+  },
+  "compiled": {
+    "base_config_sha256": "2b09f20ecdaf42ea652e5a7254b6d82f00dc93619270699424d24a1024767f3a",
+    "manifest_sha256": "4160519d7eac8f3b0509495c0339e1b4528a56fcc40f9cfc819c1f95b2d7aebb",
+    "weapons": {
+      "kusanagi": {
+        "resource": "samurai_kusanagi",
+        "source_sha256": "e9187d20953db85d8885c679583d3c69fb9adee1cd4609ecafde4a793846950e",
+        "weapon_sha256": {
+          "spr": "fd405f9587b82d17e8b023cca5f96d21e3d4b2451e335df9fe525267cc1518ff",
+          "act": "621a72003d2ac24939c45d4fdad20dece3d9bc2b37f83a3077d8868d53bbff7b"
+        },
+        "floor_valid": true,
+        "floor_origin": [
+          16,
+          16
+        ],
+        "icon_size": [
+          32,
+          32
+        ],
+        "collection_size": [
+          128,
+          128
+        ]
+      },
+      "muramasa": {
+        "resource": "samurai_muramasa",
+        "source_sha256": "126d386a3ee2029d5ca5f463f7a157acce7d5a1199e55b75dc6aec928f959d9f",
+        "weapon_sha256": {
+          "spr": "45b1133da9db66fb9893602ae495122449d377e8f5b5597110be4d8b4df03099",
+          "act": "fa2ad3d4c2a8410d3a95c0f9ee48c1a3b088a52ebe05565d7015cb14150676f3"
+        },
+        "floor_valid": true,
+        "floor_origin": [
+          16,
+          16
+        ],
+        "icon_size": [
+          32,
+          32
+        ],
+        "collection_size": [
+          128,
+          128
+        ]
+      }
+    },
+    "body_sha256": {
+      "spr": "c5c3ea78995c90bdf4c820d2c6e252814d87313ab1c086dcf55e2686d5577aad",
+      "act": "534d734911b30e8ab7730d859795864fac8b5617463f2a8d5e36c58957758275"
+    },
+    "overlay_sha256": {
+      "data/sprite/custom/samurai/kusanagi.act": "621a72003d2ac24939c45d4fdad20dece3d9bc2b37f83a3077d8868d53bbff7b",
+      "data/sprite/custom/samurai/kusanagi.spr": "fd405f9587b82d17e8b023cca5f96d21e3d4b2451e335df9fe525267cc1518ff",
+      "data/sprite/custom/samurai/muramasa.act": "fa2ad3d4c2a8410d3a95c0f9ee48c1a3b088a52ebe05565d7015cb14150676f3",
+      "data/sprite/custom/samurai/muramasa.spr": "45b1133da9db66fb9893602ae495122449d377e8f5b5597110be4d8b4df03099",
+      "data/sprite/\uc544\uc774\ud15c/samurai_kusanagi.act": "bdce179c49a9177d0d58370878b84d936621882a364dae5b555b2fe09a1f91fa",
+      "data/sprite/\uc544\uc774\ud15c/samurai_kusanagi.spr": "0293835f4287c4a6fc1d0bfda387323be2e80c70e8884206982585d647ce7999",
+      "data/sprite/\uc544\uc774\ud15c/samurai_muramasa.act": "bdce179c49a9177d0d58370878b84d936621882a364dae5b555b2fe09a1f91fa",
+      "data/sprite/\uc544\uc774\ud15c/samurai_muramasa.spr": "860ba0e302bd55c6d158feaf28e786b61f09c91fc3e4830ad3b4050c0ac982f4",
+      "data/texture/\uc720\uc800\uc778\ud130\ud398\uc774\uc2a4/collection/samurai_kusanagi.bmp": "c63473fb3841bc4cda597243c408cfd179e2eadd4524003133dadfb6afe88bd9",
+      "data/texture/\uc720\uc800\uc778\ud130\ud398\uc774\uc2a4/collection/samurai_muramasa.bmp": "1e51fe07443ad5a7421cf725256932dd867d236fbe1bb693e9b122da73c38ad6",
+      "data/texture/\uc720\uc800\uc778\ud130\ud398\uc774\uc2a4/item/samurai_kusanagi.bmp": "219e90d7cd1b09edf94833e189e1c4a33b973bcc559a38b85c90dddc088dfe9d",
+      "data/texture/\uc720\uc800\uc778\ud130\ud398\uc774\uc2a4/item/samurai_muramasa.bmp": "b17a763731938d2010408225df504689b8c8e2c49706639008bd53c34315fb75"
+    }
+  }
+}

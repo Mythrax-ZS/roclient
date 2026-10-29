@@ -1,0 +1,82 @@
+{
+  "kusanagi": {
+    "rect": [
+      24,
+      312,
+      1488,
+      624
+    ],
+    "downsample": 24,
+    "source_grip": [
+      14,
+      6
+    ],
+    "source_size": [
+      1774,
+      887
+    ],
+    "source_visible_bbox": [
+      40,
+      339,
+      1431,
+      580
+    ],
+    "native_size": [
+      61,
+      13
+    ],
+    "native_visible_bbox": [
+      1,
+      1,
+      59,
+      11
+    ],
+    "sha256": "e9187d20953db85d8885c679583d3c69fb9adee1cd4609ecafde4a793846950e",
+    "main_blade_width_range": [
+      5,
+      6
+    ],
+    "main_blade_width_median": 6,
+    "native_visible_edge_contacts": []
+  },
+  "muramasa": {
+    "rect": [
+      0,
+      270,
+      1620,
+      540
+    ],
+    "downsample": 27,
+    "source_grip": [
+      16,
+      5
+    ],
+    "source_size": [
+      1961,
+      802
+    ],
+    "source_visible_bbox": [
+      28,
+      295,
+      1577,
+      510
+    ],
+    "native_size": [
+      60,
+      10
+    ],
+    "native_visible_bbox": [
+      1,
+      1,
+      58,
+      9
+    ],
+    "sha256": "126d386a3ee2029d5ca5f463f7a157acce7d5a1199e55b75dc6aec928f959d9f",
+    "main_blade_width_range": [
+      4,
+      6
+    ],
+    "main_blade_width_median": 5,
+    "native_visible_edge_contacts": []
+  }
+}

@@ -6,11 +6,18 @@ pub const JOB: i16 = 4500;
 pub const SPRITE: &str = "samurai";
 pub const BODY: &str = r"data\sprite\custom\samurai\ember_ronin";
 pub const KATANA: &str = r"data\sprite\custom\samurai\katana";
+pub const KUSANAGI: &str = r"data\sprite\custom\samurai\kusanagi";
+pub const MURAMASA: &str = r"data\sprite\custom\samurai\muramasa";
 
 /// The supplied weapon ACT is aligned to this body; stock weapon ACTs are not.
 pub fn weapon(view: u32) -> Option<&'static str> {
-    // 49 is the stock Slayer/Claymore/Muramasa sprite alias in current itemInfo.
-    matches!(view, 2 | 3 | 49).then_some(KATANA)
+    match view {
+        // 49 is the stock Slayer/Claymore/Muramasa sprite alias in current itemInfo.
+        2 | 3 | 49 => Some(KATANA),
+        9001 => Some(KUSANAGI),
+        9002 => Some(MURAMASA),
+        _ => None,
+    }
 }
 
 /// Find the tracked asset overlay from a packaged executable or a repository checkout.
@@ -145,10 +152,65 @@ mod tests {
     }
 
     #[test]
+    fn legendary_weapon_views_resolve_to_distinct_body_aligned_sprites() {
+        assert_eq!(weapon(9001), Some(KUSANAGI));
+        assert_eq!(weapon(9002), Some(MURAMASA));
+        assert_ne!(weapon(9001), weapon(9002));
+        assert_ne!(weapon(9001), weapon(2));
+        assert_ne!(weapon(9002), weapon(49)); // The stock Muramasa remains the generic katana.
+        assert_eq!(weapon(900000), None); // Item IDs must first resolve through itemInfo.
+        assert_eq!(weapon(900001), None);
+        assert_eq!(weapon(900002), None);
+    }
+
+    #[test]
+    fn legendary_item_metadata_resolves_bundled_icons_and_visible_floor_sprites() {
+        let root = overlay_path().expect("bundled Samurai overlay");
+        let entries = crate::customdata::iteminfo(
+            &std::fs::read(root.join("System/samurai_iteminfo.lua")).unwrap(), "samurai_iteminfo.lua");
+        let mut db = ro_game::items::ItemDb::default();
+        db.extend(entries);
+        assert!(db.get(1164).is_none()); // Do not replace the stock two-handed Muramasa.
+        for (id, name, resource, view, sprite) in [
+            (900001, "Kusanagi", "samurai_kusanagi", 9001, KUSANAGI),
+            (900002, "Muramasa", "samurai_muramasa", 9002, MURAMASA),
+        ] {
+            let info = db.get(id).expect("legendary weapon metadata");
+            assert_eq!((info.name.as_str(), info.resource.as_str()), (name, resource));
+            assert_eq!((info.slots, info.view), (1, view));
+            assert_eq!(weapon(info.view), Some(sprite));
+            for (folder, size) in [("item", 32), ("collection", 128)] {
+                let path = format!("data/texture/유저인터페이스/{folder}/{resource}.bmp");
+                let bytes = std::fs::read(root.join(&path)).expect("bundled item picture");
+                assert!(bytes.starts_with(b"BM"), "{path} must be a real BMP");
+                let image = ro_formats::image::decode(&bytes, &path).unwrap();
+                assert_eq!((image.width, image.height), (size, size));
+                assert!(image.pixels.chunks_exact(4).any(|p| p[3] == 0), "{path} needs transparency");
+                assert!(image.pixels.chunks_exact(4).any(|p| p[3] != 0), "{path} must be visible");
+            }
+            let path = root.join(format!("data/sprite/아이템/{resource}"));
+            let spr = ro_formats::spr::Spr::parse(&std::fs::read(path.with_extension("spr")).unwrap()).unwrap();
+            let act = ro_formats::act::Act::parse(&std::fs::read(path.with_extension("act")).unwrap()).unwrap();
+            let (indexed, rgba) = spr.images(None);
+            let frames = &act.actions.first().expect("floor action 0").frames;
+            assert!(!frames.is_empty());
+            for frame in frames {
+                let layers: Vec<_> = frame.layers.iter().filter(|l| l.sprite >= 0).collect();
+                assert!(!layers.is_empty(), "floor item must have a visible layer");
+                for layer in layers {
+                    let images = if layer.kind == 1 { &rgba } else { &indexed };
+                    let image = images.get(layer.sprite as usize).expect("valid floor sprite reference");
+                    assert!(image.pixels.chunks_exact(4).any(|p| p[3] != 0));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn shipped_body_and_weapon_match_all_player_actions() {
         let root = overlay_path().expect("bundled Samurai overlay");
         let mut parsed = Vec::new();
-        for base in [BODY, KATANA] {
+        for base in [BODY, KATANA, KUSANAGI, MURAMASA] {
             let path = root.join(base.replace('\\', "/"));
             let spr = ro_formats::spr::Spr::parse(&std::fs::read(path.with_extension("spr")).unwrap()).unwrap();
             let act = ro_formats::act::Act::parse(&std::fs::read(path.with_extension("act")).unwrap()).unwrap();
@@ -162,9 +224,11 @@ mod tests {
             }
             parsed.push(act);
         }
-        for (body, weapon) in parsed[0].actions.iter().zip(&parsed[1].actions) {
-            assert_eq!(body.frames.len(), weapon.frames.len());
-            assert_eq!(body.delay_ms, weapon.delay_ms);
+        for weapon in &parsed[1..] {
+            for (body, weapon) in parsed[0].actions.iter().zip(&weapon.actions) {
+                assert_eq!(body.frames.len(), weapon.frames.len());
+                assert_eq!(body.delay_ms, weapon.delay_ms);
+            }
         }
     }
 }

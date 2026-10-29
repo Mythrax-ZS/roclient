@@ -1,0 +1,40 @@
+{
+  "weapons": [
+    {
+      "name": "kusanagi",
+      "item_id": 900001,
+      "view": 9001,
+      "resource": "samurai_kusanagi",
+      "png": "source/legendary/kusanagi.png",
+      "rect": [
+        24,
+        312,
+        1488,
+        624
+      ],
+      "downsample": 24,
+      "source_grip": [
+        14,
+        6
+      ]
+    },
+    {
+      "name": "muramasa",
+      "item_id": 900002,
+      "view": 9002,
+      "resource": "samurai_muramasa",
+      "png": "source/legendary/muramasa.png",
+      "rect": [
+        0,
+        270,
+        1620,
+        540
+      ],
+      "downsample": 27,
+      "source_grip": [
+        16,
+        5
+      ]
+    }
+  ]
+}

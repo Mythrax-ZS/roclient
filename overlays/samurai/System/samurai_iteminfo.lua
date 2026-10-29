@@ -1,6 +1,6 @@
--- Samurai's starter weapon. Resource names are CP949 bytes expressed as Lua
--- decimal escapes so this file remains ASCII and survives editor encoding changes.
--- Both resources refer to the existing Katana icon in the installed game data.
+-- Samurai weapons. The starter uses the installed Katana icon; the two custom
+-- weapons have their own bundled inventory, collection, floor and equipped art.
+-- CP949 resource names use decimal escapes so this file remains ASCII.
 tbl = {
     [900000] = {
         unidentifiedDisplayName = "Unidentified Katana",
@@ -20,6 +20,55 @@ tbl = {
         },
         slotCount = 0,
         ClassNum = 2,
+        costume = false,
+    },
+    [900001] = {
+        unidentifiedDisplayName = "Unidentified Katana",
+        unidentifiedResourceName = "\196\171\197\184\179\170",
+        unidentifiedDescriptionName = { "Identify this weapon with a Magnifier." },
+        identifiedDisplayName = "Kusanagi",
+        identifiedResourceName = "samurai_kusanagi",
+        identifiedDescriptionName = {
+            "A Divinity blade for precise strikes and measured spiritual strength.",
+            "HIT +15, CRIT +8, Max SP +5%.",
+            "Heaven's Severance damage +10%.",
+            "Kusanagi Guard and Moonlit Reflection SP costs -15%.",
+            "^0000CCType:^000000 One-Handed Sword",
+            "^0000CCAttack:^000000 190",
+            "^0000CCElement:^000000 Neutral",
+            "^0000CCWeight:^000000 100",
+            "^0000CCWeapon Level:^000000 4",
+            "^0000CCRequired Base Level:^000000 99",
+            "^0000CCJobs:^000000 Samurai",
+            "Can be refined. Can be equipped in either hand.",
+        },
+        slotCount = 1,
+        ClassNum = 9001,
+        costume = false,
+    },
+    [900002] = {
+        unidentifiedDisplayName = "Unidentified Katana",
+        unidentifiedResourceName = "\196\171\197\184\179\170",
+        unidentifiedDescriptionName = { "Identify this weapon with a Magnifier." },
+        identifiedDisplayName = "Muramasa",
+        identifiedResourceName = "samurai_muramasa",
+        identifiedDescriptionName = {
+            "A Cursed blade that trades vitality for punishing blows and bleeding wounds.",
+            "CRIT +5. Max HP -5%.",
+            "Ashen Wind Slash and Wrath Unbound damage +10%.",
+            "Short-range physical hits have a 3% chance to inflict Bleeding",
+            "for up to 5 seconds, subject to the target's status resistance.",
+            "^0000CCType:^000000 One-Handed Sword",
+            "^0000CCAttack:^000000 210",
+            "^0000CCElement:^000000 Neutral",
+            "^0000CCWeight:^000000 120",
+            "^0000CCWeapon Level:^000000 4",
+            "^0000CCRequired Base Level:^000000 99",
+            "^0000CCJobs:^000000 Samurai",
+            "Can be refined. Can be equipped in either hand.",
+        },
+        slotCount = 1,
+        ClassNum = 9002,
         costume = false,
     },
 }
