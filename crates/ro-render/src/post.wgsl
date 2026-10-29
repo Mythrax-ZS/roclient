@@ -117,15 +117,21 @@ fn caustic(pos: vec2<f32>, t: f32) -> f32 {
     return clamp(pow(abs(c), 8.0), 0.0, 3.0);
 }
 
+// Gradient noise (smooth, no square lattice showing through), 0..1.
 fn noise2(p: vec2<f32>) -> f32 {
     let i = floor(p);
     let f = fract(p);
-    let u = f * f * (3.0 - 2.0 * f);
-    let a = hash2(i).x;
-    let b = hash2(i + vec2(1.0, 0.0)).x;
-    let c = hash2(i + vec2(0.0, 1.0)).x;
-    let d = hash2(i + vec2(1.0, 1.0)).x;
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    // Quintic fade: continuous curvature across cell borders.
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    let ga = normalize(hash2(i) * 2.0 - 1.0 + vec2(1e-4));
+    let gb = normalize(hash2(i + vec2(1.0, 0.0)) * 2.0 - 1.0 + vec2(1e-4));
+    let gc = normalize(hash2(i + vec2(0.0, 1.0)) * 2.0 - 1.0 + vec2(1e-4));
+    let gd = normalize(hash2(i + vec2(1.0, 1.0)) * 2.0 - 1.0 + vec2(1e-4));
+    let a = dot(ga, f);
+    let b = dot(gb, f - vec2(1.0, 0.0));
+    let c = dot(gc, f - vec2(0.0, 1.0));
+    let d = dot(gd, f - vec2(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y) * 0.75 + 0.5;
 }
 
 // Direction light travels down through the water (slanted, like a low sun above the waves).
@@ -138,10 +144,13 @@ const SHAFT_DIR: vec3<f32> = vec3<f32>(0.32, -1.0, 0.18);
 // camera moves.
 fn shaft_density(pos: vec3<f32>, t: f32) -> f32 {
     let q = pos.xz - SHAFT_DIR.xz / SHAFT_DIR.y * pos.y;
-    let a = noise2(q / 38.0 + vec2(t * 0.020, t * 0.013));
-    let b = noise2(q / 17.0 - vec2(t * 0.031, -t * 0.017));
+    // Each layer is rotated off the world axes, so no grid lines up anywhere.
+    let r1 = mat2x2<f32>(0.819, 0.574, -0.574, 0.819);
+    let r2 = mat2x2<f32>(0.423, -0.906, 0.906, 0.423);
+    let a = noise2(r1 * q / 38.0 + vec2(t * 0.020, t * 0.013));
+    let b = noise2(r2 * q / 17.0 - vec2(t * 0.031, -t * 0.017));
     let pulse = noise2(q / 90.0 + vec2(t * 0.05, 0.0));
-    return smoothstep(0.66, 0.86, a * 0.65 + b * 0.35) * (0.3 + 1.1 * pulse * pulse);
+    return smoothstep(0.55, 0.85, a * 0.65 + b * 0.35) * (0.3 + 1.1 * pulse * pulse);
 }
 
 // In-scattered shaft light along the view ray, through a fixed band of water in front of
@@ -248,7 +257,7 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
         let open_len = mix(ray_len, p.depth.x * 3.0, abyss);
         let light = vec3(0.30, 0.62, 0.70);
         c += light * shafts(p.eye.xyz, dir, p.depth.x * 0.6, open_len, secs) * 0.45 * uw;
-        c += vec3(0.55, 0.75, 0.8) * marine_snow(p.eye.xyz, dir, open_len, secs) * 0.16 * uw;
+        c += vec3(0.55, 0.75, 0.8) * marine_snow(p.eye.xyz, dir, min(open_len, p.depth.x * 1.3), secs) * 0.16 * uw;
     }
 
     c *= p.grade.x;
