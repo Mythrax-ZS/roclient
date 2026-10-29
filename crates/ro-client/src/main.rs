@@ -2678,6 +2678,25 @@ impl App {
                 self.viewpoints.insert((0, 250), ((x as f32, y as f32), egui::Color32::from_rgb(255, 200, 60), Some(std::time::Instant::now() + std::time::Duration::from_secs(30))));
                 self.hud.push_chat(ro_net::ChatKind::System, format!("The shop is at ({x}, {y}), marked on the minimap."));
             }
+            BossInfo { kind, x, y, hours, minutes, name } => {
+                let gold = egui::Color32::from_rgb(255, 60, 60);
+                match kind {
+                    0 => {
+                        self.viewpoints.remove(&(0, 251));
+                        self.hud.push_chat(ro_net::ChatKind::System, "You cannot find any trace of a Boss Monster in this area.".into());
+                    }
+                    1 | 2 => {
+                        self.viewpoints.insert((0, 251), ((x as f32, y as f32), gold, None));
+                        if kind == 2 {
+                            self.hud.push_chat(ro_net::ChatKind::System, format!("{name} is present in this area."));
+                        }
+                    }
+                    _ => {
+                        self.viewpoints.remove(&(0, 251));
+                        self.hud.push_chat(ro_net::ChatKind::System, format!("{name} will appear in approximately {hours} hours {minutes} minutes."));
+                    }
+                }
+            }
             DressRoom => {
                 let (hair, color) = self.player.as_ref().and_then(|p| p.look.as_ref()).map_or((1, 0), |l| (l.hair, l.hair_color));
                 self.stylist.open(hair, color, 0);

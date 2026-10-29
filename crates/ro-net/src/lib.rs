@@ -478,6 +478,8 @@ pub enum Event {
     Bgm(String),
     /// ZC_COMPASS (viewpoint): kind 0 blink, 1 keep, 2 remove; color 0xRRGGBB.
     Viewpoint { npc: u32, kind: u32, x: u32, y: u32, id: u8, color: u32 },
+    /// ZC_BOSS_INFO (Convex Mirror / bossmapinfo): kind 0 none, 1 alive, 2 alive+announce, 3 dead (respawn in h:m).
+    BossInfo { kind: u8, x: u32, y: u32, hours: u16, minutes: u16, name: String },
     /// ZC_NPCSPRITE_CHANGE (setnpcdisplay): the unit shows a new class.
     NpcSprite { id: u32, class: u32 },
     /// ZC_MSG_VALUE / ZC_MSG_COLOR / ZC_MSG_SKILL: a msgstringtable line.
@@ -968,6 +970,12 @@ impl MapSession {
                         0x0144 if data.len() >= 23 => {
                             let l = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
                             Some(Event::Viewpoint { npc: l(2), kind: l(6), x: l(10), y: l(14), id: data[18], color: l(19) })
+                        }
+                        0x0293 if data.len() >= 70 => {
+                            let l = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                            let raw = &data[19..70];
+                            let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+                            Some(Event::BossInfo { kind: data[2], x: l(3), y: l(7), hours: u16::from_le_bytes([data[11], data[12]]), minutes: u16::from_le_bytes([data[13], data[14]]), name: String::from_utf8_lossy(&raw[..end]).into_owned() })
                         }
                         0x01b0 if data.len() >= 11 => Some(Event::NpcSprite { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), class: u32::from_le_bytes([data[7], data[8], data[9], data[10]]) }),
                         0x07e2 if data.len() >= 8 => Some(Event::MsgValue { msg: u16::from_le_bytes([data[2], data[3]]), value: i32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
