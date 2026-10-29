@@ -173,8 +173,10 @@ impl MapEmitter {
 
 /// The map's particle emitters: RSW effect objects with id 974 (EF_EMITTER, `positions` in
 /// RSW order) paired with the entries of `effecttool\<map>.lub` (the Nth object takes entry
-/// N). Missing fields take BrowEdit's defaults.
-pub fn map_emitters(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, map: &str, positions: &[glam::Vec3]) -> Vec<ro_render::Emitter> {
+/// N). Missing fields take BrowEdit's defaults. `animated`: the id 1073 objects instead
+/// (EF_ANIMATED_EMITTER, `_<map>_animatedEmitterInfo`), whose particles play built-in frame
+/// sets rather than one texture.
+pub fn map_emitters(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, map: &str, positions: &[glam::Vec3], animated: bool) -> Vec<ro_render::Emitter> {
     if positions.is_empty() {
         return vec![];
     }
@@ -189,7 +191,16 @@ pub fn map_emitters(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::V
             return vec![];
         }
     };
-    let Some(table) = chunk.globals.get(&format!("_{}_emitterInfo", map.replace('@', ""))) else { return vec![] };
+    let kind = if animated { "animatedEmitterInfo" } else { "emitterInfo" };
+    let Some(table) = chunk.globals.get(&format!("_{}_{kind}", map.replace('@', ""))) else { return vec![] };
+    let frames: Vec<Vec<ro_render::TexId>> = if animated {
+        [&["shockwave_b", "shockwave_c", "shockwave_d", "shockwave_e"][..], &["plazma_a", "plazma_b", "plazma_c"][..]]
+            .iter()
+            .map(|set| set.iter().filter_map(|n| fx.texture_dyn(r, vfs, &format!("effect\\{n}.bmp"))).collect())
+            .collect()
+    } else {
+        vec![]
+    };
     let num = |v: &ro_formats::lub::Value| if let ro_formats::lub::Value::Number(n) = v { Some(*n as f32) } else { None };
     let mut out = vec![];
     for (i, &pos) in positions.iter().enumerate() {
@@ -234,6 +245,7 @@ pub fn map_emitters(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::V
                 billboard: one("billboard_off", 0.0) == 0.0,
                 rotate: v3("rotate_angle", [0.0; 3]),
                 tex,
+                frames: frames.clone(),
             },
         });
     }

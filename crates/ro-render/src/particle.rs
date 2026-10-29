@@ -36,6 +36,9 @@ pub struct EmitterDef {
     /// Degrees, used when not a billboard.
     pub rotate: [f32; 3],
     pub tex: TexId,
+    /// Animated emitters (EF_ANIMATED_EMITTER): frame sets; each particle picks one and
+    /// steps a frame every 0.13 s. Empty: every particle shows `tex`.
+    pub frames: Vec<Vec<TexId>>,
 }
 
 /// An emitter placed in the world (y-up render space).
@@ -51,6 +54,9 @@ struct Particle {
     born: f32,
     life: f32,
     size: f32,
+    /// Frame set and start offset (s) for animated emitters.
+    set: usize,
+    phase: f32,
 }
 
 struct Live {
@@ -180,7 +186,9 @@ impl Particles {
         let vel = Vec3::new(lerp(d.dir1[0], d.dir2[0]), -lerp(d.dir1[1], d.dir2[1]), -lerp(d.dir1[2], d.dir2[2]));
         let life = lerp(d.life[0], d.life[1]).max(0.05);
         let size = lerp(d.size[0], d.size[1]);
-        Particle { start, vel, born, life, size }
+        let set = if d.frames.is_empty() { 0 } else { ((self.rand() * d.frames.len() as f32) as usize).min(d.frames.len() - 1) };
+        let phase = self.rand() * 2.0;
+        Particle { start, vel, born, life, size, set, phase }
     }
 
     /// Ages particles and emits new ones near `focus` (render space), within `range`.
@@ -219,7 +227,6 @@ impl Particles {
             let base = l.e.pos + Vec3::new(0.0, 10.0, 0.0);
             let grav = Vec3::new(d.gravity[0], -d.gravity[1], -d.gravity[2]);
             let fixed = Mat3::from_rotation_z(d.rotate[2].to_radians()) * Mat3::from_rotation_y(-d.rotate[1].to_radians()) * Mat3::from_rotation_x(d.rotate[0].to_radians());
-            let out = groups.entry(((d.src, d.dst, d.zenable), d.tex.0)).or_default();
             for p in &l.particles {
                 let t = now - p.born;
                 let pos = base + p.start + p.vel * d.speed * t + grav * d.speed * t * t * 0.5;
@@ -238,7 +245,11 @@ impl Particles {
                 let (a, b) = (right * p.size, up * p.size);
                 let v = |q: Vec3, u: f32, vv: f32| Vertex { pos: q.into(), uv: [u, vv], color };
                 let (p0, p1, p2, p3) = (v(pos - a - b, 0.0, 1.0), v(pos + a - b, 1.0, 1.0), v(pos + a + b, 1.0, 0.0), v(pos - a + b, 0.0, 0.0));
-                out.extend([p0, p1, p2, p0, p2, p3]);
+                let tex = match d.frames.get(p.set) {
+                    Some(f) if !f.is_empty() => f[((t + p.phase) / 0.13) as usize % f.len()],
+                    _ => d.tex,
+                };
+                groups.entry(((d.src, d.dst, d.zenable), tex.0)).or_default().extend([p0, p1, p2, p0, p2, p3]);
             }
         }
         groups.into_iter().map(|((k, t), v)| (k, TexId(t), v)).collect()

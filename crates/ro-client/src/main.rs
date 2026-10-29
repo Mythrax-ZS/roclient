@@ -1066,7 +1066,9 @@ impl App {
                 // Ambient map effects play from the frame loop.
                 // EF_EMITTER objects are particle systems defined by the map's effecttool lub.
                 let emitter_spots: Vec<glam::Vec3> = map.effects.iter().filter(|e| e.0 == 974).map(|e| e.1).collect();
-                let emitters = fx::map_emitters(&mut self.fx, r, vfs, name, &emitter_spots);
+                let mut emitters = fx::map_emitters(&mut self.fx, r, vfs, name, &emitter_spots, false);
+                let animated_spots: Vec<glam::Vec3> = map.effects.iter().filter(|e| e.0 == 1073).map(|e| e.1).collect();
+                emitters.extend(fx::map_emitters(&mut self.fx, r, vfs, name, &animated_spots, true));
                 tracing::info!(objects = emitter_spots.len(), emitters = emitters.len(), "map particle emitters");
                 r.set_emitters(emitters);
                 self.map_fx = map.effects.into_iter().enumerate().map(|(i, (id, pos, delay))| fx::MapEmitter::new(id, pos, delay, i)).collect();
