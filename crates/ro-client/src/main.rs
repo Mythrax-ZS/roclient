@@ -92,6 +92,10 @@ struct Config {
     /// GRFs inside `client_dir`, highest priority first.
     #[serde(default = "default_grfs")]
     grfs: Vec<String>,
+    /// Folders laid over the client data, first wins: an unpacked translation pack such as
+    /// ROenglishRE's Translation/Renewal (its SystemEN stands in for System).
+    #[serde(default)]
+    overlays: Vec<PathBuf>,
     /// Map shown in the window until it follows the network session.
     #[serde(default = "default_map")]
     map: String,
@@ -107,7 +111,8 @@ fn default_map() -> String {
 
 fn open_vfs(cfg: &Config) -> anyhow::Result<Option<ro_vfs::Vfs>> {
     let Some(dir) = &cfg.client_dir else { return Ok(None) };
-    let mut vfs = ro_vfs::Vfs { loose: Some(dir.clone()), grfs: vec![] };
+    let overlays: Vec<PathBuf> = cfg.overlays.iter().filter(|p| p.is_dir() || { tracing::warn!(path = %p.display(), "overlay folder not found, skipping"); false }).cloned().collect();
+    let mut vfs = ro_vfs::Vfs { overlays, loose: Some(dir.clone()), grfs: vec![] };
     for name in &cfg.grfs {
         let path = dir.join(name);
         if path.is_file() {

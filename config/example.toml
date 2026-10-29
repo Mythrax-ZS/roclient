@@ -15,6 +15,9 @@ soak_secs = 30
 client_dir = "C:/Gravity/Ragnarok Online"
 # event.grf is a DES-encrypted seasonal (Christmas) overlay; leave it out.
 grfs = ["data.grf"]
+# Optional folders laid over the data, first wins: e.g. an unpacked English translation
+# (github.com/llchrisll/ROenglishRE), whose SystemEN files replace System.
+# overlays = ["C:/ROenglishRE/Translation/Renewal"]
 map = "prontera"
 msaa = 4
 # Starting volumes (0..1). In-game changes (Alt+O) are saved to settings.toml beside this file.

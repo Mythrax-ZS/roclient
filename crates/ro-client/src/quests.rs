@@ -22,7 +22,8 @@ pub struct QuestLog {
 impl QuestLog {
     pub fn load(vfs: &ro_vfs::Vfs) -> Self {
         let mut q = Self::default();
-        let chunk = vfs.read(r"System\OngoingQuestInfoList_True.lub").ok().flatten().and_then(|d| ro_formats::lub::eval(&d).ok());
+        // Translation packs name it after kRO's file; prefer theirs when present.
+        let chunk = [r"System\OngoingQuests.lub", r"System\OngoingQuestInfoList_True.lub"].iter().find_map(|p| vfs.read(p).ok().flatten()).and_then(|d| ro_formats::lub::eval(&d).ok());
         if chunk.is_none() {
             tracing::warn!("OngoingQuestInfoList_True.lub not found; quests show by id");
         }

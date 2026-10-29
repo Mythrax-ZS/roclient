@@ -7,7 +7,9 @@ use mlua::{Lua, Table, Value};
 use ro_game::items::ItemInfo;
 
 /// Text (not compiled) item info files, in the order they override each other.
-pub const ITEMINFO_SOURCES: [&str; 2] = [r"System\itemInfo.lua", r"System\iteminfo_custom.lua"];
+/// The first is where translation packs keep the full table (their System\itemInfo.lua is
+/// only a loader that runs it).
+pub const ITEMINFO_SOURCES: [&str; 3] = [r"System\LuaFiles514\itemInfo.lua", r"System\itemInfo.lua", r"System\iteminfo_custom.lua"];
 
 fn lines(t: &Table, k: &str) -> Vec<String> {
     match t.get::<Value>(k) {
@@ -19,6 +21,11 @@ fn lines(t: &Table, k: &str) -> Vec<String> {
 /// Runs a text itemInfo and returns its entries (empty when it is compiled or fails).
 pub fn iteminfo(src: &[u8], name: &str) -> Vec<(u32, ItemInfo)> {
     if src.starts_with(b"\x1bLua") {
+        return vec![];
+    }
+    // A translation pack's System\itemInfo.lua only loads other files (read separately).
+    if src.windows(7).any(|w| w == b"dofile(") {
+        tracing::debug!("{name}: a loader, skipped");
         return vec![];
     }
     let lua = Lua::new();

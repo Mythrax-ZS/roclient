@@ -57,7 +57,7 @@ const DAYS: i32 = 20;
 impl Progress {
     pub fn load(vfs: &ro_vfs::Vfs) -> Self {
         let mut p = Self::default();
-        if let Some(c) = vfs.read(r"System\achievement_list.lub").ok().flatten().and_then(|d| ro_formats::lub::eval(&d).ok()) {
+        if let Some(c) = [r"System\achievements.lub", r"System\achievement_list.lub"].iter().find_map(|p| vfs.read(p).ok().flatten()).and_then(|d| ro_formats::lub::eval(&d).ok()) {
             if let Some(tbl) = c.globals.get("achievement_tbl") {
                 for (id, e) in c.entries(tbl) {
                     let Some(id) = id.as_number() else { continue };

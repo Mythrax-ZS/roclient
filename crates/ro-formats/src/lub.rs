@@ -38,19 +38,24 @@ struct Function {
     constants: Vec<Value>,
 }
 
-fn string(r: &mut Reader) -> Result<String> {
-    let len = r.u32()? as usize;
+fn string(r: &mut Reader, wide: bool) -> Result<String> {
+    let len = if wide { r.u64()? as usize } else { r.u32()? as usize };
     if len == 0 {
         return Ok(String::new());
     }
     let bytes = r.bytes(len)?;
-    // Includes the trailing NUL. Names are ASCII; values may be EUC-KR.
-    Ok(EUC_KR.decode(&bytes[..len - 1]).0.into_owned())
+    // Includes the trailing NUL. Names are ASCII; values are EUC-KR in the official data
+    // and usually UTF-8 in translation packs (EUC-KR text is almost never valid UTF-8).
+    let bytes = &bytes[..len - 1];
+    Ok(match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => EUC_KR.decode(bytes).0.into_owned(),
+    })
 }
 
-fn function(r: &mut Reader, depth: usize) -> Result<Function> {
+fn function(r: &mut Reader, wide: bool, depth: usize) -> Result<Function> {
     ensure!(depth < 64, "lub: nesting too deep");
-    string(r)?; // source
+    string(r, wide)?; // source
     r.bytes(8)?; // linedefined, lastlinedefined
     r.bytes(4)?; // nups, numparams, is_vararg, maxstacksize
     let n = r.u32()? as usize;
@@ -62,38 +67,61 @@ fn function(r: &mut Reader, depth: usize) -> Result<Function> {
             0 => Value::Nil,
             1 => Value::Bool(r.u8()? != 0),
             3 => Value::Number(f64::from_le_bytes(r.bytes(8)?.try_into()?)),
-            4 => Value::Str(string(r)?),
+            4 => Value::Str(string(r, wide)?),
             t => bail!("lub: unknown constant type {t}"),
         });
     }
     let protos = r.u32()? as usize;
     for _ in 0..protos {
-        function(r, depth + 1)?;
+        function(r, wide, depth + 1)?;
     }
     // Debug info: line info, locals, upvalue names.
     let n = r.u32()? as usize;
     r.bytes(n * 4)?;
     let n = r.u32()? as usize;
     for _ in 0..n {
-        string(r)?;
+        string(r, wide)?;
         r.bytes(8)?;
     }
     let n = r.u32()? as usize;
     for _ in 0..n {
-        string(r)?;
+        string(r, wide)?;
     }
     Ok(Function { code, constants })
+}
+
+/// Reads a Lua 5.1 header; true when strings carry 8-byte lengths (a 64-bit build, as
+/// produced by `compile_if_text`) rather than the client's 4.
+fn header(r: &mut Reader) -> Result<bool> {
+    ensure!(r.bytes(4)? == b"\x1bLua", "not a Lua chunk");
+    ensure!(r.u8()? == 0x51, "only Lua 5.1 chunks are supported");
+    let header = r.bytes(7)?;
+    match header {
+        [0, 1, 4, 4, 4, 8, 0] => Ok(false),
+        [0, 1, 4, 8, 4, 8, 0] => Ok(true),
+        _ => bail!("unsupported Lua 5.1 build {header:?}"),
+    }
+}
+
+/// Translation packs ship many .lub tables as Lua source (the client accepts both); those
+/// are compiled here so the bytecode readers below see what the official files contain.
+pub fn compile_if_text(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>> {
+    if data.starts_with(b"\x1bLua") {
+        return Ok(std::borrow::Cow::Borrowed(data));
+    }
+    let src = data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data);
+    let lua = mlua::Lua::new();
+    let f = lua.load(src).set_name("=lub").into_function().map_err(|e| anyhow::anyhow!("lub source: {e}"))?;
+    Ok(std::borrow::Cow::Owned(f.dump(true)))
 }
 
 /// Every `table[key] = value` assignment in the chunk's main function whose key and
 /// value resolve to constants. A key read as `tbl.NAME` is reported as `NAME`.
 pub fn assignments(data: &[u8]) -> Result<Vec<(Value, Value)>> {
-    let mut r = Reader::new(data);
-    ensure!(r.bytes(4)? == b"\x1bLua", "not a Lua chunk");
-    ensure!(r.u8()? == 0x51, "only Lua 5.1 chunks are supported");
-    let header = r.bytes(7)?;
-    ensure!(header == [0, 1, 4, 4, 4, 8, 0], "unsupported Lua 5.1 build {header:?}");
-    let f = function(&mut r, 0)?;
+    let data = compile_if_text(data)?;
+    let mut r = Reader::new(&data);
+    let wide = header(&mut r)?;
+    let f = function(&mut r, wide, 0)?;
 
     const GETTABLE: u32 = 6;
     const LOADK: u32 = 1;
@@ -149,12 +177,10 @@ impl Chunk {
 /// constants, globals, nested table constructors (NEWTABLE / SETTABLE / SETLIST).
 /// Function calls and control flow are ignored, which data tables do not use.
 pub fn eval(data: &[u8]) -> Result<Chunk> {
-    let mut r = Reader::new(data);
-    ensure!(r.bytes(4)? == b"\x1bLua", "not a Lua chunk");
-    ensure!(r.u8()? == 0x51, "only Lua 5.1 chunks are supported");
-    let header = r.bytes(7)?;
-    ensure!(header == [0, 1, 4, 4, 4, 8, 0], "unsupported Lua 5.1 build {header:?}");
-    let f = function(&mut r, 0)?;
+    let data = compile_if_text(data)?;
+    let mut r = Reader::new(&data);
+    let wide = header(&mut r)?;
+    let f = function(&mut r, wide, 0)?;
 
     const MOVE: u32 = 0;
     const LOADK: u32 = 1;

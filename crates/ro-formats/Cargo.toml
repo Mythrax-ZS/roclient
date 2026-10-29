@@ -6,4 +6,5 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 encoding_rs.workspace = true
+mlua = { version = "0.12.2", features = ["lua51", "vendored"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "tga", "png", "jpeg"] }
