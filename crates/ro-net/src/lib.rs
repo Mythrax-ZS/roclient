@@ -321,6 +321,8 @@ pub enum Event {
     CartOff,
     /// ZC_EXTEND_BODYITEM_SIZE: slots added to the base inventory.
     InventoryExtra(u16),
+    /// ZC_INVENTORY_TAB: an item moved into or out of the favourites tab.
+    ItemFavorite { index: u16, favorite: bool },
     /// ZC_ACK_OPEN_MSGBOX_EXTEND_BODYITEM_SIZE: 0 asks to confirm using `item`, else failed.
     ExpandAsk { result: u8, item: u32 },
     /// ZC_ITEM_PICKUP_PARTY: a party member picked up an item.
@@ -1232,6 +1234,8 @@ impl MapSession {
                             _ => None,
                         },
                         0x01a3 | 0x022f if data.len() >= 5 => Some(Event::Fed { homun: opcode == 0x022f, ok: data[2] != 0, item: u16::from_le_bytes([data[3], data[4]]) }),
+                        // The wire flag is inverted: 0 means "in the favourites tab".
+                        0x0908 if data.len() >= 5 => Some(Event::ItemFavorite { index: u16::from_le_bytes([data[2], data[3]]), favorite: data[4] == 0 }),
                         0x01b9 if data.len() >= 6 => Some(Event::CastCancel(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         // ZC_HIGHJUMP: instant slide to a cell (Taekwon jump, knockback snaps).
                         0x01ff if data.len() >= 10 => Some(Event::Stop { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), x: u16::from_le_bytes([data[6], data[7]]), y: u16::from_le_bytes([data[8], data[9]]) }),

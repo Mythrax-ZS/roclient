@@ -470,6 +470,7 @@ fn inv_item(d: ro_net::ItemData) -> ro_game::items::InvItem {
         identified: d.identified,
         cards: d.cards,
         look: d.look,
+        favorite: d.favorite,
     }
 }
 
@@ -1415,6 +1416,11 @@ impl App {
                 }
             }
             InventoryExtra(n) => self.windows.inv_extra = n,
+            ItemFavorite { index, favorite } => {
+                if let Some(it) = self.inventory.items.get_mut(&index) {
+                    it.favorite = favorite;
+                }
+            }
             ExpandAsk { result, item } => match result {
                 0 => self.windows.expand_ask = Some(item),
                 _ => self.hud.push_chat(ro_net::ChatKind::System, match result {
@@ -3038,6 +3044,7 @@ impl App {
             Equip { index, location } => self.send(Command::Item(ItemRequest::Equip { index, location })),
             Unequip(index) => self.send(Command::Item(ItemRequest::Unequip { index })),
             UnequipAll(location) => self.send(Command::Item(ItemRequest::UnequipAll { location })),
+            Favorite { index, on } => self.send(Command::Item(ItemRequest::Favorite { index, on })),
             SwitchAdd { index, location } => self.send(Command::Switch(ro_net::SwitchRequest::Add { index, location })),
             SwitchRemove(index) => self.send(Command::Switch(ro_net::SwitchRequest::Remove(index))),
             SwitchAll => self.send(Command::Switch(ro_net::SwitchRequest::All)),
@@ -4277,6 +4284,11 @@ impl App {
                 let action = match step.split_once(':').or(Some((step.as_str(), ""))) {
                     Some(("equip", id)) => id.parse().ok().and_then(item).map(|(index, location)| windows::UiAction::Equip { index, location }),
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
+                    Some((f @ ("fav" | "unfav"), id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::Favorite { index, on: f == "fav" }),
+                    Some(("invtab", n)) => {
+                        self.windows.inventory_tab(n.parse().unwrap_or(0));
+                        None
+                    }
                     Some(("card", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::CardTargets(index)),
                     // refsel:item picks equipment in the refine window; refine:material refines it.
                     // gradesel:item picks equipment in the grade window; gradeup:material tries.

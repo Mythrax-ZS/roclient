@@ -23,6 +23,8 @@ pub struct ItemData {
     pub identified: bool,
     pub cards: [u32; 4],
     pub look: u16,
+    /// In the "etc" (favourites) tab: the PlaceETCTab flag.
+    pub favorite: bool,
 }
 
 fn cards(b: &mut &[u8]) -> [u32; 4] {
@@ -46,7 +48,7 @@ pub fn parse_itemlist_normal(data: &[u8]) -> Vec<ItemData> {
             // Cards carry the slots they fit in where other items say what they occupy;
             // a card is never worn.
             let (location, equipped) = if kind == 6 { (0, 0) } else { (0, equipped) };
-            ItemData { index, id, kind, amount, location, equipped, refine: 0, grade: 0, identified: flags & 1 != 0, cards, look: 0 }
+            ItemData { index, id, kind, amount, location, equipped, refine: 0, grade: 0, identified: flags & 1 != 0, cards, look: 0, favorite: flags & 2 != 0 }
         })
         .collect()
 }
@@ -69,7 +71,7 @@ pub fn parse_itemlist_equip(data: &[u8]) -> Vec<ItemData> {
             let refine = b.get_u8();
             let grade = b.get_u8();
             let flags = b.get_u8();
-            ItemData { index, id, kind, amount: 1, location, equipped, refine, grade, identified: flags & 1 != 0, cards, look }
+            ItemData { index, id, kind, amount: 1, location, equipped, refine, grade, identified: flags & 1 != 0, cards, look, favorite: flags & 4 != 0 }
         })
         .collect()
 }
@@ -91,7 +93,7 @@ pub fn parse_pickup(data: &[u8]) -> Option<ItemData> {
     let look = b.get_u16_le();
     let refine = b.get_u8();
     let grade = b.get_u8();
-    (result == 0).then_some(ItemData { index, id, kind, amount, location, equipped: 0, refine, grade, identified, cards, look })
+    (result == 0).then_some(ItemData { index, id, kind, amount, location, equipped: 0, refine, grade, identified, cards, look, favorite: false })
 }
 
 /// An item lying on the ground.
@@ -182,6 +184,8 @@ pub enum ItemRequest {
     Unequip { index: u16 },
     /// CZ_REQ_TAKEOFF_EQUIP_ALL: take off everything worn in these slots.
     UnequipAll { location: u32 },
+    /// CZ_INVENTORY_TAB: move to (on) or out of the favourites tab.
+    Favorite { index: u16, on: bool },
     /// Inventory expansion: ask (0x0b14), confirm (0x0b16) or cancel (0x0b19).
     ExpandAsk,
     ExpandConfirm(bool),
@@ -205,6 +209,12 @@ impl Encode for ItemRequest {
             ItemRequest::Unequip { index } => put_db_packet(d, "UnequipItem", &[&index.to_le_bytes()]),
             ItemRequest::ExpandAsk => d.put_u16_le(0x0b14),
             ItemRequest::ExpandConfirm(yes) => d.put_u16_le(if yes { 0x0b16 } else { 0x0b19 }),
+            ItemRequest::Favorite { index, on } => {
+                d.put_u16_le(0x0907);
+                d.put_u16_le(index);
+                // The wire flag is inverted: false asks for the favourites tab.
+                d.put_u8(!on as u8);
+            }
             ItemRequest::UnequipAll { location } => {
                 d.put_u16_le(0x0bf5);
                 d.put_u32_le(location);

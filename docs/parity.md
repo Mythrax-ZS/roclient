@@ -41,7 +41,7 @@ Ticked items are handled and tested in game against the local server.
 - [ ] ZC_COMBODELAY, ZC_BLADESTOP
 - [ ] ZC_NOTIFY_BIND_ON_EQUIP, ZC_CHANGE_ITEM_OPTION, ZC_UPDATE_CARDSLOT
 - [x] ZC_ACK_TAKEOFF_EQUIP_ALL ("Take off all" button per equipment tab), ZC_MOVE_ITEM_FAILED
-- [ ] ZC_INVENTORY_TAB, ZC_INVENTORY_END
+- [x] ZC_INVENTORY_TAB (favourites live in the "etc" tab, as PlaceETCTab says); ZC_INVENTORY_END is a no-op marker
 - [x] ZC_EXTEND_BODYITEM_SIZE (+ ACK / MSGBOX): slot count, + button, confirmation
 
 ## World
@@ -57,7 +57,6 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_PET_ACT (pettalktable.xml lines in chat, emotions)
 - [x] ZC_SUMMON_HP_INIT / UPDATE, ZC_HO_PAR_CHANGE2, ZC_HOSKILLINFO_UPDATE (summon bar tested with ABR Battle Warrior)
 - [x] Elementals (ZC_EL_INIT, ZC_EL_PAR_CHANGE): companion window tab + HP bar
-- [ ] Elemental sprite looks hidden behind the pet on the same cell; verify it draws
 
 ## Social
 - [x] Guild emblems in the guild window (download, upload from Emblem*.bmp)

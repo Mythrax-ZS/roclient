@@ -122,6 +122,8 @@ pub struct InvItem {
     pub look: u16,
     /// Slots this item takes in the equipment-switch set (0: not in it).
     pub switch: u32,
+    /// Kept in the "etc" (favourites) tab.
+    pub favorite: bool,
 }
 
 impl InvItem {

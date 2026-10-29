@@ -19,6 +19,8 @@ pub enum UiAction {
     Unequip(u16),
     /// Take off everything in these slots.
     UnequipAll(u32),
+    /// Move an item into (true) or out of the favourites ("etc") tab.
+    Favorite { index: u16, on: bool },
     /// Equipment switch set: add an item, remove one, swap the whole set.
     SwitchAdd { index: u16, location: u32 },
     SwitchRemove(u16),
@@ -483,6 +485,10 @@ fn inventory_item_actions(resp: egui::Response, it: &InvItem, v: &View) -> Optio
             action = Some(UiAction::UseItem(it.index));
             ui.close();
         }
+        if it.equipped == 0 && ui.button(if it.favorite { "Move out of favourites" } else { "Move to favourites" }).clicked() {
+            action = Some(UiAction::Favorite { index: it.index, on: !it.favorite });
+            ui.close();
+        }
         if v.has_cart && it.equipped == 0 && ui.button("Move to cart").clicked() {
             action = Some(UiAction::CartPut { index: it.index, amount: it.amount });
             ui.close();
@@ -558,6 +564,16 @@ fn item_slot(ui: &mut egui::Ui, icons: &HashMap<u32, egui::TextureHandle>, it: &
 }
 
 impl Windows {
+    /// Test hook: open the inventory on a tab (0 item, 1 equip, 2 etc).
+    pub fn inventory_tab(&mut self, n: u8) {
+        self.inventory = true;
+        self.tab = match n {
+            0 => InvTab::Items,
+            1 => InvTab::Equip,
+            _ => InvTab::Etc,
+        };
+    }
+
     pub fn toggle_inventory(&mut self) {
         self.inventory = !self.inventory;
     }
@@ -668,9 +684,9 @@ impl Windows {
                 .iter()
                 .filter(|it| it.equipped == 0)
                 .filter(|it| match tab {
-                    InvTab::Items => it.is_usable(),
-                    InvTab::Equip => it.is_equipment(),
-                    InvTab::Etc => !it.is_usable() && !it.is_equipment(),
+                    InvTab::Items => !it.favorite && !it.is_equipment(),
+                    InvTab::Equip => !it.favorite && it.is_equipment(),
+                    InvTab::Etc => it.favorite,
                 })
                 .collect();
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
@@ -782,9 +798,9 @@ impl Windows {
                     .iter()
                     .filter(|it| it.equipped == 0)
                     .filter(|it| match self.tab {
-                        InvTab::Items => it.is_usable(),
-                        InvTab::Equip => it.is_equipment(),
-                        InvTab::Etc => !it.is_usable() && !it.is_equipment(),
+                        InvTab::Items => !it.favorite && !it.is_equipment(),
+                        InvTab::Equip => !it.favorite && it.is_equipment(),
+                        InvTab::Etc => it.favorite,
                     })
                     .collect();
                 egui::Grid::new("inv").spacing(Vec2::splat(4.0)).show(ui, |ui| {
