@@ -150,6 +150,9 @@ pub struct Renderer {
     /// Night mode (the server's day/night cycle); the look fades over `night_t`.
     pub night: bool,
     night_t: f32,
+    /// Direction sprite shadows are cast in this frame: the sun, bent away from a strong
+    /// nearby light source (eased so it swings smoothly).
+    cast_dir: glam::Vec3,
     last_frame: std::time::Instant,
     /// Code-drawn effects playing this frame; the client advances and removes them.
     pub procs: Vec<ProcFx>,
@@ -520,6 +523,7 @@ impl Renderer {
             night: false,
             night_t: 0.0,
             last_frame: std::time::Instant::now(),
+            cast_dir: glam::Vec3::new(-0.5, -0.7, -0.5).normalize(),
             procs: vec![],
             effects: vec![],
             effect_pipeline,
@@ -570,6 +574,37 @@ impl Renderer {
         let h = glam::Vec2::new(d.x, d.z).try_normalize().unwrap_or(glam::Vec2::new(0.6, 0.8));
         let (s, c) = elev.to_radians().sin_cos();
         glam::Vec3::new(h.x * c, -s, h.y * c)
+    }
+
+    /// Where sprite shadows point: the sun's direction, turned away from the map lights near
+    /// the player (torches, lamps), each weighted by how close and bright it is, so the
+    /// shadow swings smoothly from one light to the next. Lights on opposite sides cancel
+    /// and the shadow shortens under them.
+    fn light_cast_dir(&self) -> glam::Vec3 {
+        let sun = self.shadow_dir();
+        let peak = self.point_lights.iter().map(|l| l.color[0].max(l.color[1]).max(l.color[2])).fold(0.0f32, f32::max).max(1e-3);
+        let target = self.camera.target;
+        let (mut pull, mut total) = (glam::Vec2::ZERO, 0.0f32);
+        for l in &self.point_lights {
+            let away = glam::Vec2::new(target.x - l.pos.x, target.z - l.pos.z);
+            let d = away.length();
+            // RSW colours are dim (~0.1-0.5); judge each against the brightest on the map.
+            let bright = l.color[0].max(l.color[1]).max(l.color[2]) / peak;
+            let w = (1.0 - d / l.range.max(1.0)).clamp(0.0, 1.0).powi(2) * bright * self.post_settings.point_lights.min(1.0);
+            if w > 0.0 && d > 1e-3 {
+                pull += away / d * w;
+                total += w;
+            }
+        }
+        if total <= 0.0 {
+            return sun;
+        }
+        // Away from the lights along the ground, dipping down as from a lamp overhead; the
+        // more the lights agree on a side, the longer the shadow.
+        let reach = (pull.length() / total).clamp(0.0, 1.0);
+        let away = pull.try_normalize().unwrap_or(glam::Vec2::ZERO) * 0.8 * reach;
+        let lamp = glam::Vec3::new(away.x, -0.6 - 0.4 * (1.0 - reach), away.y).normalize();
+        sun.lerp(lamp, (total * 3.0).min(1.0)).normalize()
     }
 
     /// Indoor maps: draw only cells set in `mask` (`w` x `h`, one byte per GAT cell, row 0
@@ -818,11 +853,14 @@ impl Renderer {
                 };
             }
         }
+        // Ease the shadow direction toward this frame's light (about a quarter second).
+        let goal = self.light_cast_dir();
+        self.cast_dir = self.cast_dir.lerp(goal, (dt * 4.0).min(1.0)).try_normalize().unwrap_or(goal);
         let targets = targets.unwrap_or(&self.targets);
         let aspect = size.0 as f32 / size.1 as f32;
         let cam = &self.camera;
         // The sun's view of the area around the player, for sprite shadows.
-        let light_vp = shadow::Shadow::light_vp(cam.target, self.shadow_dir(), (cam.distance * 0.75).clamp(120.0, 600.0));
+        let light_vp = shadow::Shadow::light_vp(cam.target, self.cast_dir, (cam.distance * 0.75).clamp(120.0, 600.0));
         let shadow_strength = if self.post_settings.enabled { self.post_settings.shadow_strength } else { 0.0 };
         // The point lights nearest the camera target, flattened into (pos, range), (colour, 0).
         let lights: Vec<[f32; 4]> = {
@@ -882,8 +920,8 @@ impl Renderer {
         let mut enc = self.device.create_command_encoder(&Default::default());
         // Sun shadows: every sprite layer except the round blob shadows under actors.
         if shadow_strength > 0.0 {
-            // Casters face the sun (not the camera) so they throw their full silhouette.
-            let sun = self.shadow_dir();
+            // Casters face the light (not the camera) so they throw their full silhouette.
+            let sun = self.cast_dir;
             let right = glam::Vec3::new(-sun.z, 0.0, sun.x).try_normalize().unwrap_or(glam::Vec3::X);
             let casters = sprite_draws.iter().filter(|(s, _)| !blobs.contains(s)).map(|(s, r)| (&self.sheets[*s].bind, r.clone()));
             self.shadow.record(&self.queue, &mut enc, light_vp, right, CELL / sprite::PIXELS_PER_CELL, sprite_buffer.as_ref(), casters);
