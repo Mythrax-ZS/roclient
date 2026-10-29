@@ -36,6 +36,8 @@ pub struct EmitterDef {
     /// visible); true adds in linear light instead, so a near-black texture background (torch
     /// flame frames) stays invisible.
     pub linear: bool,
+    /// Size at the end of a particle's life relative to its start (1 = constant).
+    pub grow: f32,
     pub billboard: bool,
     /// Degrees, used when not a billboard.
     pub rotate: [f32; 3],
@@ -280,7 +282,8 @@ impl Particles {
                 } else {
                     (fixed * Vec3::X, fixed * Vec3::Y)
                 };
-                let (a, b) = (right * p.size, up * p.size);
+                let size = p.size * (1.0 + (d.grow - 1.0) * (t / p.life).clamp(0.0, 1.0));
+                let (a, b) = (right * size, up * size);
                 let v = |q: Vec3, u: f32, vv: f32| Vertex { pos: q.into(), uv: [u, vv], color };
                 let (p0, p1, p2, p3) = (v(pos - a - b, 0.0, 1.0), v(pos + a - b, 1.0, 1.0), v(pos + a + b, 1.0, 0.0), v(pos - a + b, 0.0, 0.0));
                 let tex = match d.frames.get(p.set) {

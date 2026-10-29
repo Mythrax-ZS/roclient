@@ -243,6 +243,7 @@ pub fn map_emitters(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::V
                 max: one("maxcount", 30.0).clamp(0.0, 500.0) as u32,
                 zenable: one("zenable", 1.0) != 0.0,
                 linear: false,
+                grow: 1.0,
                 billboard: one("billboard_off", 0.0) == 0.0,
                 rotate: v3("rotate_angle", [0.0; 3]),
                 tex,
@@ -291,6 +292,7 @@ pub fn map_torches(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vf
                 max: 1,
                 zenable: true,
                 linear: true,
+                grow: 1.0,
                 billboard: true,
                 rotate: [0.0; 3],
                 tex: frames[0],
@@ -299,6 +301,47 @@ pub fn map_torches(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vf
         });
     }
     out
+}
+
+/// Chimney smoke (EF_SMOKE, 44): the original takes the single image of sprite 굴뚝연기 and
+/// animates it in code. Following roBrowser's table, a puff leaves every second, drifts up
+/// about 20 units and a little sideways, grows to four times its size and fades over 10 s
+/// (at most 0.8 opaque).
+pub fn map_smoke(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, effects: &[(i32, glam::Vec3)]) -> Vec<ro_render::Emitter> {
+    let spots: Vec<glam::Vec3> = effects.iter().filter(|e| e.0 == 44).map(|e| e.1).collect();
+    if spots.is_empty() {
+        return vec![];
+    }
+    let Some(tex) = fx.sprite_texture(r, vfs, "굴뚝연기") else { return vec![] };
+    spots
+        .into_iter()
+        .map(|pos| ro_render::Emitter {
+            // The particle system lifts emitters 10 units; start at the chimney itself.
+            pos: pos - glam::Vec3::new(0.0, 10.0, 0.0),
+            def: ro_render::EmitterDef {
+                // RO y-down: negative y rises.
+                dir1: [0.0, -2.0, 0.0],
+                dir2: [0.3, -2.0, 0.3],
+                gravity: [0.0; 3],
+                radius: [0.3, 0.0, 0.3],
+                color: [1.0, 1.0, 1.0, 0.8],
+                rate: [1.0, 1.0],
+                size: [2.5, 3.0],
+                life: [10.0, 10.0],
+                speed: 1.0,
+                src: 5,
+                dst: 6,
+                max: 10,
+                zenable: true,
+                billboard: true,
+                rotate: [0.0; 3],
+                tex,
+                frames: vec![],
+                linear: false,
+                grow: 4.0,
+            },
+        })
+        .collect()
 }
 
 /// The map's wind effects: RSW objects with id 2343 (EF_WIND_EFFECT, `positions` in RSW
@@ -426,6 +469,20 @@ impl FxLib {
         }
         let t = img.map(|i| r.add_effect_texture(&i));
         self.textures_dyn.insert(name.to_ascii_lowercase(), t);
+        t
+    }
+
+    /// The first image of sprite effect `name` (data\sprite\이팩트\), as an effect texture.
+    pub fn sprite_texture(&mut self, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, name: &str) -> Option<ro_render::TexId> {
+        let key = format!("spr:{name}");
+        if let Some(t) = self.textures_dyn.get(&key) {
+            return *t;
+        }
+        let spr = vfs.read(&format!("data\\sprite\\이팩트\\{name}.spr")).ok().flatten().and_then(|d| ro_formats::spr::Spr::parse(&d).ok());
+        // Straight alpha (the particle blend applies it); images() would premultiply.
+        let t = spr.and_then(|s| s.rgba.first().cloned().or_else(|| s.images(None).0.into_iter().next()));
+        let t = t.map(|img| r.add_effect_texture(&img));
+        self.textures_dyn.insert(key, t);
         t
     }
 
