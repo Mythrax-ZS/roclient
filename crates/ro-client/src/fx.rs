@@ -171,8 +171,79 @@ impl MapEmitter {
     }
 }
 
+/// The map's particle emitters: RSW effect objects with id 974 (EF_EMITTER, `positions` in
+/// RSW order) paired with the entries of `effecttool\<map>.lub` (the Nth object takes entry
+/// N). Missing fields take BrowEdit's defaults.
+pub fn map_emitters(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, map: &str, positions: &[glam::Vec3]) -> Vec<ro_render::Emitter> {
+    if positions.is_empty() {
+        return vec![];
+    }
+    let data = [format!("data\\luafiles514\\lua files\\effecttool\\{map}.lub"), format!("data\\lua files\\effecttool\\{map}.lub")]
+        .iter()
+        .find_map(|p| vfs.read(p).ok().flatten());
+    let Some(data) = data else { return vec![] };
+    let chunk = match ro_formats::lub::eval(&data) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(map, "effecttool lub: {e:#}");
+            return vec![];
+        }
+    };
+    let Some(table) = chunk.globals.get(&format!("_{}_emitterInfo", map.replace('@', ""))) else { return vec![] };
+    let num = |v: &ro_formats::lub::Value| if let ro_formats::lub::Value::Number(n) = v { Some(*n as f32) } else { None };
+    let mut out = vec![];
+    for (i, &pos) in positions.iter().enumerate() {
+        let Some(e) = chunk.field_index(table, i as u32) else { continue };
+        let list = |key: &str| -> Vec<f32> { chunk.field(e, key).map(|t| chunk.entries(t).iter().filter_map(|(_, v)| num(v)).collect()).unwrap_or_default() };
+        let v3 = |key: &str, d: [f32; 3]| {
+            let l = list(key);
+            if l.len() >= 3 { [l[0], l[1], l[2]] } else { d }
+        };
+        let v2 = |key: &str, d: [f32; 2]| {
+            let l = list(key);
+            match l.len() {
+                0 => d,
+                1 => [l[0], l[0]],
+                _ => [l[0], l[1]],
+            }
+        };
+        let one = |key: &str, d: f32| list(key).first().copied().unwrap_or(d);
+        let color = list("color");
+        let color = if color.len() >= 4 { [color[0] / 255.0, color[1] / 255.0, color[2] / 255.0, color[3] / 255.0] } else { [1.0; 4] };
+        let texture = match chunk.field(e, "texture") {
+            Some(ro_formats::lub::Value::Str(s)) => s.replace("\\\\", "\\"),
+            _ => "smoke2.bmp".to_string(),
+        };
+        let Some(tex) = fx.texture_dyn(r, vfs, &texture) else { continue };
+        out.push(ro_render::Emitter {
+            pos,
+            def: ro_render::EmitterDef {
+                dir1: v3("dir1", [0.0; 3]),
+                dir2: v3("dir2", [0.0; 3]),
+                gravity: v3("gravity", [0.0; 3]),
+                radius: v3("radius", [0.0; 3]),
+                color,
+                rate: v2("rate", [5.0, 15.0]),
+                size: v2("size", [3.0, 8.0]),
+                life: v2("life", [1.0, 5.0]),
+                speed: one("speed", 0.5),
+                src: one("srcmode", 10.0) as u8,
+                dst: one("destmode", 2.0) as u8,
+                max: one("maxcount", 30.0).clamp(0.0, 500.0) as u32,
+                zenable: one("zenable", 1.0) != 0.0,
+                billboard: one("billboard_off", 0.0) == 0.0,
+                rotate: v3("rotate_angle", [0.0; 3]),
+                tex,
+            },
+        });
+    }
+    out
+}
+
 #[derive(Default)]
 pub struct FxLib {
+    /// Textures by path under data\texture\ (particle emitters name them at run time).
+    textures_dyn: HashMap<String, Option<ro_render::TexId>>,
     cache: HashMap<String, Option<ro_render::FxId>>,
     textures: HashMap<&'static str, Option<ro_render::TexId>>,
     sprites: HashMap<&'static str, Option<ro_render::SheetId>>,
@@ -228,6 +299,22 @@ impl FxLib {
             }
             Some(r.add_effect_texture(&img?))
         })
+    }
+
+    /// A texture by path under data\texture\ (or data\texture\effect\ when not found there).
+    pub fn texture_dyn(&mut self, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, name: &str) -> Option<ro_render::TexId> {
+        if let Some(t) = self.textures_dyn.get(&name.to_ascii_lowercase()) {
+            return *t;
+        }
+        let img = [format!("data\\texture\\{name}"), format!("data\\texture\\effect\\{name}")]
+            .into_iter()
+            .find_map(|p| vfs.read(&p).ok().flatten().and_then(|d| ro_formats::image::decode(&d, &p).ok()));
+        if img.is_none() {
+            tracing::warn!(%name, "particle texture missing");
+        }
+        let t = img.map(|i| r.add_effect_texture(&i));
+        self.textures_dyn.insert(name.to_ascii_lowercase(), t);
+        t
     }
 
     /// A sprite effect from data\sprite\이팩트\.
