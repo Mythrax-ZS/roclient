@@ -1281,6 +1281,8 @@ impl MapSession {
                         0x01d2 if data.len() >= 10 => Some(Event::ComboDelay { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), ms: u32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
                         // ZC_NOTIFY_MAPPROPERTY2: map type (battleground mode); nothing to draw.
                         0x01d6 => None,
+                        // ZC_NOTIFY_ACTORINIT: the server finished sending the map's initial state.
+                        0x0b1b => None,
                         0x018c if data.len() >= 29 => {
                             let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
                             let mut mods = [0u8; 9];
