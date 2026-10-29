@@ -74,7 +74,7 @@
     },
     "gui_execution": "Root reviewed 22 offline captures using the existing release renderer and installed v2 overlay: both weapons ready/side/attack plus Muramasa windup/strike in all eight directions. Renderer matches decoded contacts and corrected hand/edge orientation. No live login."
   },
-  "build_config_sha256": "4909f43be3a00a576f2540bf5b19dca4fa259598f821c685ef6112154c5a899e",
+  "build_config_sha256": "0bb1abcabb4f538a61cffc4079ed51ed0d30fab9fde606d6d94c04aec4d81eb0",
   "review_artifacts": "target/weapon-pose-audit/{S,SW,W,NW,N}.png; diagnostic outputs are not release inputs.",
   "ready_pose_edge_side_correction": {
     "revision": "2026-10-30",
@@ -93,5 +93,60 @@
       "NE": "NW"
     },
     "review": "Offline captures of the ready pose: Kusanagi in SW, W, NW, NE, E and SE; Muramasa and the starter katana in SW and W."
+  },
+  "offhand_cross_slash": {
+    "revision": "2026-10-30",
+    "groups": [
+      4,
+      5,
+      10,
+      11
+    ],
+    "request": "Dual wielding Kusanagi and Muramasa; the blades make a cross slash, slashing in opposite directions of each other.",
+    "grip": "Main-hand grip + (2, 0): the body art holds one katana in stacked fists.",
+    "ready_tip_angles": {
+      "S": 30,
+      "SW": 30,
+      "W": 30,
+      "NW": 30,
+      "N": 210
+    },
+    "attack_tip_angles_frames_2_to_5": {
+      "S": [
+        330,
+        240,
+        135,
+        150
+      ],
+      "SW": [
+        20,
+        35,
+        185,
+        195
+      ],
+      "W": [
+        90,
+        55,
+        225,
+        240
+      ],
+      "NW": [
+        165,
+        150,
+        220,
+        230
+      ],
+      "N": [
+        225,
+        210,
+        250,
+        255
+      ]
+    },
+    "attack_frames_1_and_6": "Hold the ready guard.",
+    "edge_side": "Counter-clockwise cuts (S) mirror=true, rotation=(tip+180)%360; clockwise cuts are plain rotations, so the edge leads. N ready is mirrored (tip up-left, edge outward).",
+    "visibility": "Facing away (NW, N) the off-hand blade is drawn behind the body like the main one; angles were chosen so it clears the head. No tip ends more than 2 px below the ground line.",
+    "basis": "Decoded composites of body + off-hand + main in all eight directions (mirrored NE/E/SE reflect automatically).",
+    "validation": "Offline captures at prt_fild08, 2000x1125, distance 300, Kusanagi right and Muramasa left: ready S, attack frame 4 facing S, E and NE, frame 3 facing W and N. Live login as Hayate (Kusanagi right, Muramasa left equipped on the server): the client resolved the left hand as item 900002 and loaded muramasa_offhand; a capture while attacking shows both blades in the ready stance."
   }
 }

@@ -18,7 +18,7 @@
   "weapon_included_in_body": false,
   "sex": "male",
   "art_status": "Body and starter blade artwork retain prior visual reviews. Current attack poses were reviewed in decoded before/after composites; current runtime validation is recorded separately. Three attack groups share one six-frame swing. Female and separate head/headgear art are not supplied.",
-  "build_config_sha256": "4909f43be3a00a576f2540bf5b19dca4fa259598f821c685ef6112154c5a899e",
+  "build_config_sha256": "0bb1abcabb4f538a61cffc4079ed51ed0d30fab9fde606d6d94c04aec4d81eb0",
   "body_images": 119,
   "actions": 104,
   "timeline_frames": 304,
@@ -41,7 +41,9 @@
     "data/sprite/custom/samurai/ember_ronin.spr": "c5c3ea78995c90bdf4c820d2c6e252814d87313ab1c086dcf55e2686d5577aad",
     "data/sprite/custom/samurai/ember_ronin.act": "534d734911b30e8ab7730d859795864fac8b5617463f2a8d5e36c58957758275",
     "data/sprite/custom/samurai/katana.spr": "82bb15bdf204d4d5bfccbe0510a8e2b6212a13e7dcd4d9fd0adc57e0409b0079",
-    "data/sprite/custom/samurai/katana.act": "01bf5143a439b89519e95caef89e5740a24cdf3ef5fa00f2b75de32710f5dab1"
+    "data/sprite/custom/samurai/katana.act": "01bf5143a439b89519e95caef89e5740a24cdf3ef5fa00f2b75de32710f5dab1",
+    "data/sprite/custom/samurai/katana_offhand.spr": "82bb15bdf204d4d5bfccbe0510a8e2b6212a13e7dcd4d9fd0adc57e0409b0079",
+    "data/sprite/custom/samurai/katana_offhand.act": "9bba09e6370c8797e2f4689878e6eeeeb5ec4273fc96bab5f731631204ad0a70"
   },
   "selected_reference_sha256": "e28a3499c25bb932e968ab6a9535898dff4f2bbb328ee1526558f9f03dd496ce",
   "prior_revision_validation": {
@@ -56,5 +58,6 @@
     "katana_decoded_review": "All8ready directions and48attackposes: attached grips, unclipped blade tips,5pixel main blade width; ACT unchanged.",
     "scope": "Evidence from before the current attack orientation change; retained as history, not a claim of current runtime coverage."
   },
-  "weapon_pose_audit": "tools/samurai_assets/artwork/weapon_pose_audit.json"
+  "weapon_pose_audit": "tools/samurai_assets/artwork/weapon_pose_audit.json",
+  "dual_wield": "katana_offhand is the starter katana on the off-hand cross-slash poses (weapon_pose_audit.json, offhand_cross_slash). The client draws it when item 900000 is in the left hand. Body, katana and their timelines are byte-identical to the previous revision."
 }

@@ -107,6 +107,13 @@ def weapon_layer(pose, size, source_grip):
                 rotation=rotation, mirror=mirrored, scale_x=sx, scale_y=sy)
 
 
+def weapon_frame(pose, image, source_grip, mirrored):
+    layer = weapon_layer(pose, image.size, source_grip) if pose else None
+    if mirrored and layer:
+        layer = reflect_layer(layer)
+    return dict(layers=[layer] if layer else [], anchors=[])
+
+
 def sampled_weapon_png(path, spec):
     """Sample an authored rectangle once, retaining its transparent margins."""
     image = Image.open(path).convert("RGBA")
@@ -164,7 +171,9 @@ def compile_package(config_path, destination):
         source_hashes[source_name] = hashlib.sha256(weapon_path.read_bytes()).hexdigest()
     else:
         weapon_image = Image.new("RGBA", (2, 2))
-    weapon_actions = []
+    # Off-hand poses (dual wielding) make a second pair from the same weapon image.
+    has_offhand = any(group.get("offhand_poses") for group in config["groups"])
+    weapon_actions, offhand_actions = [], []
     diagnostics = []
     for group_index in range(13):
         group = groups[group_index]
@@ -178,11 +187,12 @@ def compile_package(config_path, destination):
                 specs = [dict(sheet=sheet_name, row=row, column=col) for col in group["columns"]]
             if not specs:
                 raise ValueError(f"Group {group_index} direction {direction} is empty")
-            body_frames, weapon_frames = [], []
+            body_frames, weapon_frames, offhand_frames = [], [], []
             poses = group.get("weapon_poses", {}).get(source_direction, [None] * len(specs))
-            if len(poses) != len(specs):
+            offhand_poses = group.get("offhand_poses", {}).get(source_direction, [None] * len(specs))
+            if len(poses) != len(specs) or len(offhand_poses) != len(specs):
                 raise ValueError(f"Weapon frame count differs in group {group_index} direction {direction}")
-            if any(pose is not None for pose in poses) and not weapon_config:
+            if any(pose is not None for pose in poses + offhand_poses) and not weapon_config:
                 raise ValueError("Weapon poses require a weapon SPR and source grip")
             for frame_index, ref in enumerate(specs):
                 sheet_name, row, column = ref["sheet"], ref["row"], ref["column"]
@@ -214,16 +224,15 @@ def compile_package(config_path, destination):
                 layer, info = source_frames[source_key]
                 layer = reflect_layer(layer) if is_mirrored else dict(layer)
                 body_frames.append(dict(layers=[layer], anchors=[dict(x=0, y=config.get("head_anchor_y", -40))]))
-                pose = poses[frame_index]
-                wlayer = weapon_layer(pose, weapon_image.size, weapon_config["source_grip"]) if pose else None
-                if is_mirrored and wlayer:
-                    wlayer = reflect_layer(wlayer)
-                weapon_frames.append(dict(layers=[wlayer] if wlayer else [], anchors=[]))
+                grip = weapon_config["source_grip"] if weapon_config else None
+                weapon_frames.append(weapon_frame(poses[frame_index], weapon_image, grip, is_mirrored))
+                offhand_frames.append(weapon_frame(offhand_poses[frame_index], weapon_image, grip, is_mirrored))
                 diagnostics.append(dict(action=group_index * 8 + DIRECTIONS.index(direction), frame=frame_index,
                     source=key, mirror=is_mirrored, output_layer=layer, **info))
             action = dict(interval=group["interval_ms"] / 25, frames=body_frames)
             actions.append(action)
             weapon_actions.append(dict(interval=action["interval"], frames=weapon_frames))
+            offhand_actions.append(dict(interval=action["interval"], frames=offhand_frames))
     destination.mkdir(parents=True, exist_ok=True)
     body_name, weapon_name = config.get("body", "ember_ronin"), config.get("weapon_name", "katana")
     for name in (body_name, weapon_name):
@@ -233,26 +242,32 @@ def compile_package(config_path, destination):
     write_act(destination / f"{body_name}.act", actions)
     write_spr(destination / f"{weapon_name}.spr", [raw_image(weapon_image)])
     write_act(destination / f"{weapon_name}.act", weapon_actions)
-    report = validate_package(destination, body_name, weapon_name)
+    offhand_name = f"{weapon_name}_offhand" if has_offhand else None
+    if offhand_name:
+        write_spr(destination / f"{offhand_name}.spr", [raw_image(weapon_image)])
+        write_act(destination / f"{offhand_name}.act", offhand_actions)
+    report = validate_package(destination, body_name, weapon_name, offhand_name)
     report.update(source_sha256=source_hashes, config_sha256=hashlib.sha256(config_path.read_bytes()).hexdigest(),
                   downsample=divisor, source_cells=diagnostics,
                   visual_status="Requires human review of all action directions; structural checks do not certify animation quality.")
     save_json(destination / "validation_report.json", report)
     save_json(destination / "build_config.json", config)
-    write_previews(destination, config, body_name, weapon_name)
+    write_previews(destination, config, body_name, weapon_name, offhand_name)
     return report
 
 
-def validate_package(directory, body_name, weapon_name):
+def validate_package(directory, body_name, weapon_name, offhand_name=None):
     directory = Path(directory)
     body = validate_pair(directory / f"{body_name}.spr", directory / f"{body_name}.act", True)
     weapon = validate_pair(directory / f"{weapon_name}.spr", directory / f"{weapon_name}.act")
-    ba, wa = (read_act(directory / f"{name}.act")["actions"] for name in (body_name, weapon_name))
-    if len(wa) != len(ba):
-        raise FormatError("Body and katana action counts differ")
-    for index, (b, w) in enumerate(zip(ba, wa)):
-        if len(b["frames"]) != len(w["frames"]) or b["interval"] != w["interval"]:
-            raise FormatError(f"Body and katana timeline mismatch in action {index}")
+    ba = read_act(directory / f"{body_name}.act")["actions"]
+    for name in filter(None, (weapon_name, offhand_name)):
+        wa = read_act(directory / f"{name}.act")["actions"]
+        if len(wa) != len(ba):
+            raise FormatError(f"Body and {name} action counts differ")
+        for index, (b, w) in enumerate(zip(ba, wa)):
+            if len(b["frames"]) != len(w["frames"]) or b["interval"] != w["interval"]:
+                raise FormatError(f"Body and {name} timeline mismatch in action {index}")
     images = read_spr(directory / f"{body_name}.spr")["images"]
     x = y = row_height = 1
     for image in images:
@@ -264,7 +279,10 @@ def validate_package(directory, body_name, weapon_name):
             row_height = 0
         x += image["width"] + 1
         row_height = max(row_height, image["height"])
-    return dict(body=body, weapon=weapon, paired_timelines=True, body_atlas_size=[1024, y + row_height + 1])
+    report = dict(body=body, weapon=weapon, paired_timelines=True, body_atlas_size=[1024, y + row_height + 1])
+    if offhand_name:
+        report["offhand"] = validate_pair(directory / f"{offhand_name}.spr", directory / f"{offhand_name}.act")
+    return report
 
 
 def render_layers(canvas, images, layers, origin):
@@ -306,11 +324,12 @@ def preview_layout(parsed):
                 origin_x=half_width, origin_y=origin_y)
 
 
-def write_previews(directory, config, body_name, weapon_name):
+def write_previews(directory, config, body_name, weapon_name, offhand_name=None):
     """All preview images are decoded from the completed SPR/ACT outputs."""
     manifest = dict(name=config.get("name", "Samurai"), directions=list(DIRECTIONS), groups=[], sheets={})
     parsed = {}
-    for kind, name in (("body", body_name), ("weapon", weapon_name)):
+    kinds = [("body", body_name), ("weapon", weapon_name)] + ([("offhand", offhand_name)] if offhand_name else [])
+    for kind, name in kinds:
         sprite, action = read_spr(directory / f"{name}.spr"), read_act(directory / f"{name}.act")
         images = rgba_images(sprite)
         paths = []
@@ -339,7 +358,9 @@ def write_previews(directory, config, body_name, weapon_name):
             for fi in range(len(action["frames"])):
                 origin = (fi * cw + layout["origin_x"], direction * ch + layout["origin_y"])
                 draw.line((origin[0] - 50, origin[1], origin[0] + 50, origin[1]), fill="#526272")
-                order = ("weapon", "body") if direction in (3, 4, 5) else ("body", "weapon")
+                # The off-hand blade is drawn just before the main one, at the same depth.
+                weapons = [kind for kind in ("offhand", "weapon") if kind in parsed]
+                order = weapons + ["body"] if direction in (3, 4, 5) else ["body"] + weapons
                 for kind in order:
                     images, actions = parsed[kind]
                     render_layers(sheet, images, actions[index]["frames"][fi]["layers"], origin)

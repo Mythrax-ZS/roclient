@@ -105,6 +105,8 @@ class CompilerTest(unittest.TestCase):
         self.assertFalse(wa[40]["frames"][1]["layers"])
         self.assertEqual(len(list(output.glob("contact_*.png"))), 13)
         self.assertTrue((output / "preview.html").is_file())
+        self.assertNotIn("offhand", report)
+        self.assertFalse((output / "katana_offhand.act").exists())
         before = (output / "ember_ronin.spr").read_bytes(), (output / "ember_ronin.act").read_bytes()
         compile_package(path, output)
         self.assertEqual(before, ((output / "ember_ronin.spr").read_bytes(), (output / "ember_ronin.act").read_bytes()))
@@ -112,6 +114,28 @@ class CompilerTest(unittest.TestCase):
         write_act(output / "katana.act", wa)
         with self.assertRaisesRegex(FormatError, "timeline mismatch"):
             validate_package(output, "ember_ronin", "katana")
+
+    def test_offhand_poses_make_a_paired_dual_wield_layer(self):
+        config = self.config()
+        config["groups"][5]["offhand_poses"] = {direction: [None, dict(grip=[2, -4], rotation=200, mirror=True)]
+                                                for direction in ("S", "SW", "W", "NW", "N")}
+        path = self.root / "build.json"
+        path.write_text(json.dumps(config))
+        output = self.root / "compiled"
+        report = compile_package(path, output)
+        self.assertTrue(report["offhand"]["valid"])
+        self.assertEqual(read_spr(output / "katana_offhand.spr")["images"], read_spr(output / "katana.spr")["images"])
+        ba, oa = (read_act(output / f"{name}.act")["actions"] for name in ("ember_ronin", "katana_offhand"))
+        for body, offhand in zip(ba, oa):
+            self.assertEqual((len(body["frames"]), body["interval"]), (len(offhand["frames"]), offhand["interval"]))
+        self.assertFalse(oa[40]["frames"][0]["layers"])
+        west, east = oa[42]["frames"][1]["layers"][0], oa[46]["frames"][1]["layers"][0]
+        self.assertEqual((west["x"], west["y"], west["rotation"], west["mirror"]), (2, -4, 200, True))
+        self.assertEqual((east["x"], east["rotation"], east["mirror"]), (-2, 160, False))
+        oa[40]["interval"] *= 2
+        write_act(output / "katana_offhand.act", oa)
+        with self.assertRaisesRegex(FormatError, "katana_offhand timeline mismatch"):
+            validate_package(output, "ember_ronin", "katana", "katana_offhand")
 
     def test_empty_cells_and_missing_groups_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "Empty source cell"):

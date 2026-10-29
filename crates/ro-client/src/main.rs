@@ -208,6 +208,11 @@ fn load_character(
     // (어세신_남_카타르_카타르), as both hands hold one.
     let mut weapon = vec![];
     if look.job == samurai::SPRITE {
+        // Dual wielding: the left-hand katana (an item id) is drawn just before (under) the main blade.
+        if let Some(base) = samurai::offhand(g.shield) {
+            tracing::debug!(item = g.shield, base, "offhand sprite");
+            weapon.extend(sheet(base, None).inspect_err(|e| tracing::warn!("offhand sprite: {e:#}")).ok());
+        }
         if let Some(base) = samurai::weapon(g.weapon) {
             weapon.push(sheet(base, None)?);
         }
@@ -5497,6 +5502,11 @@ impl App {
                         None
                     }
                     // cast:skill_id on the nearest monster.
+                    // attack: like --attack, start attacking the nearest monster.
+                    Some(("attack", _)) => {
+                        self.auto_attack = true;
+                        None
+                    }
                     Some(("cast", id)) => {
                         let me = self.player.as_ref().map_or((0, 0), |p| p.walker.cell);
                         let target = self
@@ -6878,7 +6888,7 @@ fn main() -> anyhow::Result<()> {
         distance: arg("--distance").and_then(|d| d.parse().ok()),
         yaw: arg("--yaw").and_then(|d| d.parse().ok()),
         pitch: arg("--pitch").and_then(|d| d.parse().ok()),
-        look: Look { job: arg("--job").unwrap_or_else(|| "초보자".into()), male: arg("--sex").is_none_or(|s| s != "f"), hair: 1, hair_color: 0, gear: ro_net::Look { weapon: arg("--weapon").and_then(|w| w.parse().ok()).unwrap_or(0), ..Default::default() } },
+        look: Look { job: arg("--job").unwrap_or_else(|| "초보자".into()), male: arg("--sex").is_none_or(|s| s != "f"), hair: 1, hair_color: 0, gear: ro_net::Look { weapon: arg("--weapon").and_then(|w| w.parse().ok()).unwrap_or(0), shield: arg("--shield").and_then(|w| w.parse().ok()).unwrap_or(0), ..Default::default() } },
         action: arg("--action").and_then(|a| a.parse().ok()).unwrap_or(0),
         dir: arg("--dir").and_then(|d| d.parse::<usize>().ok()).unwrap_or(0) % 8,
         capture_after: arg("--capture-after").and_then(|d| d.parse().ok()).unwrap_or(0.0),

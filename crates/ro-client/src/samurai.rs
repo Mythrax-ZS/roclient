@@ -8,6 +8,9 @@ pub const BODY: &str = r"data\sprite\custom\samurai\ember_ronin";
 pub const KATANA: &str = r"data\sprite\custom\samurai\katana";
 pub const KUSANAGI: &str = r"data\sprite\custom\samurai\kusanagi";
 pub const MURAMASA: &str = r"data\sprite\custom\samurai\muramasa";
+pub const KATANA_OFFHAND: &str = r"data\sprite\custom\samurai\katana_offhand";
+pub const KUSANAGI_OFFHAND: &str = r"data\sprite\custom\samurai\kusanagi_offhand";
+pub const MURAMASA_OFFHAND: &str = r"data\sprite\custom\samurai\muramasa_offhand";
 
 /// The supplied weapon ACT is aligned to this body; stock weapon ACTs are not.
 pub fn weapon(view: u32) -> Option<&'static str> {
@@ -16,6 +19,18 @@ pub fn weapon(view: u32) -> Option<&'static str> {
         2 | 3 | 49 => Some(KATANA),
         9001 => Some(KUSANAGI),
         9002 => Some(MURAMASA),
+        _ => None,
+    }
+}
+
+/// A katana in the left hand (dual wielding): the same blade on its own cross-slash poses,
+/// sweeping opposite to the main-hand blade. The left hand arrives as an item id, and a view
+/// can't tell a sword from a shield (a Buckler is view 2, like the katana), so match item ids.
+pub fn offhand(item: u32) -> Option<&'static str> {
+    match item {
+        900000 => Some(KATANA_OFFHAND),
+        900001 => Some(KUSANAGI_OFFHAND),
+        900002 => Some(MURAMASA_OFFHAND),
         _ => None,
     }
 }
@@ -164,6 +179,16 @@ mod tests {
     }
 
     #[test]
+    fn dual_wielded_katanas_resolve_to_their_offhand_sprites() {
+        assert_eq!(offhand(900000), Some(KATANA_OFFHAND));
+        assert_eq!(offhand(900001), Some(KUSANAGI_OFFHAND));
+        assert_eq!(offhand(900002), Some(MURAMASA_OFFHAND));
+        assert_eq!(offhand(0), None); // Empty left hand.
+        assert_eq!(offhand(2104), None); // Buckler: a shield, though its view (2) is the katana's.
+        assert_eq!(offhand(9001), None); // Views are not item ids.
+    }
+
+    #[test]
     fn legendary_item_metadata_resolves_bundled_icons_and_visible_floor_sprites() {
         let root = overlay_path().expect("bundled Samurai overlay");
         let entries = crate::customdata::iteminfo(
@@ -210,7 +235,7 @@ mod tests {
     fn shipped_body_and_weapon_match_all_player_actions() {
         let root = overlay_path().expect("bundled Samurai overlay");
         let mut parsed = Vec::new();
-        for base in [BODY, KATANA, KUSANAGI, MURAMASA] {
+        for base in [BODY, KATANA, KUSANAGI, MURAMASA, KATANA_OFFHAND, KUSANAGI_OFFHAND, MURAMASA_OFFHAND] {
             let path = root.join(base.replace('\\', "/"));
             let spr = ro_formats::spr::Spr::parse(&std::fs::read(path.with_extension("spr")).unwrap()).unwrap();
             let act = ro_formats::act::Act::parse(&std::fs::read(path.with_extension("act")).unwrap()).unwrap();

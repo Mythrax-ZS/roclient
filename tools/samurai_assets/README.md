@@ -146,6 +146,11 @@ authored grip; it never detects a hand by color. Reflection automatically mirror
 the weapon geometry alongside the body. Body and katana always get identical
 104 action counts, frame counts and delays, including unarmed empty layers.
 
+`offhand_poses` has the same shape and describes a second, left-hand copy of the
+weapon for dual wielding. When any group has them, the compiler also writes
+`<weapon_name>_offhand.spr/.act`: the same weapon image on those poses, with the
+same timeline as the body. The client draws it just before the main weapon.
+
 ## Review outputs
 
 `validation_report.json` checks strict SPR/ACT parsing, all image references,

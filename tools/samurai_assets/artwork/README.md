@@ -57,6 +57,30 @@ The complete package has 119 body images. All 104 action frame counts and delays
 were checked against the previous accepted animation; they are unchanged.
 `selection_manifest.json` lists the selected inputs and runtime checksums.
 
+## Dual wielding: the off-hand cross slash
+
+`offhand_poses` in groups 4, 5, 10 and 11 place a second, left-hand blade. The
+body art holds one katana in stacked fists, so the off-hand hilt sits 2 pixels
+beside the main grip. Only its angle differs:
+
+- **Ready:** held low behind, the tip down and back at 30 degrees. Facing N, it
+  is raised to the upper left instead.
+- **Attack:** frames 1 and 6 hold the ready guard. In frames 2 to 5 the off-hand
+  blade sweeps opposite to the main blade, so the two cuts cross. The tip angles
+  for frames 2 to 5 are:
+  - S: 330, 240, 135, 150
+  - SW: 20, 35, 185, 195
+  - W: 90, 55, 225, 240
+  - NW: 165, 150, 220, 230
+  - N: 225, 210, 250, 255
+- **Edges:** counter-clockwise cuts (S) are mirrored, so the cutting edge leads.
+  The others are plain rotations.
+- **Visibility:** facing away (NW, N), the angles are chosen so that the blade
+  shows beside the head instead of hiding behind the body.
+
+The starter katana, Kusanagi and Muramasa each get an `*_offhand` pair from the
+same metadata. `weapon_pose_audit.json` records the review.
+
 ## Kusanagi and Muramasa source revision
 
 The selected legendary weapon sources are `source/legendary/kusanagi-v4.png`

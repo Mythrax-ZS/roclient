@@ -33,14 +33,14 @@ function render(now){
   context.fillStyle='#26303c';context.fillRect(0,0,cw*4,ch*2);context.imageSmoothingEnabled=false;
   const frames=[];
   for(let direction=0;direction<8;direction++){
-    const index=group*8+direction,body=data.sheets.body.actions[index],weapon=data.sheets.weapon.actions[index];
+    const index=group*8+direction,body=data.sheets.body.actions[index],weapon=data.sheets.weapon.actions[index],offhand=data.sheets.offhand&&data.sheets.offhand.actions[index];
     let frame=Math.floor(time/(body.interval*25));
     frame=loop?frame%body.frames.length:Math.min(frame,body.frames.length-1);frames.push(frame+1);
     const column=direction%4,row=Math.floor(direction/4);
     context.save();context.translate(column*cw+layout.origin_x*zoom,row*ch+layout.origin_y*zoom);
     context.strokeStyle='#647b8d';context.beginPath();context.moveTo(-60*zoom,.5);context.lineTo(60*zoom,.5);
     context.moveTo(.5,-6);context.lineTo(.5,6);context.stroke();context.scale(zoom,zoom);
-    const drawWeapon=()=>{if($('weapon').checked)paintLayers('weapon',weapon.frames[frame].layers);};
+    const drawWeapon=()=>{if(!$('weapon').checked)return;if(offhand)paintLayers('offhand',offhand.frames[frame].layers);paintLayers('weapon',weapon.frames[frame].layers);};
     if([3,4,5].includes(direction))drawWeapon();
     paintLayers('body',body.frames[frame].layers);
     if(![3,4,5].includes(direction))drawWeapon();

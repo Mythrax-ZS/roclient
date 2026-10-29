@@ -26,14 +26,15 @@
     "body_files_unchanged": true,
     "pose_metadata": "Attack and ready poses unchanged (weapon_pose_audit.json); the v4 sources keep the convention of tip right, cutting edge below.",
     "runtime_gui_checks": "8 offline captures at prt_fild08, 2000x1125, distance 300 (no server, no login): ready facing S and W, attack at 180 ms facing S and at 270 ms facing E, for each weapon. Hilts sit in the hands and the cutting edge leads.",
-    "visual_limits": "Main-hand weapon is rendered; separately animated offhand artwork is not supplied. Muramasa's tassel is a few pixels at game scale.",
+    "visual_limits": "The body holds one katana in stacked fists, so the off-hand hilt sits beside the main grip. Muramasa's tassel is a few pixels at game scale.",
     "gameplay_scope": "This revision changes weapon artwork only. Item scripts and stats are unchanged.",
     "compiler_tests_passed": 17,
     "samurai_client_tests_passed": 6,
     "installed_overlay_matches_staging": true,
     "runtime_review_artifacts": [
       "target/legendary-weapons-v4/captures/contact.png"
-    ]
+    ],
+    "dual_wield": "Offline captures at prt_fild08, 2000x1125, distance 300, Kusanagi right and Muramasa left: ready S, attack frame 4 facing S, E and NE, frame 3 facing W and N. Live login as Hayate (Kusanagi right, Muramasa left equipped on the server): the client resolved the left hand as item 900002 and loaded muramasa_offhand; a capture while attacking shows both blades in the ready stance."
   },
   "source_sha256": {
     "source/legendary/kusanagi-v4.png": "25165a08de9aa676f5f75bd2793e175d7a0a545ed864530d8cd344a0286230b0",
@@ -44,7 +45,7 @@
     "source/legendary/sampling_review.json": "f2527786bc6efaf770283ac0f65dd3b3a4fdb89e3ee417eae0aa210278f46d33"
   },
   "compiled": {
-    "base_config_sha256": "4909f43be3a00a576f2540bf5b19dca4fa259598f821c685ef6112154c5a899e",
+    "base_config_sha256": "0bb1abcabb4f538a61cffc4079ed51ed0d30fab9fde606d6d94c04aec4d81eb0",
     "manifest_sha256": "499e24b9fcd1628627dfbf5b3caa515ce6f9903a110cc1fcc1259c513cf0c7a7",
     "weapons": {
       "kusanagi": {
@@ -53,6 +54,10 @@
         "weapon_sha256": {
           "spr": "ed2e73ff44a02939809cc1bdab17bef8e99a20c20a75738b051c6b8ea80f21db",
           "act": "a19e0aae4de904cf0fabd6157dfc6a1301febb6ae440403eddd467de89378f64"
+        },
+        "offhand_sha256": {
+          "spr": "ed2e73ff44a02939809cc1bdab17bef8e99a20c20a75738b051c6b8ea80f21db",
+          "act": "09401a016815c85d7d7be2373a4994744a86b04f6c2768f78551b6a633472f1a"
         },
         "floor_valid": true,
         "floor_origin": [
@@ -74,6 +79,10 @@
         "weapon_sha256": {
           "spr": "7f090cde8bb802dc021848b49110f7783177d1c2849f21599643fd1d848998bf",
           "act": "5ea600e3acf3d408ea7991f87a94e2dc215d6c1446147ddf285e72e4998ab094"
+        },
+        "offhand_sha256": {
+          "spr": "7f090cde8bb802dc021848b49110f7783177d1c2849f21599643fd1d848998bf",
+          "act": "891f58291d553ad6e83a1b1087fec3954634e509b3d88c317462f8181a1b5fb6"
         },
         "floor_valid": true,
         "floor_origin": [
@@ -97,8 +106,12 @@
     "overlay_sha256": {
       "data/sprite/custom/samurai/kusanagi.act": "a19e0aae4de904cf0fabd6157dfc6a1301febb6ae440403eddd467de89378f64",
       "data/sprite/custom/samurai/kusanagi.spr": "ed2e73ff44a02939809cc1bdab17bef8e99a20c20a75738b051c6b8ea80f21db",
+      "data/sprite/custom/samurai/kusanagi_offhand.act": "09401a016815c85d7d7be2373a4994744a86b04f6c2768f78551b6a633472f1a",
+      "data/sprite/custom/samurai/kusanagi_offhand.spr": "ed2e73ff44a02939809cc1bdab17bef8e99a20c20a75738b051c6b8ea80f21db",
       "data/sprite/custom/samurai/muramasa.act": "5ea600e3acf3d408ea7991f87a94e2dc215d6c1446147ddf285e72e4998ab094",
       "data/sprite/custom/samurai/muramasa.spr": "7f090cde8bb802dc021848b49110f7783177d1c2849f21599643fd1d848998bf",
+      "data/sprite/custom/samurai/muramasa_offhand.act": "891f58291d553ad6e83a1b1087fec3954634e509b3d88c317462f8181a1b5fb6",
+      "data/sprite/custom/samurai/muramasa_offhand.spr": "7f090cde8bb802dc021848b49110f7783177d1c2849f21599643fd1d848998bf",
       "data/sprite/아이템/samurai_kusanagi.act": "bdce179c49a9177d0d58370878b84d936621882a364dae5b555b2fe09a1f91fa",
       "data/sprite/아이템/samurai_kusanagi.spr": "8c2512de57fd662095aa89f988be81a5943210676a6f57d54e4bb44359027d28",
       "data/sprite/아이템/samurai_muramasa.act": "bdce179c49a9177d0d58370878b84d936621882a364dae5b555b2fe09a1f91fa",
@@ -132,5 +145,6 @@
     "tools/samurai_assets/illustration/cutout.py",
     "tools/samurai_assets/illustration/mura_outline.py",
     "tools/samurai_assets/illustration/native.py"
-  ]
+  ],
+  "runtime_changes_dual_wield": "kusanagi_offhand and muramasa_offhand draw the left-hand blade when dual wielding: low behind in the ready stance and sweeping opposite to the main blade when attacking. The main-hand pairs and item art are unchanged."
 }

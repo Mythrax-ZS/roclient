@@ -28,8 +28,13 @@ The game job is **Samurai** (4500); **Ember Ronin** remains the asset filename.
   about 5 pixels wide. The blade was shortened and widened for gameplay zoom; do not
   restore the old 0.75 scale, which made the thin blade hard to read in-game.
 - Equipped swords with view 2, 3 or 49 use the starter katana. Custom views 9001
-  and 9002 select Kusanagi and Muramasa. Dual wielding is a
-  server mechanic; separate offhand and katar artwork are not supplied.
+  and 9002 select Kusanagi and Muramasa. Katar artwork is not supplied.
+- Dual wielding draws the left-hand katana from its own `*_offhand` pair. It is the
+  same blade on off-hand poses. In the ready stance it is held low behind; when
+  attacking, it sweeps opposite to the main blade, a cross slash. The server sends
+  the left hand as an item ID. The client matches 900000, 900001 and 900002 rather
+  than view numbers, because a view can't tell a sword from a shield (a Buckler is
+  also view 2). Other swords in the left hand are not drawn.
 - All pairs use SPR 2.1 truecolor RGBA and ACT 2.5. Weapon pairs must match the
   body's action layout and authored grip positions.
 
@@ -68,8 +73,8 @@ py -m unittest discover -s tools/samurai_assets -p 'test_*.py'
 
 Open `target/samurai-review/preview.html` to inspect all directions, step through
 frames and toggle the katana. Contact sheets and the validation report are
-decoded from the output binaries. Installation is a separate copy of both
-SPR/ACT pairs into `data/sprite/custom/samurai/`.
+decoded from the output binaries. Installation is a separate copy of the
+SPR/ACT pairs (body, katana and katana_offhand) into `data/sprite/custom/samurai/`.
 
 [provenance.json](provenance.json) records the runtime file hashes and source
 locations. The artwork was generated with the built-in image-generation tool.
@@ -97,7 +102,8 @@ their visual identities.
 
 The overlay includes separate equipped SPR/ACT pairs, 32-pixel inventory icons,
 128-pixel collection art and floor-drop sprites. Either weapon can be equipped
-in either hand mechanically; the current client displays the main-hand weapon.
+in either hand. When both are wielded, the client draws the left-hand one from
+its off-hand pair (`kusanagi_offhand`, `muramasa_offhand`), crossing the main blade.
 The existing stock Muramasa (1164) remains a separate item.
 
 The selected weapon art is the `*-v4.png` pair in the source directory below,

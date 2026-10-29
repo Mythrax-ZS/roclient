@@ -99,8 +99,11 @@ def compile_weapons(base_path, manifest_path, output):
         if body_bytes is not None and body != body_bytes:
             raise ValueError(f"Weapon variant {name} changed the body SPR/ACT")
         body_bytes = body
-        for extension in ("spr", "act"):
-            shutil.copy2(destination / f"{name}.{extension}", armed / f"{name}.{extension}")
+        # Off-hand (dual wield) pairs exist when the base config has offhand_poses.
+        pairs = [n for n in (name, f"{name}_offhand") if (destination / f"{n}.act").is_file()]
+        for pair in pairs:
+            for extension in ("spr", "act"):
+                shutil.copy2(destination / f"{pair}.{extension}", armed / f"{pair}.{extension}")
         source = sampled_weapon_png(png, {"rect": entry["rect"]} if "rect" in entry else {})
         small = item_picture(source, 32)
         save_colorkey_bmp(overlay / f"data/texture/유저인터페이스/item/{resource}.bmp", small)
@@ -116,6 +119,7 @@ def compile_weapons(base_path, manifest_path, output):
         floor_report = validate_pair(floor.with_suffix(".spr"), floor.with_suffix(".act"))
         report["weapons"][name] = dict(resource=resource, source_sha256=digest(png),
             weapon_sha256={ext: digest(armed / f"{name}.{ext}") for ext in ("spr", "act")},
+            offhand_sha256={ext: digest(armed / f"{name}_offhand.{ext}") for ext in ("spr", "act")} if len(pairs) > 1 else None,
             floor_valid=floor_report["valid"], floor_origin=[16, 16], icon_size=[32, 32], collection_size=[128, 128])
     report["body_sha256"] = {ext: hashlib.sha256(data).hexdigest() for ext, data in zip(("spr", "act"), body_bytes)}
     report["overlay_sha256"] = {p.relative_to(overlay).as_posix(): digest(p) for p in sorted(overlay.rglob("*")) if p.is_file()}

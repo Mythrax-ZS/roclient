@@ -30,11 +30,11 @@
   ],
   "exclusion_reason": "Not referenced by build.json; working or superseded artwork remains outside release.",
   "sha256": {
-    "build.json": "4909f43be3a00a576f2540bf5b19dca4fa259598f821c685ef6112154c5a899e",
+    "build.json": "0bb1abcabb4f538a61cffc4079ed51ed0d30fab9fde606d6d94c04aec4d81eb0",
     "legendary_weapons.json": "499e24b9fcd1628627dfbf5b3caa515ce6f9903a110cc1fcc1259c513cf0c7a7",
     "master_audit.json": "7b589392b84d7d90bd20c073badad3f1ed3dc458ed5736d17a561face6a36fb4",
     "prompts_root.json": "5534a6cc57e7550837bb0009cce73a6d2b69fd17d4ecbea67b40dd69c0b74581",
-    "README.md": "01d25d56a2d3448f761d43d779d4a7f1025bcf524a8a21e85272f6c363b1b048",
+    "README.md": "20c25e9f9ef05a0cb51802017e08eaf4de4a193a8eb2d89a276795bc828ed87c",
     "source/attack/attack_audit.json": "5426270d8e7c0939a9ba5330f33362f61e034ddfb4cf5e033c847fd280edb43a",
     "source/attack/attack_N.png": "861b2f97c12447b0a5ab42846e5326d19efb6171df5676d56794f4141a199b94",
     "source/attack/attack_N.prompt.json": "0f740bb94100e65a92832709fd4e8246e9defd632e19580ff507e6e7b411444c",
@@ -74,7 +74,7 @@
     "source/walk_W.png": "3e5065eb8c966d02266c475054a36c5bb42819361380e79797b223a2633f7735",
     "utility_audit.json": "f05bac28e39e3399d920886cab5cd91a63bf80e99bfe17a21c4c5a5b19280520",
     "walk_audit.json": "609d30ef412c112761e5f953496ec6005abfb04e6ea4e5f1f57df1a10c93b963",
-    "weapon_pose_audit.json": "b44bfdfeafb2561558a0379b63730474d64ada0f6cd806bf5ecdca61619ea94d",
+    "weapon_pose_audit.json": "6202be34b92c9c2b73704f2b8b34dafdf979a2ce60a8a152282da7b1c2a4e0f9",
     "source/legendary/kusanagi-v2.png": "75910d1f459bbd2ecacc50623c2574ccba3f8ef26fcf93ed10bf4c7fd9e4999c",
     "source/legendary/kusanagi-v2.prompt.json": "a52f1bcb32a37b6f81b628fb5a1d233708b20314a3800b4542044306e116dc56",
     "source/legendary/muramasa-v2.png": "bd56ff254785a056011dee7f16a88c5d2ef8ee48b2a5e10a19090006bd9cdec8",
@@ -96,7 +96,13 @@
     "kusanagi.spr": "ed2e73ff44a02939809cc1bdab17bef8e99a20c20a75738b051c6b8ea80f21db",
     "kusanagi.act": "a19e0aae4de904cf0fabd6157dfc6a1301febb6ae440403eddd467de89378f64",
     "muramasa.spr": "7f090cde8bb802dc021848b49110f7783177d1c2849f21599643fd1d848998bf",
-    "muramasa.act": "5ea600e3acf3d408ea7991f87a94e2dc215d6c1446147ddf285e72e4998ab094"
+    "muramasa.act": "5ea600e3acf3d408ea7991f87a94e2dc215d6c1446147ddf285e72e4998ab094",
+    "katana_offhand.spr": "82bb15bdf204d4d5bfccbe0510a8e2b6212a13e7dcd4d9fd0adc57e0409b0079",
+    "katana_offhand.act": "9bba09e6370c8797e2f4689878e6eeeeb5ec4273fc96bab5f731631204ad0a70",
+    "kusanagi_offhand.spr": "ed2e73ff44a02939809cc1bdab17bef8e99a20c20a75738b051c6b8ea80f21db",
+    "kusanagi_offhand.act": "09401a016815c85d7d7be2373a4994744a86b04f6c2768f78551b6a633472f1a",
+    "muramasa_offhand.spr": "7f090cde8bb802dc021848b49110f7783177d1c2849f21599643fd1d848998bf",
+    "muramasa_offhand.act": "891f58291d553ad6e83a1b1087fec3954634e509b3d88c317462f8181a1b5fb6"
   },
   "animation_contract": {
     "actions": 104,
