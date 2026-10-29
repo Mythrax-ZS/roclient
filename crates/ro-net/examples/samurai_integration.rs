@@ -4,7 +4,7 @@
 //! This deliberately refuses the normal login/char/map ports and any remote address.
 
 use anyhow::{bail, ensure, Context, Result};
-use ro_net::{Command, Event, ItemData, ItemRequest, Skill, StatRequest};
+use ro_net::{Command, Event, ItemData, ItemRequest, Skill, StatRequest, NpcDialog, NpcReply};
 use std::{collections::{BTreeMap, BTreeSet}, net::SocketAddr, sync::mpsc, time::{Duration, Instant}};
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -15,6 +15,9 @@ const PASSWORD: &str = "samurai-test-only";
 #[derive(Default)]
 struct State {
     account: u32,
+    job: u32,
+    mentor: Option<u32>,
+    dialogs: Vec<NpcDialog>,
     items: BTreeMap<u16, ItemData>,
     skills: BTreeMap<u16, Skill>,
     stats: BTreeMap<u16, i64>,
@@ -31,9 +34,25 @@ impl State {
     fn accept(&mut self, e: Event) -> Result<()> {
         match e {
             Event::Disconnected(reason) => bail!("test session disconnected: {reason}"),
+            Event::Unit(unit) if unit.name == "Samurai Mentor" => self.mentor = Some(unit.id),
+            Event::NpcName { id, name, .. } if name == "Samurai Mentor" => self.mentor = Some(id),
+            Event::Npc(dialog) => {
+                println!("NPC {dialog:?}");
+                self.dialogs.push(dialog);
+            }
+            Event::LookChange { id, kind: 0, value, .. } if id == self.account => {
+                self.job = value;
+                println!("JOB_CHANGED {value}");
+            }
             Event::InventoryStart => self.items.clear(),
             Event::Items(items) => self.items.extend(items.into_iter().map(|i| (i.index, i))),
             Event::ItemAdded(item) => { self.items.insert(item.index, item); }
+            Event::ItemRemoved { index, amount } => {
+                if let Some(item) = self.items.get_mut(&index) {
+                    item.amount = item.amount.saturating_sub(amount);
+                    if item.amount == 0 { self.items.remove(&index); }
+                }
+            }
             Event::Equipped { index, slots, ok, .. } => {
                 ensure!(ok, "equip refused for inventory index {index}, slots {slots:#x}");
                 if let Some(item) = self.items.get_mut(&index) { item.equipped = slots; }
@@ -78,12 +97,17 @@ impl State {
                 println!("ATTACK damage={} left={}", act.damage, act.left_damage);
             }
             Event::Chat { text, .. } => {
+                if let Some(rest) = text.strip_prefix("SAMURAI_MENTOR ") { self.mentor = rest.trim().parse().ok(); }
                 if let Some(rest) = text.strip_prefix("SAMURAI_DUMMY ") { self.dummy = rest.trim().parse().ok(); }
                 println!("CHAT {text}");
             }
             _ => {}
         }
         Ok(())
+    }
+
+    fn item_count(&self, id: u32) -> u32 {
+        self.items.values().filter(|item| item.id == id).map(|item| item.amount as u32).sum()
     }
 
     fn stat(&self, id: u16) -> Result<i64> {
@@ -115,6 +139,37 @@ impl Test {
         self.send(Command::Stat(StatRequest::UseSkill { skill, level: 5, target }))?;
         self.pump(650).await
     }
+    /// Exercise the production trainer's actual dialogue, including weight checks.
+    async fn mentor(&mut self, choice: Option<&str>) -> Result<Vec<String>> {
+        let npc = self.state.mentor.context("Samurai Mentor was not received in view")?;
+        self.state.dialogs.clear();
+        self.send(Command::Npc { npc, reply: NpcReply::Contact })?;
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let mut lines = Vec::new();
+        while Instant::now() < deadline {
+            self.pump(120).await?;
+            for dialog in std::mem::take(&mut self.state.dialogs) {
+                match dialog {
+                    NpcDialog::Say { text, .. } => lines.push(text),
+                    NpcDialog::Next { npc } => self.send(Command::Npc { npc, reply: NpcReply::Next })?,
+                    NpcDialog::Menu { npc, options } => {
+                        let requested = choice.context("trainer unexpectedly offered a menu on revisit")?;
+                        let selected = options.iter().position(|option| option == requested)
+                            .with_context(|| format!("trainer did not offer {requested:?}: {options:?}"))?;
+                        self.send(Command::Npc { npc, reply: NpcReply::Menu(selected as u8 + 1) })?;
+                    }
+                    NpcDialog::Close { npc } => {
+                        self.send(Command::Npc { npc, reply: NpcReply::Close })?;
+                        self.pump(250).await?;
+                        return Ok(lines);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        bail!("trainer dialogue timed out; lines {lines:?}")
+    }
+
     async fn buff(&mut self, skill: u16, efst: u16) -> Result<()> {
         self.cast(skill, self.state.account).await?;
         ensure!(self.state.buffs.contains(&efst), "skill {skill} did not apply EFST {efst}; failures {:?}", self.state.failed);
@@ -137,8 +192,8 @@ async fn main() -> Result<()> {
     test_address(server.addr.into(), 55121)?;
     let chars = ro_net::enter_char(server, &auth).await?;
     let character = chars.characters.iter().find(|c| c.slot == 0).context("test character in slot 0 missing")?.clone();
-    ensure!(character.job == 4500 && character.sex == 1, "expected male Samurai, got job={} sex={}", character.job, character.sex);
-    println!("PASS login retains male Samurai job 4500 ({})", character.name);
+    ensure!(character.job == 4013 && character.sex == 1, "expected male Assassin Cross fixture, got job={} sex={}", character.job, character.sex);
+    println!("PASS login starts male Assassin Cross job 4013 ({})", character.name);
     let zone = chars.select(0).await?;
     test_address(zone.addr.into(), 55122)?;
     let map = ro_net::enter_map(&zone, &auth).await?;
@@ -146,8 +201,33 @@ async fn main() -> Result<()> {
     let (events, rx) = mpsc::channel();
     let name = character.name.clone();
     let task = tokio::spawn(async move { map.run(&name, &mut commands, &events).await });
-    let mut test = Test { tx, rx, state: State { account: auth.account_id, ..Default::default() } };
+    let mut test = Test { tx, rx, state: State { account: auth.account_id, job: character.job as u32, ..Default::default() } };
+    // Initial levels come from character selection, not always from map stat updates.
+    test.state.stats.insert(ro_net::sp::BASELEVEL, character.base_level as i64);
+    test.state.stats.insert(ro_net::sp::JOBLEVEL, character.job_level as i64);
     test.pump(1200).await?;
+    ensure!(test.state.items.is_empty(), "trainer regression fixture must start with an empty inventory");
+    ensure!(test.state.stat(ro_net::sp::WEIGHT)? == 0, "trainer fixture must start at zero weight");
+    if test.state.mentor.is_none() { test.chat("@samuraimentor").await?; }
+    let base_level = test.state.stat(ro_net::sp::BASELEVEL)?;
+    let lines = test.mentor(Some("Become a Samurai")).await?;
+    ensure!(test.state.job == 4500, "trainer failed to change an eligible empty-inventory character to Samurai; dialogue {lines:?}");
+    ensure!(test.state.stat(ro_net::sp::BASELEVEL)? == base_level, "trainer changed base level");
+    ensure!(test.state.stat(ro_net::sp::JOBLEVEL)? == 1, "Samurai must start at job level 1");
+    ensure!(test.state.item_count(900000) == 1, "trainer must award exactly one starter katana");
+    ensure!(!lines.iter().any(|line| line.contains("Make room")), "false inventory failure: {lines:?}");
+    println!("PASS real mentor changes Assassin Cross to Samurai/job 1 and awards one katana from empty inventory");
+    test.mentor(None).await?;
+    ensure!(test.state.item_count(900000) == 1, "mentor gave a duplicate starter katana");
+    println!("PASS revisiting mentor does not duplicate the starter reward");
+    test.chat("@samurairewardreset").await?;
+    ensure!(test.state.item_count(900000) == 0, "reward reset did not remove the isolated tester's katana");
+    let lines = test.mentor(Some("Claim my katana")).await?;
+    ensure!(test.state.item_count(900000) == 1, "already-Samurai reward claim failed: {lines:?}");
+    test.mentor(None).await?;
+    ensure!(test.state.item_count(900000) == 1, "repeat reward claim duplicated the katana");
+    println!("PASS already-Samurai unclaimed reward is delivered once");
+    test.chat("@item 1201 1").await?;
 
     for skill in 7001..=7008 {
         for _ in 0..5 {
