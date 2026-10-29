@@ -346,6 +346,8 @@ pub enum Event {
     MacroScan(Vec<u32>),
     /// ZC_ACK_APPLY_MACRO_DETECTOR: 0 now being watched, 1 no data, 2 already being tested.
     MacroApplied(u32),
+    /// ZC_ACK_REQNAMEALL_NPC: an NPC's or monster's name and title.
+    NpcName { id: u32, name: String, title: String },
     /// ZC_SKILL_SCALE: a monster casting an area skill; the area shows until the cast ends.
     SkillScale { id: u32, skill: u16, level: u16, x: u16, y: u16, cast_ms: u32 },
     /// ZC_MEMORIALDUNGEON_*: instance creation queue, status and notices.
@@ -1472,6 +1474,9 @@ impl MapSession {
                         0x0a17 if data.len() >= 6 => Some(Event::DynamicNpc(l(&data, 2))),
                         0x0a6d => Some(Event::MacroScan(data.get(4..).unwrap_or_default().chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())),
                         0x0a57 if data.len() >= 6 => Some(Event::MacroApplied(l(&data, 2))),
+                        0x0adf if data.len() >= 58 => Some(Event::NpcName { id: l(&data, 2), name: ro_proto::packets::get_fixed_str(&mut &data[10..34], 24), title: ro_proto::packets::get_fixed_str(&mut &data[34..58], 24) }),
+                        // ZC_CHANGE_GUILD (this version's layout: guild, emblem, unit).
+                        0x0b47 if data.len() >= 14 => Some(Event::UnitGuild { id: l(&data, 10), guild: l(&data, 2) }),
                         0x09da => ro_proto::guild::parse_storage_log(&data).map(|(r, e)| Event::GuildStorageLog(r, e)),
                         0x0a41 if data.len() >= 18 => {
                             let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
@@ -1531,7 +1536,7 @@ impl MapSession {
                         0x02b7 if data.len() >= 7 => Some(Event::QuestActiveChanged { quest: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), active: data[6] != 0 }),
                         0x0446 => parse_quest_mark(&data).map(|(npc, mark, color)| Event::QuestMark { npc, mark, color }),
                         0x043d if data.len() >= 8 => Some(Event::SkillCooldown { skill: u16::from_le_bytes([data[2], data[3]]), ms: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
-                        0x01ad | 0x018d | 0x025a | 0x0abe | 0x0afb | 0x0177 | 0x0442 | 0x01a6 | 0x0b65 | 0x0221 | 0x07e3 => parse_menu(opcode, &data).map(Event::Menu),
+                        0x01ad | 0x018d | 0x025a | 0x0abe | 0x0afb | 0x0177 | 0x0442 | 0x01a6 | 0x0b65 | 0x0221 | 0x07e3 | 0x097f => parse_menu(opcode, &data).map(Event::Menu),
                         0x018f => parse_make_result(&data).map(|(ok, item)| Event::MakeResult { ok, item }),
                         // ZC_NPC_SHOWEFST_UPDATE: a monster or NPC's option (hiding, cloaking...).
                         0x028a if data.len() >= 10 => Some(Event::UnitOption { id: l(&data, 2), option: l(&data, 6) }),

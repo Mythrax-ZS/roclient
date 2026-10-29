@@ -35,6 +35,8 @@ pub enum Menu {
     /// ZC_ITEMLISTWIN_OPEN (0x07e3): inventory items to hand in, with amounts. Kind 0 is
     /// Change Material; 1 and 2 are Four Spirit Analysis (pure to rough, rough to pure).
     Materials(u32),
+    /// ZC_SELECTCART (0x097f): Cart Decoration's cart looks to choose from (with our account id).
+    Cart { aid: u32, looks: Vec<u8> },
 }
 
 pub fn parse_menu(opcode: u16, data: &[u8]) -> Option<Menu> {
@@ -68,6 +70,7 @@ pub fn parse_menu(opcode: u16, data: &[u8]) -> Option<Menu> {
         0x0b65 => Menu::Repair(body.chunks_exact(24).map(|c| (u16::from_le_bytes([c[0], c[1]]), u32::from_le_bytes([c[2], c[3], c[4], c[5]]), c[22])).collect()),
         0x0221 => Menu::WeaponRefine(body.chunks_exact(23).map(|c| (u16::from_le_bytes([c[0], c[1]]), u32::from_le_bytes([c[2], c[3], c[4], c[5]]), c[6])).collect()),
         0x07e3 => Menu::Materials(u32::from_le_bytes(data.get(2..6)?.try_into().ok()?)),
+        0x097f => Menu::Cart { aid: u32::from_le_bytes(data.get(4..8)?.try_into().ok()?), looks: data.get(8..)?.to_vec() },
         _ => return None,
     })
 }
@@ -88,6 +91,7 @@ pub enum MenuReply {
     WeaponRefine(u16),
     /// (inventory index, amount) pairs; empty cancels.
     Materials { kind: u32, items: Vec<(u16, u16)> },
+    Cart { aid: u32, look: u8 },
 }
 
 impl Encode for MenuReply {
@@ -145,6 +149,11 @@ impl Encode for MenuReply {
             MenuReply::WeaponRefine(index) => {
                 d.put_u16_le(0x0222);
                 d.put_u32_le(*index as u32);
+            }
+            MenuReply::Cart { aid, look } => {
+                d.put_u16_le(0x0980);
+                d.put_u32_le(*aid);
+                d.put_u8(*look);
             }
             MenuReply::Materials { kind, items } => {
                 d.put_u16_le(0x07e4);

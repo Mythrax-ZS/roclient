@@ -2890,6 +2890,17 @@ impl App {
             StarPlaceAsk(which) => self.windows.star_ask = Some(which),
             AdoptAsk { father, mother, name } => self.windows.adopt_ask = Some((father, mother, name)),
             MacroScan(ids) => self.reporter.found(ids),
+            NpcName { id, name, title } => {
+                if let Some(m) = self.units.get_mut(&id) {
+                    if !name.is_empty() {
+                        m.name = name;
+                    }
+                    // A title shows on the line under the name.
+                    if !title.is_empty() {
+                        m.titles = Some((String::new(), title, String::new()));
+                    }
+                }
+            }
             MacroApplied(status) => self.reporter.applied(status),
             GuildStorageLog(result, entries) => match result {
                 1 => self.guild.storage_log = Some(entries),
@@ -5147,6 +5158,7 @@ impl App {
                                 }
                                 Menu::Repair(list) => list.iter().find(|r| r.1 == id).map(|&(index, item, refine)| MenuReply::Repair { index, item, refine }),
                                 Menu::WeaponRefine(list) => list.iter().find(|r| r.1 == id).map(|r| MenuReply::WeaponRefine(r.0)),
+                                Menu::Cart { aid, looks } => looks.contains(&(id as u8)).then_some(MenuReply::Cart { aid, look: id as u8 }),
                                 // The whole stack of that item.
                                 Menu::Materials(kind) => self.inventory.items.values().find(|i| i.id == id).map(|i| MenuReply::Materials { kind, items: vec![(i.index, i.amount)] }),
                                 Menu::Egg(_) => Some(MenuReply::Egg(self.inventory.items.values().find(|i| i.id == id).map_or(id as u16, |i| i.index))),

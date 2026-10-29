@@ -1325,6 +1325,7 @@ impl Windows {
                 Menu::WeaponRefine(_) => "Weapon Refine",
                 Menu::Materials(0) => "Change Material",
                 Menu::Materials(_) => "Four Spirit Analysis",
+                Menu::Cart { .. } => "Cart Decoration",
             };
             let skill_name = |id: u16| v.skill_info.and_then(|i| i.internal(id)).map_or_else(|| format!("Skill {id}"), |n| (v.skill_names)(n));
             let item_name_of = |id: u32| v.db.map_or_else(|| format!("Item #{id}"), |d| d.name(id, true));
@@ -1410,6 +1411,16 @@ impl Windows {
                                 }
                                 if ui.button("Cancel").clicked() {
                                     chosen = Some(MenuReply::Materials { kind: *kind, items: vec![] });
+                                }
+                            });
+                        }
+                        Menu::Cart { aid, looks } => {
+                            ui.label("Choose a look for your cart.");
+                            ui.horizontal(|ui| {
+                                for &look in looks {
+                                    if ui.button(format!("Cart {look}")).clicked() {
+                                        chosen = Some(MenuReply::Cart { aid: *aid, look });
+                                    }
                                 }
                             });
                         }
