@@ -424,6 +424,12 @@ impl Windows {
             ui.add_space(4.0);
             self.skill_tab = Some(tab);
             let grid = tabs[tab].1;
+            if tabs[tab].0 == crate::samurai::JOB {
+                ui.horizontal(|ui| {
+                    ui.add_sized([4.0 * 58.0, 20.0], egui::Label::new(RichText::new("Divinity / Kusanagi").strong()));
+                    ui.label(RichText::new("Cursed / Muramasa").strong());
+                });
+            }
             let rows = grid.iter().map(|(slot, _)| slot / crate::skilltree::COLUMNS + 1).max().unwrap_or(1);
             const CELL: f32 = 58.0;
             let cols = crate::skilltree::COLUMNS;

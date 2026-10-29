@@ -17,6 +17,17 @@ pub struct SkillTree {
 }
 
 impl SkillTree {
+    /// Register a custom job while retaining the stock ancestor tabs.
+    pub fn insert(&mut self, job: i16, parent: Option<i16>, slots: Vec<(u32, String)>) {
+        self.views.insert(job, slots);
+        self.same_as.remove(&job);
+        if let Some(parent) = parent {
+            self.parent.insert(job, parent);
+        } else {
+            self.parent.remove(&job);
+        }
+    }
+
     pub fn from_lubs(view: &[u8], inherit: &[u8]) -> anyhow::Result<Self> {
         let inherit = ro_formats::lub::eval(inherit)?;
         let mut job_ids: HashMap<String, i16> = HashMap::new();

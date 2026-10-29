@@ -76,14 +76,17 @@ fn draw(out: &mut [u8], s: &Layered, action: usize, shift: (i32, i32)) {
 pub fn compose(vfs: &ro_vfs::Vfs, look: &Look) -> Option<egui::ColorImage> {
     let sex = if look.male { "남" } else { "여" };
     // Doram (Summoner) have their own sprite and palette folders.
-    let (race, pal_dir) = if look.job == "summoner" { ("도람족", "palette\\도람족\\머리") } else { ("인간족", "palette\\머리") };
-    let body = load(vfs, &format!("data\\sprite\\{race}\\몸통\\{sex}\\{}_{sex}", look.job), None)?;
-    let head = load(
+    let race = crate::jobs::race_dir(&look.job);
+    let pal_dir = if race == "도람족" { "palette\\도람족\\머리" } else { "palette\\머리" };
+    let appearance = crate::jobs::appearance(&look.job, look.male)?;
+    let body = load(vfs, &appearance.body, None)?;
+    let head = if appearance.attachments { load(
         vfs,
         &format!("data\\sprite\\{race}\\머리통\\{sex}\\{}_{sex}", look.hair),
         (look.hair_color > 0).then(|| format!("data\\{pal_dir}\\머리{}_{sex}_{}.pal", look.hair, look.hair_color)),
-    );
-    let gear: Vec<Layered> = look.headgear.iter().filter_map(|n| load(vfs, &format!("data\\sprite\\악세사리\\{sex}\\{sex}{n}"), None)).collect();
+    ) } else { None };
+    let gear: Vec<Layered> = look.headgear.iter().filter(|_| appearance.attachments)
+        .filter_map(|n| load(vfs, &format!("data\\sprite\\악세사리\\{sex}\\{sex}{n}"), None)).collect();
     let mut out = vec![0u8; (SIZE * SIZE * 4) as usize];
     let anchor = |s: &Layered| s.act.actions.first().and_then(|a| a.frames.first()).and_then(|f| f.anchors.first()).copied();
     let body_anchor = anchor(&body);

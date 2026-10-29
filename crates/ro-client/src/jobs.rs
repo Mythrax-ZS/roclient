@@ -168,7 +168,28 @@ const JOBS: &[(i16, &str, &str)] = &[
     (4306, "night_watch", "Night Watch"),
     (4307, "hyper_novice", "Hyper Novice"),
     (4308, "spirit_handler", "Spirit Handler"),
+    (crate::samurai::JOB, crate::samurai::SPRITE, "Samurai"),
 ];
+
+/// Body selection and attachment rules shared by world actors and CPU portraits.
+pub struct Appearance {
+    pub body: String,
+    pub attachments: bool,
+}
+
+pub fn appearance(sprite: &str, male: bool) -> Option<Appearance> {
+    if sprite == crate::samurai::SPRITE {
+        // This package contains the male artwork only. The job-change NPC enforces it.
+        return male.then(|| Appearance { body: crate::samurai::BODY.into(), attachments: false });
+    }
+    let sex = if male { "남" } else { "여" };
+    let race = race_dir(sprite);
+    Some(Appearance { body: format!("data\\sprite\\{race}\\몸통\\{sex}\\{sprite}_{sex}"), attachments: true })
+}
+
+pub fn is_player(job: i16) -> bool {
+    job < 45 || (4001..4400).contains(&job) || job == crate::samurai::JOB
+}
 
 pub fn sprite(job: i16) -> &'static str {
     JOBS.iter().find(|j| j.0 == job).map_or("초보자", |j| j.1)

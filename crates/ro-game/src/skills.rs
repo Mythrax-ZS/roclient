@@ -16,6 +16,13 @@ pub struct SkillNames {
 }
 
 impl SkillNames {
+    /// Adds server-specific metadata after the stock tables have been loaded.
+    pub fn insert(&mut self, id: u16, internal: &str, name: &str, description: Vec<String>) {
+        self.ids.insert(id, internal.into());
+        self.names.insert(internal.into(), name.into());
+        self.descriptions.insert(internal.into(), description);
+    }
+
     pub fn from_lub(data: &[u8]) -> anyhow::Result<Self> {
         let chunk = lub::eval(data)?;
         let list = chunk.globals.get("SKILL_INFO_LIST").ok_or_else(|| anyhow::anyhow!("no SKILL_INFO_LIST"))?;

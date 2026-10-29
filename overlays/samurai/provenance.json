@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "job_name": "Samurai",
+  "appearance_working_name": "Ember Ronin",
+  "source_package": "rathena/generated/custom_jobs/ember_ronin",
+  "origin": "Generated earlier for this project using the built-in image-generation tool and a user-provided character reference.",
+  "license": "No separate artwork license supplied; no rights to the reference image are inferred or granted.",
+  "generation_prompts": "Original package source/*.json",
+  "runtime_changes": "None; copied byte-for-byte from the validated source package.",
+  "head_included": true,
+  "hair_included": true,
+  "weapon_included_in_body": false,
+  "sex": "male",
+  "art_status": "First-pass artwork; direction consistency, weapon grips and overlap need further visual polish.",
+  "sha256": {
+    "data/sprite/custom/samurai/ember_ronin.spr": "465450265df2f3d585eca59e6a4ab7ebec98a8f0e482880a4df9eb4e69ff21e6",
+    "data/sprite/custom/samurai/ember_ronin.act": "31bba79f8f25a8beaa209f990eec4796e21270de0aabd2072dcc76726f87a798",
+    "data/sprite/custom/samurai/katana.spr": "08c3791ed8bf113f24f8b246090577c4d5df644383d1b69e3fd813786592d341",
+    "data/sprite/custom/samurai/katana.act": "e5d1dd529b1fadb6deb59010e2adb4644b6a97ebda753e0e0ec924b7f11c50e1"
+  }
+}

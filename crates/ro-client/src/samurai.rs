@@ -1,0 +1,170 @@
+//! Samurai's shared appearance and client metadata. Combat rules live on the server.
+
+use std::path::{Path, PathBuf};
+
+pub const JOB: i16 = 4500;
+pub const SPRITE: &str = "samurai";
+pub const BODY: &str = r"data\sprite\custom\samurai\ember_ronin";
+pub const KATANA: &str = r"data\sprite\custom\samurai\katana";
+
+/// The supplied weapon ACT is aligned to this body; stock weapon ACTs are not.
+pub fn weapon(view: u32) -> Option<&'static str> {
+    // 49 is the stock Slayer/Claymore/Muramasa sprite alias in current itemInfo.
+    matches!(view, 2 | 3 | 49).then_some(KATANA)
+}
+
+/// Find the tracked asset overlay from a packaged executable or a repository checkout.
+/// Existing local.toml files do not need editing when this content is installed.
+pub fn overlay_path() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok();
+    let working = std::env::current_dir().ok();
+    let roots = executable.as_deref().and_then(Path::parent).into_iter()
+        .chain(working.as_deref())
+        .chain(std::iter::once(Path::new(env!("CARGO_MANIFEST_DIR"))));
+    roots.flat_map(|p| p.ancestors().take(4))
+        .map(|p| p.join("overlays/samurai"))
+        .find(|p| p.join("data/sprite/custom/samurai/ember_ronin.spr").is_file())
+}
+
+pub struct Skill {
+    pub id: u16,
+    pub internal: &'static str,
+    pub name: &'static str,
+    pub description: &'static str,
+    /// An existing client icon; a custom icon with the skill's own name takes priority.
+    pub icon: &'static str,
+    pub slot: u32,
+}
+
+pub const SKILLS: &[Skill] = &[
+    Skill { id: 7001, internal: "SAM_HEAVENS_SEVERANCE", name: "Heaven's Severance", description: "Divinity / Kusanagi. Strike one enemy for 400/500/600/700/800% ATK, with 25/30/35/40/45 percentage points of additional critical chance.", icon: "kn_bowlingbash", slot: 0 },
+    Skill { id: 7002, internal: "SAM_KUSANAGI_GUARD", name: "Kusanagi Guard", description: "Divinity / Kusanagi. Gain a 25/30/35/40/45% chance to parry physical attacks for 12 seconds.", icon: "lk_parrying", slot: 7 },
+    Skill { id: 7003, internal: "SAM_MOONLIT_REFLECTION", name: "Moonlit Reflection", description: "Divinity / Kusanagi. Within 8 seconds, block the next physical skill, return 50/60/70/80/90% of its damage and recover 2/3/4/5/6% of maximum SP.", icon: "kn_autocounter", slot: 14 },
+    Skill { id: 7004, internal: "SAM_BLADE_HARMONY", name: "Blade Harmony", description: "Divinity / Kusanagi. Gain 10/20/30/40/50 HIT and 1/2/3/4/5 ASPD for 20 seconds.", icon: "kn_twohandquicken", slot: 21 },
+    Skill { id: 7005, internal: "SAM_BLOOD_COVENANT", name: "Blood Covenant", description: "Cursed / Muramasa. Pay 10% of maximum HP. Your next 3 normal attack attempts gain 30/40/50/60/70% damage. Unused charges expire after 30 seconds.", icon: "lk_berserk", slot: 4 },
+    Skill { id: 7006, internal: "SAM_MURAMASAS_CURSE", name: "Muramasa's Curse", description: "Cursed / Muramasa. Gain 15/20/25/30/35% attack for 20 seconds. Drains 1% of maximum HP each second and ends before the drain would kill you.", icon: "bs_overthrust", slot: 11 },
+    Skill { id: 7007, internal: "SAM_ASHEN_WIND_SLASH", name: "Ashen Wind Slash", description: "Cursed / Muramasa. Strike enemies within 3 cells for 300/400/500/600/700% ATK. Has a 15/20/25/30/35% chance to inflict Bleeding for 10 seconds.", icon: "asc_meteorassault", slot: 18 },
+    Skill { id: 7008, internal: "SAM_WRATH_UNBOUND", name: "Wrath Unbound", description: "Cursed / Muramasa. Strike for 800/1000/1200/1400/1600% ATK. Requires HP strictly below 30% of maximum. Cooldown: 15 seconds.", icon: "as_sonicblow", slot: 25 },
+];
+
+pub fn register(names: &mut ro_game::skills::SkillNames, tree: &mut crate::skilltree::SkillTree) {
+    for s in SKILLS {
+        // Matches db/custom/samurai/skill_db.yml and skill_tree.yml on the server.
+        let (sp, cooldown, target, prerequisite) = match s.id {
+            7001 => (25, 2, "One enemy, range 2 cells", None),
+            7002 => (30, 20, "Self", Some("Heaven's Severance Lv 3")),
+            7003 => (35, 18, "Self", Some("Kusanagi Guard Lv 3")),
+            7004 => (30, 25, "Self", Some("Moonlit Reflection Lv 3")),
+            7005 => (20, 12, "Self", None),
+            7006 => (35, 25, "Self", Some("Blood Covenant Lv 3")),
+            7007 => (30, 4, "Self-centered attack, radius 3 cells", Some("Muramasa's Curse Lv 3")),
+            7008 => (50, 15, "One enemy, range 2 cells", Some("Ashen Wind Slash Lv 3")),
+            _ => unreachable!("Samurai skill metadata"),
+        };
+        let mut description = vec![
+            s.description.into(),
+            "Maximum level: 5".into(),
+            format!("Target: {target}"),
+            format!("SP cost: {sp}. Cooldown: {cooldown} seconds. After-cast delay: 0.3 seconds."),
+            "Requires an equipped dagger, one-handed sword, two-handed sword or katar.".into(),
+        ];
+        if let Some(prerequisite) = prerequisite {
+            description.push(format!("Prerequisite: {prerequisite}"));
+        }
+        names.insert(s.id, s.internal, s.name, description);
+    }
+    tree.insert(JOB, Some(4013), SKILLS.iter().map(|s| (s.slot, s.internal.to_string())).collect());
+}
+
+pub fn icon(id: u16) -> Option<&'static str> {
+    SKILLS.iter().find(|s| s.id == id).map(|s| s.icon)
+}
+
+/// (EFST id, skill id): the server's five temporary Samurai effects.
+pub const BUFFS: &[(u16, u16)] = &[(2000, 7002), (2001, 7003), (2002, 7004), (2003, 7005), (2004, 7006)];
+
+pub fn buff_skill(id: u16) -> Option<&'static Skill> {
+    let skill = BUFFS.iter().find(|(efst, _)| *efst == id)?.1;
+    SKILLS.iter().find(|s| s.id == skill)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skills_resolve_in_both_tree_branches_and_preserve_inherited_tabs() {
+        let mut names = ro_game::skills::SkillNames::default();
+        let mut tree = crate::skilltree::SkillTree::default();
+        tree.insert(4013, None, vec![(0, "ASC_METEORASSAULT".into())]);
+        register(&mut names, &mut tree);
+        let tabs = tree.tabs(JOB);
+        assert_eq!(tabs.iter().map(|t| t.0).collect::<Vec<_>>(), [4013, JOB]);
+        assert_eq!(tabs[1].1.len(), 8);
+        for (slot, name) in tabs[1].1 {
+            assert!(matches!(slot % crate::skilltree::COLUMNS, 0 | 4));
+            let id = names.id_of(name).expect("tree skill has a network ID");
+            assert_eq!(names.internal(id), Some(name.as_str()));
+            assert!(names.description(name).is_some());
+            assert!(icon(id).is_some());
+        }
+    }
+
+    #[test]
+    fn full_body_preview_needs_no_stock_hair_or_headgear_assets() {
+        assert!(crate::jobs::is_player(JOB));
+        assert_eq!(crate::jobs::sprite(JOB), SPRITE);
+        let appearance = crate::jobs::appearance(SPRITE, true).unwrap();
+        assert_eq!(appearance.body, BODY);
+        assert!(!appearance.attachments);
+        assert!(crate::jobs::appearance(SPRITE, false).is_none());
+        let vfs = ro_vfs::Vfs { overlays: vec![overlay_path().unwrap()], ..Default::default() };
+        let look = crate::preview::Look { job: SPRITE.into(), male: true, hair: 99, hair_color: 17, headgear: vec!["missing_hat".into()] };
+        let portrait = crate::preview::compose(&vfs, &look).expect("full-body preview without GRFs");
+        assert!(portrait.pixels.iter().any(|p| p.a() != 0));
+        let plain = crate::preview::compose(&vfs, &crate::preview::Look { hair: 1, hair_color: 0, headgear: vec![], ..look.clone() }).unwrap();
+        assert_eq!(portrait.pixels, plain.pixels);
+        assert!(crate::preview::compose(&vfs, &crate::preview::Look { male: false, ..look }).is_none());
+    }
+
+    #[test]
+    fn starter_item_metadata_resolves_to_the_matching_katana_view() {
+        let path = overlay_path().unwrap().join("System/samurai_iteminfo.lua");
+        let entries = crate::customdata::iteminfo(&std::fs::read(&path).unwrap(), "samurai_iteminfo.lua");
+        let mut db = ro_game::items::ItemDb::default();
+        db.extend(entries);
+        let info = db.get(900000).expect("starter katana metadata");
+        assert_eq!(info.name, "Samurai Initiate's Katana");
+        assert_eq!(info.resource, "카타나");
+        assert_eq!(weapon(info.view), Some(KATANA));
+        assert_eq!(weapon(2), Some(KATANA));
+        assert_eq!(weapon(3), Some(KATANA));
+        assert_eq!(weapon(49), Some(KATANA)); // Slayer 1151 / Claymore 1163 / Muramasa 1164.
+        assert_eq!(weapon(0), None);
+        assert_eq!(weapon(16), None); // No matching custom katar art.
+    }
+
+    #[test]
+    fn shipped_body_and_weapon_match_all_player_actions() {
+        let root = overlay_path().expect("bundled Samurai overlay");
+        let mut parsed = Vec::new();
+        for base in [BODY, KATANA] {
+            let path = root.join(base.replace('\\', "/"));
+            let spr = ro_formats::spr::Spr::parse(&std::fs::read(path.with_extension("spr")).unwrap()).unwrap();
+            let act = ro_formats::act::Act::parse(&std::fs::read(path.with_extension("act")).unwrap()).unwrap();
+            let (indexed, rgba) = spr.images(None);
+            assert_eq!(act.actions.len(), 104);
+            for a in &act.actions {
+                assert!(!a.frames.is_empty());
+                for l in a.frames.iter().flat_map(|f| &f.layers).filter(|l| l.sprite >= 0) {
+                    assert!((l.sprite as usize) < if l.kind == 1 { rgba.len() } else { indexed.len() });
+                }
+            }
+            parsed.push(act);
+        }
+        for (body, weapon) in parsed[0].actions.iter().zip(&parsed[1].actions) {
+            assert_eq!(body.frames.len(), weapon.frames.len());
+            assert_eq!(body.delay_ms, weapon.delay_ms);
+        }
+    }
+}

@@ -46,6 +46,13 @@ impl Buffs {
                 }
             }
         }
+        for &(id, _) in crate::samurai::BUFFS {
+            if let Some(skill) = crate::samurai::buff_skill(id) {
+                let name = format!("EFST_{}", skill.internal);
+                b.descriptions.insert(name.clone(), vec![skill.name.into(), skill.description.into()]);
+                b.names.insert(id, name);
+            }
+        }
         tracing::info!(names = b.names.len(), described = b.descriptions.len(), "status icon tables");
         b
     }
@@ -64,6 +71,9 @@ impl Buffs {
         self.icons
             .entry(id)
             .or_insert_with(|| {
+                if let Some(skill) = crate::samurai::buff_skill(id) {
+                    return crate::load_texture(ctx, vfs, &format!(r"data\texture\유저인터페이스\item\{}.bmp", skill.icon));
+                }
                 let classic = crate::status_icons::ICONS.iter().find(|(i, _)| *i == id).map(|(_, f)| f.to_string());
                 let modern = names.get(&id).map(|n| format!("{}.tga", n.to_ascii_lowercase()));
                 classic.into_iter().chain(modern).find_map(|f| crate::load_texture(ctx, vfs, &format!(r"data\texture\effect\{f}")))

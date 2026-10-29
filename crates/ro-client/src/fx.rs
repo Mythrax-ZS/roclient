@@ -19,6 +19,11 @@ pub enum Visual {
 /// What plays on the target (or cell) when a skill lands, by rAthena skill id.
 pub fn skill_visual(skill: u16) -> Option<Visual> {
     Some(match skill {
+        7001 => Visual::Str("sonicblow"),
+        7002 | 7003 | 7004 => Visual::Column("alpha_down.tga", [0.4, 0.75, 1.0]),
+        7005 | 7006 => Visual::Column("alpha_down.tga", [1.0, 0.2, 0.25]),
+        7007 => Visual::Str("brandish"),
+        7008 => Visual::Str("bowling"),
         28 => Visual::Column("alpha_down.tga", [0.3, 0.55, 0.3]),
         29 => Visual::Column("agi_up.bmp", [0.7, 1.0, 0.8]),
         30 => Visual::Column("alpha_down.tga", [0.25, 0.25, 0.55]),

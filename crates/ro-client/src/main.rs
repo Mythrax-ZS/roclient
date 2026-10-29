@@ -19,6 +19,7 @@ mod guild;
 mod hud;
 mod iteminfo;
 mod jobs;
+mod samurai;
 mod mail;
 mod msgstr;
 mod merchant;
@@ -123,7 +124,13 @@ fn default_map() -> String {
 
 fn open_vfs(cfg: &Config) -> anyhow::Result<Option<ro_vfs::Vfs>> {
     let Some(dir) = &cfg.client_dir else { return Ok(None) };
-    let overlays: Vec<PathBuf> = cfg.overlays.iter().filter(|p| p.is_dir() || { tracing::warn!(path = %p.display(), "overlay folder not found, skipping"); false }).cloned().collect();
+    let mut overlays: Vec<PathBuf> = cfg.overlays.iter().filter(|p| p.is_dir() || { tracing::warn!(path = %p.display(), "overlay folder not found, skipping"); false }).cloned().collect();
+    if let Some(path) = samurai::overlay_path() {
+        if !overlays.contains(&path) {
+            tracing::info!(path = %path.display(), "bundled Samurai assets");
+            overlays.push(path);
+        }
+    }
     let mut vfs = ro_vfs::Vfs { overlays, loose: Some(dir.clone()), grfs: vec![] };
     for name in &cfg.grfs {
         let path = dir.join(name);
@@ -166,17 +173,19 @@ fn load_character(
     // Doram jobs have their own sprite and hair palette folders.
     let race = jobs::race_dir(&look.job);
     let pal_dir = if race == "도람족" { "palette\\도람족\\머리" } else { "palette\\머리" };
-    let body = sheet(&format!("data\\sprite\\{race}\\몸통\\{sex}\\{}_{sex}", look.job), None)?;
-    let head = sheet(
+    let appearance = jobs::appearance(&look.job, look.male)
+        .with_context(|| format!("{} has no {} sprite package", look.job, if look.male { "male" } else { "female" }))?;
+    let body = sheet(&appearance.body, None)?;
+    let head = if appearance.attachments { Some(sheet(
         &format!("data\\sprite\\{race}\\머리통\\{sex}\\{}_{sex}", look.hair),
         (look.hair_color > 0).then(|| format!("data\\{pal_dir}\\머리{}_{sex}_{}.pal", look.hair, look.hair_color)),
-    )?;
+    )?) } else { None };
     let shadow = sheet("data\\sprite\\shadow", None).inspect_err(|e| tracing::warn!("shadow sprite: {e:#}")).ok();
     // Equipment is optional: a missing sprite just isn't drawn.
     let g = look.gear;
     let mut headgear = vec![];
     for view in [g.head_bottom, g.head_mid, g.head_top] {
-        if view == 0 {
+        if view == 0 || !appearance.attachments {
             continue;
         }
         // A headgear on several slots (e.g. top+mid) is drawn once.
@@ -191,7 +200,11 @@ fn load_character(
     // Weapon, then its slash trail (_검광). Two-handed katars are named twice
     // (어세신_남_카타르_카타르), as both hands hold one.
     let mut weapon = vec![];
-    if let Some(name) = (g.weapon != 0).then(|| tables.weapon(g.weapon)).flatten() {
+    if look.job == samurai::SPRITE {
+        if let Some(base) = samurai::weapon(g.weapon) {
+            weapon.push(sheet(base, None)?);
+        }
+    } else if let Some(name) = (g.weapon != 0).then(|| tables.weapon(g.weapon)).flatten() {
         let wj = jobs::weapon_dir(&look.job);
         let dir = format!("data\\sprite\\{race}\\{wj}\\{wj}_{sex}");
         let found = [format!("{dir}{name}"), format!("{dir}{name}{name}")].into_iter().find_map(|base| sheet(&base, None).ok().map(|id| (id, base)));
@@ -209,7 +222,7 @@ fn load_character(
     Ok(ro_render::Actor {
         pos: Default::default(),
         body,
-        head: Some(head),
+        head,
         headgear,
         weapon,
         shadow,
@@ -783,7 +796,7 @@ fn load_class_names(vfs: &ro_vfs::Vfs) -> std::collections::HashMap<i16, String>
 
 /// Player jobs use the human body/head sprites; everything else has one sprite per class.
 fn is_player_class(job: i16) -> bool {
-    job < 45 || (4001..4400).contains(&job)
+    jobs::is_player(job)
 }
 
 struct App {
@@ -3712,7 +3725,11 @@ impl App {
                 continue;
             }
             let path = format!("data\\texture\\유저인터페이스\\item\\{}.bmp", name.to_ascii_lowercase());
-            if let Some(tex) = load_texture(&self.egui_ctx, vfs, &path) {
+            let tex = load_texture(&self.egui_ctx, vfs, &path).or_else(|| {
+                let alias = samurai::icon(id)?;
+                load_texture(&self.egui_ctx, vfs, &format!("data\\texture\\유저인터페이스\\item\\{alias}.bmp"))
+            });
+            if let Some(tex) = tex {
                 self.skill_icons.insert(id, tex);
             }
         }
@@ -6784,18 +6801,26 @@ fn main() -> anyhow::Result<()> {
         app.skill_scales = skillscale::SkillScales::load(vfs);
         msgstr::load(vfs);
         app.item_info = iteminfo::ItemInfo::load(vfs);
-        match read(r"System\iteminfo.lub").map(|d| ro_game::items::ItemDb::from_lub(&d)) {
-            Some(Ok(mut db)) => {
-                for p in customdata::ITEMINFO_SOURCES {
-                    if let Some(src) = read(p) {
-                        db.extend(customdata::iteminfo(&src, p));
-                    }
-                }
-                tracing::info!(items = db.len(), "loaded item info");
-                app.item_db = Some(db);
+        let mut db = match read(r"System\iteminfo.lub").map(|d| ro_game::items::ItemDb::from_lub(&d)) {
+            Some(Ok(db)) => db,
+            Some(Err(e)) => {
+                tracing::warn!("iteminfo: {e:#}");
+                ro_game::items::ItemDb::default()
             }
-            Some(Err(e)) => tracing::warn!("iteminfo: {e:#}"),
-            None => tracing::warn!("System/iteminfo.lub not found; items will show by id"),
+            None => {
+                tracing::warn!("System/iteminfo.lub not found; loading text item metadata");
+                ro_game::items::ItemDb::default()
+            }
+        };
+        // Custom items still work when an installation supplies only text item info.
+        for p in customdata::ITEMINFO_SOURCES {
+            if let Some(src) = read(p) {
+                db.extend(customdata::iteminfo(&src, p));
+            }
+        }
+        if !db.is_empty() {
+            tracing::info!(items = db.len(), "loaded item info");
+            app.item_db = Some(db);
         }
         let info = |n: &str| read(&format!(r"data\luafiles514\lua files\datainfo\{n}.lub"));
         if let (Some(a), Some(b), Some(c)) = (info("accessoryid"), info("accname"), info("weapontable")) {
@@ -6828,6 +6853,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
     }
+    samurai::register(&mut app.skill_names, &mut app.skill_tree);
     // `--sound-check`: list which classic skills have a sound file, then exit.
     if args.iter().any(|a| a == "--sound-check") {
         let (Some(vfs), true) = (app.vfs.as_ref(), true) else { return Ok(()) };

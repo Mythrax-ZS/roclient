@@ -9,7 +9,7 @@ use ro_game::items::ItemInfo;
 /// Text (not compiled) item info files, in the order they override each other.
 /// The first is where translation packs keep the full table (their System\itemInfo.lua is
 /// only a loader that runs it).
-pub const ITEMINFO_SOURCES: [&str; 3] = [r"System\LuaFiles514\itemInfo.lua", r"System\itemInfo.lua", r"System\iteminfo_custom.lua"];
+pub const ITEMINFO_SOURCES: [&str; 4] = [r"System\LuaFiles514\itemInfo.lua", r"System\itemInfo.lua", r"System\samurai_iteminfo.lua", r"System\iteminfo_custom.lua"];
 
 fn lines(t: &Table, k: &str) -> Vec<String> {
     match t.get::<Value>(k) {
