@@ -239,11 +239,16 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
         let cfar = p.inv_vp * vec4(0.0, 0.0, 0.5, 1.0);
         let floor_y = p.eye.y + normalize(cfar.xyz / cfar.w - p.eye.xyz).y * p.depth.x;
         let below = floor_y - (p.eye.y + dir.y * ray_len);
-        let abyss = select(1.0 - exp(-max(below, 0.0) * 0.02), 1.0, depth > 50000.0);
-        c = mix(c, deep * 0.8, abyss * 0.97 * uw);
+        // Saturates within a few units below the floor, so walls at different depths don't
+        // each get their own in-between shade.
+        let abyss = select(smoothstep(4.0, 30.0, below), 1.0, depth > 50000.0);
+        c = mix(c, deep * 0.8, abyss * uw);
+        // In the abyss, shafts and motes run on into open water instead of stopping at
+        // whichever wall polygon the ray happened to hit.
+        let open_len = mix(ray_len, p.depth.x * 3.0, abyss);
         let light = vec3(0.30, 0.62, 0.70);
-        c += light * shafts(p.eye.xyz, dir, p.depth.x * 0.6, ray_len, secs) * 0.45 * uw;
-        c += vec3(0.55, 0.75, 0.8) * marine_snow(p.eye.xyz, dir, ray_len, secs) * 0.16 * uw;
+        c += light * shafts(p.eye.xyz, dir, p.depth.x * 0.6, open_len, secs) * 0.45 * uw;
+        c += vec3(0.55, 0.75, 0.8) * marine_snow(p.eye.xyz, dir, open_len, secs) * 0.16 * uw;
     }
 
     c *= p.grade.x;
@@ -261,6 +266,10 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
     // Vignette.
     let v = (in.uv - 0.5) * vec2(p.misc.y, 1.0);
     c *= 1.0 - (p.misc.x + 0.25 * uw) * smoothstep(0.35, 1.05, length(v));
+    // Dither by about one display step (in gamma space) so smooth dark gradients, like
+    // underwater murk, do not show 8-bit bands.
+    let n = hash2(in.pos.xy + vec2(secs * 7.0, 0.0)).x + hash2(in.pos.yx * 1.7).x - 1.0;
+    c = pow(max(pow(c, vec3(1.0 / 2.2)) + n / 255.0, vec3(0.0)), vec3(2.2));
     return vec4(c, 1.0);
 }
 
