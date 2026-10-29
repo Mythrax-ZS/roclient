@@ -2392,6 +2392,12 @@ impl App {
                     }
                 }
             }
+            Fed { homun, ok, item } => {
+                let name = self.item_db.as_ref().map_or_else(|| format!("Item #{item}"), |d| d.name(item as u32, true));
+                let who = if homun { "homunculus" } else { "pet" };
+                let text = if ok { format!("Your {who} ate {name}.") } else { format!("You don't have any {name} to feed your {who}.") };
+                self.hud.push_chat(ro_net::ChatKind::System, text);
+            }
             CastCancel(id) => {
                 self.casts.remove(&id);
                 if let Some(m) = self.mob_mut(id) {
@@ -4207,6 +4213,12 @@ impl App {
                         None
                     }
                     // bg:Name applies solo to a battleground; bgauto enters it when ready.
+                    Some(("petmenu", n)) => {
+                        if let Ok(n) = n.parse() {
+                            self.queued_commands.push(ro_net::Command::Companion(ro_net::CompanionRequest::PetMenu(n)));
+                        }
+                        None
+                    }
                     Some(("bg", name)) => {
                         self.battle.ensure_loaded(self.vfs.as_ref());
                         self.battle.open = true;

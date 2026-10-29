@@ -283,6 +283,8 @@ pub enum Event {
     Hotkeys { row: u8, keys: Vec<Hotkey> },
     /// Someone started casting.
     Casting(Cast),
+    /// ZC_FEED_PET / ZC_FEED_MER: feeding result (homun: true for the homunculus/mercenary).
+    Fed { homun: bool, ok: bool, item: u16 },
     /// ZC_DISPEL: the unit's cast was interrupted.
     CastCancel(u32),
     /// Our skill was refused (see `parse_skill_fail` causes).
@@ -1190,6 +1192,7 @@ impl MapSession {
                             (0, row, keys) => Some(Event::Hotkeys { row, keys }),
                             _ => None,
                         },
+                        0x01a3 | 0x022f if data.len() >= 5 => Some(Event::Fed { homun: opcode == 0x022f, ok: data[2] != 0, item: u16::from_le_bytes([data[3], data[4]]) }),
                         0x01b9 if data.len() >= 6 => Some(Event::CastCancel(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         // ZC_HIGHJUMP: instant slide to a cell (Taekwon jump, knockback snaps).
                         0x01ff if data.len() >= 10 => Some(Event::Stop { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), x: u16::from_le_bytes([data[6], data[7]]), y: u16::from_le_bytes([data[8], data[9]]) }),

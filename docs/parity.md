@@ -53,7 +53,8 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_CHANGE_DIRECTION
 - [ ] ZC_SKILL_SCALE, ZC_NOTIFY_ACTORINIT, ZC_COUPLENAME
 - [x] Taming (ZC_START_CAPTURE / TRYCAPTURE_MONSTER)
-- [ ] ZC_FEED_PET, ZC_PET_ACT, ZC_FEED_MER
+- [x] ZC_FEED_PET, ZC_FEED_MER (chat result)
+- [ ] ZC_PET_ACT (pet talk lines)
 - [ ] ZC_SUMMON_HP_INIT / UPDATE, ZC_HO_PAR_CHANGE, ZC_EL_PAR_CHANGE, ZC_HOSKILLINFO_UPDATE
 
 ## Social
