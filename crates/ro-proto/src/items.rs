@@ -329,6 +329,8 @@ pub enum StatRequest {
     SkillUp(u16),
     UseSkill { skill: u16, level: u16, target: u32 },
     UseSkillAt { skill: u16, level: u16, x: u16, y: u16 },
+    /// A ground skill that carries a message (Graffiti, Talkie Box).
+    UseSkillAtWithText { skill: u16, level: u16, x: u16, y: u16, text: String },
     /// Store a shortcut bar slot (tab 0) on the server.
     SetHotkey { index: u16, key: Hotkey },
     /// Remember which bar row is showing.
@@ -348,6 +350,13 @@ impl Encode for StatRequest {
                 "UseSkillToPos",
                 &[&level.to_le_bytes(), &skill.to_le_bytes(), &x.to_le_bytes(), &y.to_le_bytes()],
             ),
+            // CZ_USE_SKILL_TOGROUND_WITHTALKBOX: the message is 21 bytes at this PACKETVER.
+            StatRequest::UseSkillAtWithText { skill, level, x, y, ref text } => {
+                let mut msg = [0u8; 21];
+                let n = text.len().min(20);
+                msg[..n].copy_from_slice(&text.as_bytes()[..n]);
+                put_db_packet(d, "UseSkillToPosMoreInfo", &[&level.to_le_bytes(), &skill.to_le_bytes(), &x.to_le_bytes(), &y.to_le_bytes(), &msg]);
+            }
             // CZ_SHORTCUT_KEY_CHANGE2 / CZ_SHORTCUTKEYBAR_ROTATE2 (registered without field offsets).
             StatRequest::SetHotkey { index, key } => {
                 d.put_u16_le(0x0b21);

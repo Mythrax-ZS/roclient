@@ -75,6 +75,10 @@ pub struct Hud {
     pub digit_text: Option<String>,
     /// Our PvP rank on this map ("rank / players").
     pub pvp_text: Option<String>,
+    /// Devotion links (screen pixels), drawn under the names.
+    pub beams: Vec<(glam::Vec2, glam::Vec2)>,
+    /// Graffiti messages on the ground (screen pixels).
+    pub scrawls: Vec<(glam::Vec2, String)>,
     pub status: Status,
     /// Script overrides for the NPC dialog's layout; cleared when the dialog ends.
     pub dialog_layout: DialogLayout,
@@ -194,6 +198,26 @@ impl Hud {
         // Names under actors, outlined for readability on any background.
         let painter = ctx.layer_painter(egui::LayerId::background());
         let ppp = ctx.pixels_per_point();
+        if !self.beams.is_empty() {
+            // A soft glow around a bright core that shimmers along its length.
+            let t = ctx.input(|i| i.time) as f32;
+            for &(a, b) in &self.beams {
+                let (a, b) = (egui::pos2(a.x / ppp, a.y / ppp), egui::pos2(b.x / ppp, b.y / ppp));
+                let pulse = 0.75 + 0.25 * (t * 4.0).sin();
+                painter.line_segment([a, b], egui::Stroke::new(6.0, Color32::from_rgba_unmultiplied(255, 200, 110, (50.0 * pulse) as u8)));
+                painter.line_segment([a, b], egui::Stroke::new(2.0, Color32::from_rgba_unmultiplied(255, 236, 190, (210.0 * pulse) as u8)));
+                let k = (t * 0.8).fract();
+                painter.circle_filled(a + (b - a) * k, 3.0, Color32::from_rgba_unmultiplied(255, 250, 230, 220));
+            }
+            ctx.request_repaint();
+        }
+        // Graffiti: the scrawled message sits on its cell, in spray-paint colours.
+        for (pos, text) in &self.scrawls {
+            let p = egui::pos2(pos.x / ppp, pos.y / ppp);
+            let font = FontId::proportional(16.0);
+            painter.text(p + Vec2::splat(1.5), Align2::CENTER_CENTER, text, font.clone(), Color32::from_black_alpha(160));
+            painter.text(p, Align2::CENTER_CENTER, text, font, Color32::from_rgb(255, 110, 200));
+        }
         for l in labels {
             let pos = egui::pos2(l.feet.x / ppp, l.feet.y / ppp + 6.0);
             let font = FontId::proportional(12.0);

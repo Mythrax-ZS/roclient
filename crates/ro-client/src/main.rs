@@ -869,6 +869,11 @@ struct App {
     unit_progress: std::collections::HashMap<u32, (f32, f32)>,
     /// `showscript` call-outs over units: id -> (text, age ms).
     shouts: std::collections::HashMap<u32, (String, f32)>,
+    /// Devotion links: Crusader id -> the units it protects.
+    devotions: std::collections::HashMap<u32, Vec<u32>>,
+    /// Ground skill units' cells (for Talkie Box messages), and Graffiti texts on them.
+    ground_units: std::collections::HashMap<u32, (u16, u16)>,
+    graffiti: std::collections::HashMap<u32, String>,
     /// `showdigit`: (type, value, ms since shown).
     digit: Option<(u8, i32, f32)>,
     /// Our PvP rank on this map: (rank, players).
@@ -1429,6 +1434,9 @@ impl App {
                 self.account_id = account_id;
                 self.char_id = character.char_id;
                 self.units.clear();
+                self.devotions.clear();
+                self.ground_units.clear();
+                self.graffiti.clear();
                 self.floor.clear();
                 self.warps.clear();
                 self.enter_map(&map);
@@ -2632,6 +2640,12 @@ impl App {
                 self.shouts.insert(id, (text, 0.0));
             }
             ShowDigit { kind, value } => self.digit = Some((kind, value, 0.0)),
+            Devotion { src, targets } if targets.is_empty() => {
+                self.devotions.remove(&src);
+            }
+            Devotion { src, targets } => {
+                self.devotions.insert(src, targets);
+            }
             Instance(note) => {
                 if let Some(text) = self.memorial.apply(note) {
                     self.hud.push_chat(ro_net::ChatKind::System, text);
@@ -2798,6 +2812,7 @@ impl App {
             }
             GroundEffect { id, cell, kind } => {
                 tracing::debug!(id, ?cell, kind = format_args!("{kind:#x}"), "ground effect");
+                self.ground_units.insert(id, cell);
                 if let (Some(name), Some(pos)) = (fx::ground_str(kind), self.cell_pos(cell)) {
                     self.stop_fx(id);
                     self.play_fx_tagged(name, pos, id);
@@ -2805,7 +2820,55 @@ impl App {
                     tracing::debug!(kind = format_args!("{kind:#x}"), "no visual for ground effect");
                 }
             }
-            GroundEffectGone(id) => self.stop_fx(id),
+            GroundEffectGone(id) => {
+                self.stop_fx(id);
+                self.ground_units.remove(&id);
+                self.graffiti.remove(&id);
+            }
+            Graffiti { id, cell, text } => {
+                tracing::debug!(id, ?cell, %text, "graffiti");
+                self.ground_units.insert(id, cell);
+                self.graffiti.insert(id, text);
+            }
+            TalkieBox { id, text } => {
+                self.shouts.insert(id, (text, 0.0));
+            }
+            RentalTime { item, secs } => {
+                let name = self.item_db.as_ref().map_or_else(|| format!("Item #{item}"), |d| d.name(item, true));
+                let name = name.as_str();
+                let text = match secs {
+                    120.. => msgstr::get(1256, &[&name, &(secs / 60).to_string()]),
+                    60.. => msgstr::get(1257, &[&name]),
+                    _ => msgstr::get(1270, &[&name, &secs.to_string()]),
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, text.map_or_else(|| format!("The [{name}] item will disappear in {} minutes.", secs / 60), |t| t.trim().to_string()));
+            }
+            StarSkill { name, id, star, result } => {
+                let name = name.trim_end_matches(".gat").to_string();
+                let body = ["Sun", "Moon", "Stars"].get(star as usize).copied().unwrap_or("Stars");
+                let text = match result {
+                    0 => format!("{name} has been designated as your Place of the {body}."),
+                    1 => format!("Your Place of the {body}: {name}"),
+                    10 => format!("{name} has been designated as your Target of the {body}."),
+                    11 => format!("Your Target of the {body}: {name}"),
+                    20 => msgstr::get(927, &[&name, &star.to_string()]).unwrap_or_else(|| format!("[Taekwon Mission] Target Monster: {name} ({star}%)")),
+                    21 => msgstr::get(1190, &[&name]).unwrap_or_else(|| format!("[Taming Mission] Target Monster: {name}")),
+                    22 => format!("[Collector Rank] Target Item: {}", self.item_db.as_ref().map_or_else(|| format!("Item #{id}"), |d| d.name(id, true))),
+                    30 => "[Sun, Moon and Stars Angel] Designated places and monsters have been reset.".into(),
+                    40 => format!("Target HP: {id}"),
+                    _ => String::new(),
+                };
+                if !text.is_empty() {
+                    self.hud.push_chat(ro_net::ChatKind::System, text);
+                }
+            }
+            StarPlaceAsk(which) => self.windows.star_ask = Some(which),
+            RentalExpired { index, item } => {
+                let name = self.item_db.as_ref().map_or_else(|| format!("Item #{item}"), |d| d.name(item, true));
+                self.inventory.remove(index, u16::MAX);
+                let text = msgstr::get(1258, &[&name.as_str()]).map_or_else(|| format!("[{name}] item has been deleted from the Inventory."), |t| t.trim().to_string());
+                self.hud.push_chat(ro_net::ChatKind::System, text);
+            }
             // EFST_SKE on ourselves: the server's night (on) or day (off).
             StatusIcon { id, kind: 160, on, .. } if id == self.account_id => {
                 tracing::info!(night = on, "day/night");
@@ -3257,6 +3320,9 @@ impl App {
                 self.member_pos.clear();
                 self.revive();
                 self.units.clear();
+                self.devotions.clear();
+                self.ground_units.clear();
+                self.graffiti.clear();
                 self.floor.clear();
                 self.warps.clear();
                 if self.world.as_ref().is_none_or(|w| w.name != map) {
@@ -3269,6 +3335,9 @@ impl App {
             // Back at character select: clear the world; the screens take over again.
             LeftGame => {
                 self.units.clear();
+                self.devotions.clear();
+                self.ground_units.clear();
+                self.graffiti.clear();
                 self.floor.clear();
                 self.warps.clear();
                 self.player = None;
@@ -3332,7 +3401,12 @@ impl App {
             InsertCard { card, equip } => self.send(Command::Item(ItemRequest::InsertCard { card, equip })),
             Menu(reply) => self.send(Command::Menu(reply)),
             ShowEquip(on) => self.send(Command::ShowEquip(on)),
-            ExpandInventory => self.send(Command::Item(ItemRequest::ExpandAsk)),
+            StarPlace(which) => self.send(Command::StarPlace(which)),
+            SkillText { skill, level, cell, text } => {
+                self.send(Command::Stat(ro_net::StatRequest::UseSkillAtWithText { skill, level, x: cell.0, y: cell.1, text }));
+            }
+            ExpandInventory =>
+ self.send(Command::Item(ItemRequest::ExpandAsk)),
             ExpandConfirm(yes) => {
                 self.windows.expand_ask = None;
                 self.send(Command::Item(ItemRequest::ExpandConfirm(yes)));
@@ -3419,6 +3493,11 @@ impl App {
     fn use_skill_at(&mut self, skill: u16, level: u16, cell: (u16, u16)) {
         self.walk_goal = None;
         self.attack = None;
+        // RG_GRAFFITI and HT_TALKIEBOX ask for their message first.
+        if matches!(skill, 125 | 220) {
+            self.windows.skill_text = Some((skill, level, cell, String::new()));
+            return;
+        }
         self.send(ro_net::Command::Stat(ro_net::StatRequest::UseSkillAt { skill, level, x: cell.0, y: cell.1 }));
     }
 
@@ -3627,11 +3706,7 @@ impl App {
 
     /// The ground point at the centre of a cell.
     fn cell_pos(&self, cell: (u16, u16)) -> Option<glam::Vec3> {
-        let w = self.world.as_ref()?;
-        let (fx, fy) = (cell.0 as f32 + 0.5, cell.1 as f32 + 0.5);
-        let (x, z) = (fx * ro_render::CELL, fy * ro_render::CELL);
-        let y = w.gat.as_ref().and_then(|g| g.height_at(fx, fy)).map_or_else(|| w.ground.height_at(x, z), |h| -h);
-        Some(glam::Vec3::new(x, y, z))
+        cell_pos_in(self.world.as_ref()?, cell)
     }
 
     /// Plays a skill's effect at `pos`, if it has one.
@@ -4579,6 +4654,8 @@ impl App {
                         self.send(ro_net::Command::Captcha(ro_net::CaptchaRequest::Answer(a.to_string())));
                         None
                     }
+                    // write:<text> answers a Graffiti / Talkie Box message prompt.
+                    Some(("write", text)) => self.windows.skill_text.take().map(|(skill, level, cell, _)| windows::UiAction::SkillText { skill, level, cell, text: text.to_string() }),
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some((f @ ("fav" | "unfav"), id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::Favorite { index, on: f == "fav" }),
                     Some(("invtab", n)) => {
@@ -4923,6 +5000,9 @@ impl App {
                                     Some(MenuReply::Identify(by_item.unwrap_or(id as u16)))
                                 }
                                 Menu::Repair(list) => list.iter().find(|r| r.1 == id).map(|&(index, item, refine)| MenuReply::Repair { index, item, refine }),
+                                Menu::WeaponRefine(list) => list.iter().find(|r| r.1 == id).map(|r| MenuReply::WeaponRefine(r.0)),
+                                // The whole stack of that item.
+                                Menu::Materials(kind) => self.inventory.items.values().find(|i| i.id == id).map(|i| MenuReply::Materials { kind, items: vec![(i.index, i.amount)] }),
                                 Menu::Egg(_) => Some(MenuReply::Egg(self.inventory.items.values().find(|i| i.id == id).map_or(id as u16, |i| i.index))),
                                 Menu::Warp { skill, maps } => maps.get(id as usize).map(|m| MenuReply::Warp { skill, map: m.clone() }),
                             };
@@ -4943,6 +5023,16 @@ impl App {
                         if let Ok(skill) = id.parse::<u16>() {
                             let level = self.skills.iter().find(|s| s.id == skill).map_or(1, |s| s.level.max(1));
                             self.use_skill_on(skill, level, self.account_id);
+                        }
+                        None
+                    }
+                    // ground:skill_id[:dx] on the cell dx (default 2) east of us.
+                    Some(("ground", spec)) => {
+                        let (id, dx) = spec.split_once(':').map_or((spec, 2), |(id, dx)| (id, dx.parse().unwrap_or(2)));
+                        if let (Ok(skill), Some(p)) = (id.parse::<u16>(), self.player.as_ref()) {
+                            let cell = ((p.walker.cell.0 + dx) as u16, p.walker.cell.1 as u16);
+                            let level = self.skills.iter().find(|s| s.id == skill).map_or(1, |s| s.level.max(1));
+                            self.use_skill_at(skill, level, cell);
                         }
                         None
                     }
@@ -5452,10 +5542,23 @@ impl App {
             .shouts
             .iter()
             .filter_map(|(id, (text, _))| {
-                let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) }?;
-                Some((r.project(m.actor.pos, size)?, text.clone()))
+                let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) };
+                // Talkie Boxes are ground units, not actors.
+                let pos = m.map(|m| m.actor.pos).or_else(|| cell_pos_in(self.world.as_ref()?, *self.ground_units.get(id)?))?;
+                Some((r.project(pos, size)?, text.clone()))
             })
             .collect();
+        let scrawls: Vec<(glam::Vec2, String)> =
+            self.graffiti.iter().filter_map(|(id, text)| Some((r.project(cell_pos_in(self.world.as_ref()?, *self.ground_units.get(id)?)?, size)?, text.clone()))).collect();
+        self.hud.scrawls = scrawls;
+        // Devotion links run chest to chest, from the Crusader to each protected unit.
+        let chest = |id: u32| {
+            let m = if id == self.account_id { self.player.as_ref() } else { self.units.get(&id) }?;
+            r.project(m.actor.pos + glam::Vec3::Y * ro_render::CELL * 1.2, size)
+        };
+        let chest = &chest;
+        let beams = self.devotions.iter().flat_map(|(&src, targets)| targets.iter().filter_map(move |&t| Some((chest(src)?, chest(t)?)))).collect();
+        self.hud.beams = beams;
         self.hud.digit_text = self.digit.map(|(kind, value, t)| digit_text(kind, value, t));
         self.hud.pvp_text = self.pvp_rank.map(|(rank, total)| format!("{rank} / {total}"));
         if let Some(state) = self.egui_state.as_mut() {
@@ -6309,6 +6412,9 @@ fn main() -> anyhow::Result<()> {
         script_progress: None,
         unit_progress: Default::default(),
         shouts: Default::default(),
+        devotions: Default::default(),
+        ground_units: Default::default(),
+        graffiti: Default::default(),
         digit: None,
         pvp_rank: None,
         breath_ms: 0.0,
@@ -6561,4 +6667,12 @@ fn option_alpha(option: u32, me: bool) -> f32 {
         (true, true) => 0.35,
         (true, false) => 0.0,
     }
+}
+
+/// The ground point at a cell's centre.
+fn cell_pos_in(w: &World, cell: (u16, u16)) -> Option<glam::Vec3> {
+    let (fx, fy) = (cell.0 as f32 + 0.5, cell.1 as f32 + 0.5);
+    let (x, z) = (fx * ro_render::CELL, fy * ro_render::CELL);
+    let y = w.gat.as_ref().and_then(|g| g.height_at(fx, fy)).map_or_else(|| w.ground.height_at(x, z), |h| -h);
+    Some(glam::Vec3::new(x, y, z))
 }

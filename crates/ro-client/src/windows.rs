@@ -15,6 +15,10 @@ pub enum UiAction {
     ExpandInventory,
     /// Answer the expansion confirmation.
     ExpandConfirm(bool),
+    /// Cast a ground skill with its message.
+    SkillText { skill: u16, level: u16, cell: (u16, u16), text: String },
+    /// Yes to saving this map as a Star Gladiator place.
+    StarPlace(u8),
     UseItem(u16),
     Equip { index: u16, location: u32 },
     Unequip(u16),
@@ -67,6 +71,12 @@ pub struct Windows {
     pub inv_extra: u16,
     /// The server asks to confirm using this item to expand the inventory.
     pub expand_ask: Option<u32>,
+    /// A ground skill waiting for its message (Graffiti, Talkie Box): skill, level, cell, text.
+    pub skill_text: Option<(u16, u16, (u16, u16), String)>,
+    /// Feeling asks to save this map as the place of the sun (0), moon (1) or stars (2).
+    pub star_ask: Option<u8>,
+    /// Amounts typed in the Change Material / Analysis window, by inventory index.
+    pub materials: std::collections::HashMap<u16, u16>,
     pub equipment: bool,
     /// Which equipment tab is showing (see EQUIP_TABS).
     pub equip_tab: u8,
@@ -1210,6 +1220,52 @@ impl Windows {
             }
         }
 
+        if let Some((skill, level, cell, mut text)) = self.skill_text.take() {
+            let title = if skill == 125 { "Talkie Box" } else { "Graffiti" };
+            let mut done = None;
+            crate::classic::show(ctx, egui::Window::new(title).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO), title, true, |ui| {
+                ui.label("Enter the message.");
+                let r = ui.add(egui::TextEdit::singleline(&mut text).char_limit(20).desired_width(220.0));
+                r.request_focus();
+                let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                ui.horizontal(|ui| {
+                    if (ui.button("OK").clicked() || enter) && !text.is_empty() {
+                        done = Some(true);
+                    }
+                    if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        done = Some(false);
+                    }
+                });
+            });
+            match done {
+                Some(true) => action = Some(UiAction::SkillText { skill, level, cell, text }),
+                Some(false) => {}
+                None => self.skill_text = Some((skill, level, cell, text)),
+            }
+        }
+
+        if let Some(which) = self.star_ask {
+            let body = ["Sun", "Moon", "Stars"].get(which as usize).copied().unwrap_or("Stars");
+            let mut answer = None;
+            crate::classic::show(ctx, egui::Window::new("Feeling").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO), "Feeling", true, |ui| {
+                ui.label(format!("Save this map as your Place of the {body}? It cannot be changed later."));
+                ui.horizontal(|ui| {
+                    if ui.button("OK").clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+            if let Some(yes) = answer {
+                self.star_ask = None;
+                if yes {
+                    action = Some(UiAction::StarPlace(which));
+                }
+            }
+        }
+
         if let Some(item) = self.expand_ask {
             let name = v.db.map_or_else(|| format!("Item #{item}"), |d| d.name(item, true));
             let mut answer = None;
@@ -1242,6 +1298,9 @@ impl Windows {
                 Menu::Skill { .. } => "Select a Skill",
                 Menu::Egg(_) => "Hatch an Egg",
                 Menu::Repair(_) => "Weapon Repair",
+                Menu::WeaponRefine(_) => "Weapon Refine",
+                Menu::Materials(0) => "Change Material",
+                Menu::Materials(_) => "Four Spirit Analysis",
             };
             let skill_name = |id: u16| v.skill_info.and_then(|i| i.internal(id)).map_or_else(|| format!("Skill {id}"), |n| (v.skill_names)(n));
             let item_name_of = |id: u32| v.db.map_or_else(|| format!("Item #{id}"), |d| d.name(id, true));
@@ -1295,6 +1354,41 @@ impl Windows {
                                 }
                             }
                         }
+                        Menu::WeaponRefine(list) => {
+                            for &(index, id, refine) in list {
+                                let label = if refine > 0 { format!("+{refine} {}", item_name_of(id)) } else { item_name_of(id) };
+                                if item_row(ui, id, label) {
+                                    chosen = Some(MenuReply::WeaponRefine(index));
+                                }
+                            }
+                        }
+                        Menu::Materials(kind) => {
+                            ui.label(match kind {
+                                0 => "Choose the materials to convert.",
+                                1 => "Choose the elemental stones to split (pure to rough).",
+                                _ => "Choose the rough stones to purify (ten make one).",
+                            });
+                            for it in v.items.iter().filter(|it| it.kind == ro_game::items::kind::ETC && it.equipped == 0) {
+                                ui.horizontal(|ui| {
+                                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::hover());
+                                    paint_icon(ui.painter(), rect, v.icons.get(&it.id), Color32::WHITE);
+                                    ui.label(format!("{} ({})", item_name(v.db, it), it.amount));
+                                    let n = self.materials.entry(it.index).or_default();
+                                    ui.add(egui::DragValue::new(n).range(0..=it.amount));
+                                });
+                            }
+                            ui.horizontal(|ui| {
+                                if ui.button("OK").clicked() {
+                                    let items: Vec<(u16, u16)> = self.materials.iter().filter(|(_, &n)| n > 0).map(|(&i, &n)| (i, n)).collect();
+                                    if !items.is_empty() {
+                                        chosen = Some(MenuReply::Materials { kind: *kind, items });
+                                    }
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    chosen = Some(MenuReply::Materials { kind: *kind, items: vec![] });
+                                }
+                            });
+                        }
                         Menu::Warp { skill, maps } => {
                             for map in maps {
                                 if ui.button(map.trim_end_matches(".gat")).clicked() {
@@ -1322,11 +1416,16 @@ impl Windows {
             if let Some(reply) = chosen {
                 action = Some(UiAction::Menu(reply));
                 self.menu = None;
+                self.materials.clear();
             } else if !open {
                 // Closing the portal menu tells the server to drop the cast.
                 if let Menu::Warp { skill, .. } = menu {
                     action = Some(UiAction::Menu(MenuReply::Warp { skill, map: "cancel".into() }));
                 }
+                if let Menu::Materials(kind) = menu {
+                    action = Some(UiAction::Menu(MenuReply::Materials { kind, items: vec![] }));
+                }
+                self.materials.clear();
                 self.menu = None;
             }
         }

@@ -312,6 +312,21 @@ pub enum Event {
     ShowScript { id: u32, text: String },
     /// ZC_SHOWDIGIT: `showdigit`: 0 show 5 s, 1 count up, 2 count down, 3 fast countdown.
     ShowDigit { kind: u8, value: i32 },
+    /// ZC_DEVOTIONLIST: the units a Crusader (or mercenary) protects with Devotion; empty ends it.
+    Devotion { src: u32, targets: Vec<u32> },
+    /// ZC_SKILL_ENTRY2 (graffiti_entry): a Graffiti scrawl on the ground, gone with ZC_SKILL_DISAPPEAR.
+    Graffiti { id: u32, cell: (u16, u16), text: String },
+    /// ZC_TALKBOX_CHATCONTENTS: a Talkie Box was stepped on and says its message.
+    TalkieBox { id: u32, text: String },
+    /// ZC_CASH_TIME_COUNTER: a rental item's time left.
+    RentalTime { item: u32, secs: u32 },
+    /// ZC_CASH_ITEM_DELETE: a rental item ran out and is gone from the inventory.
+    RentalExpired { index: u16, item: u32 },
+    /// ZC_STARSKILL: Star Gladiator places and targets, Taekwon missions: `name` is a map,
+    /// monster or job name, `star` 0 sun / 1 moon / 2 stars (or mission %), `result` the kind.
+    StarSkill { name: String, id: u32, star: u8, result: u8 },
+    /// ZC_STARPLACE: Feeling asks to save this map as the place of the sun/moon/stars.
+    StarPlaceAsk(u8),
     /// ZC_MEMORIALDUNGEON_*: instance creation queue, status and notices.
     Instance(InstanceNote),
     /// ZC_NOTIFY_EXP2 (`@showexp`): experience gained; kind 1 base, 2 job; negative = lost.
@@ -737,6 +752,8 @@ pub enum Command {
     ShowEquip(bool),
     /// Our script progress bar filled (CZ_PROGRESS); the script continues.
     ProgressDone,
+    /// Yes to Feeling's "save this map as your place" (CZ_AGREE_STARPLACE).
+    StarPlace(u8),
     /// Destroy our memorial dungeon (CZ_MEMORIALDUNGEON_COMMAND 3).
     MemorialDestroy,
     Roulette(RouletteRequest),
@@ -900,6 +917,7 @@ impl MapSession {
                     Some(Command::ViewEquip(aid)) => self.send(CzViewEquip(aid)).await?,
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::ProgressDone) => self.send(Bare(0x02f1)).await?,
+                    Some(Command::StarPlace(which)) => self.send(ro_proto::packets::StarPlace(which)).await?,
                     Some(Command::MemorialDestroy) => self.send(MemorialCommand(3)).await?,
                     Some(Command::Roulette(r)) => self.send(r).await?,
                     Some(Command::Captcha(r)) => self.send(r).await?,
@@ -1091,6 +1109,12 @@ impl MapSession {
                         0x0144 if data.len() >= 23 => {
                             let l = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
                             Some(Event::Viewpoint { npc: l(2), kind: l(6), x: l(10), y: l(14), id: data[18], color: l(19) })
+                        }
+                        // ZC_C_MARKERINFO: a Crimson Marker target on the minimap (-1,-1 clears it).
+                        0x09c1 if data.len() >= 10 => {
+                            let (x, y) = (u16::from_le_bytes([data[6], data[7]]), u16::from_le_bytes([data[8], data[9]]));
+                            let gone = x == u16::MAX && y == u16::MAX;
+                            Some(Event::Viewpoint { npc: l(&data, 2), kind: if gone { 2 } else { 1 }, x: x as u32, y: y as u32, id: 0xff, color: 0xff2020 })
                         }
                         0x0293 if data.len() >= 70 => {
                             let l = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
@@ -1395,7 +1419,22 @@ impl MapSession {
                         0x0c0c => None,
                         0x09d1 if data.len() >= 14 => Some(Event::UnitProgress { id: l(&data, 2), secs: l(&data, 10) }),
                         0x08b3 if data.len() >= 8 => Some(Event::ShowScript { id: l(&data, 4), text: ro_proto::packets::get_fixed_str(&mut &data[8..], data.len() - 8) }),
-                        0x01b1 if data.len() >= 7 => Some(Event::ShowDigit { kind: data[2], value: l(&data, 3) as i32 }),
+                        0x01cf if data.len() >= 26 => Some(Event::Devotion { src: l(&data, 2), targets: (0..5).map(|i| l(&data, 6 + 4 * i)).filter(|&t| t != 0).collect() }),
+                        0x01c9 if data.len() >= 97 => Some(Event::Graffiti {
+                            id: l(&data, 2),
+                            cell: (u16::from_le_bytes([data[10], data[11]]), u16::from_le_bytes([data[12], data[13]])),
+                            text: ro_proto::packets::get_fixed_str(&mut &data[17..], 80),
+                        }),
+                        0x0191 if data.len() >= 27 => Some(Event::TalkieBox { id: l(&data, 2), text: ro_proto::packets::get_fixed_str(&mut &data[6..], 21) }),
+                        0x0298 if data.len() >= 10 => Some(Event::RentalTime { item: l(&data, 2), secs: l(&data, 6) }),
+                        0x0299 if data.len() >= 8 => Some(Event::RentalExpired { index: u16::from_le_bytes([data[2], data[3]]), item: l(&data, 4) }),
+                        // ZC_CONFIG_NOTIFY: whether others may see our equipment (sent on map entry).
+                        0x02da if data.len() >= 3 => Some(Event::ShowEquip(data[2] != 0)),
+                        0x020e if data.len() >= 32 => Some(Event::StarSkill { name: ro_proto::packets::get_fixed_str(&mut &data[2..26], 24), id: l(&data, 26), star: data[30], result: data[31] }),
+                        0x0253 if data.len() >= 3 => Some(Event::StarPlaceAsk(data[2])),
+                        0x01b1 if data.len() >= 7 =>
+
+ Some(Event::ShowDigit { kind: data[2], value: l(&data, 3) as i32 }),
                         0x02cb if data.len() >= 65 => Some(Event::Instance(InstanceNote::Queued { name: ro_proto::packets::get_fixed_str(&mut &data[2..63], 61), place: u16::from_le_bytes([data[63], data[64]]) })),
                         0x02cc if data.len() >= 4 => Some(Event::Instance(InstanceNote::Place(u16::from_le_bytes([data[2], data[3]])))),
                         0x02cd if data.len() >= 71 => Some(Event::Instance(InstanceNote::Status { name: ro_proto::packets::get_fixed_str(&mut &data[2..63], 61), live: l(&data, 63), enter: l(&data, 67) })),
@@ -1442,7 +1481,7 @@ impl MapSession {
                         0x02b7 if data.len() >= 7 => Some(Event::QuestActiveChanged { quest: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), active: data[6] != 0 }),
                         0x0446 => parse_quest_mark(&data).map(|(npc, mark, color)| Event::QuestMark { npc, mark, color }),
                         0x043d if data.len() >= 8 => Some(Event::SkillCooldown { skill: u16::from_le_bytes([data[2], data[3]]), ms: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
-                        0x01ad | 0x018d | 0x025a | 0x0abe | 0x0afb | 0x0177 | 0x0442 | 0x01a6 | 0x0b65 => parse_menu(opcode, &data).map(Event::Menu),
+                        0x01ad | 0x018d | 0x025a | 0x0abe | 0x0afb | 0x0177 | 0x0442 | 0x01a6 | 0x0b65 | 0x0221 | 0x07e3 => parse_menu(opcode, &data).map(Event::Menu),
                         0x018f => parse_make_result(&data).map(|(ok, item)| Event::MakeResult { ok, item }),
                         0x0229 => {
                             let (id, option) = parse_state_change(&data);
@@ -1463,6 +1502,14 @@ impl MapSession {
                             on: data[8] != 0,
                             // 0x0983 adds the total and remaining time (0 or less: untimed).
                             remain_ms: (opcode == 0x0983 && data.len() >= 17).then(|| i32::from_le_bytes([data[13], data[14], data[15], data[16]])).filter(|&ms| ms > 0).map(|ms| ms as u32),
+                        }),
+                        // ZC_EFST_SET_ENTER2: statuses already running on a unit as it comes into view
+                        // (and ours after a map change).
+                        0x0984 if data.len() >= 16 => Some(Event::StatusIcon {
+                            kind: u16::from_le_bytes([data[6], data[7]]),
+                            id: l(&data, 2),
+                            on: true,
+                            remain_ms: Some(l(&data, 12) as i32).filter(|&ms| ms > 0).map(|ms| ms as u32),
                         }),
                         0x0148 => Some(Event::Resurrected(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x0284 | 0x0b69 if data.len() >= 14 => Some(Event::EffectValue {
