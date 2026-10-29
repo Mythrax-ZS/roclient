@@ -149,6 +149,8 @@ pub struct Renderer {
     ui: Option<UiFrame>,
     /// Actors drawn each frame; the caller updates positions, actions and times.
     pub actors: Vec<Actor>,
+    /// 0..1: the underwater screen look for submerged maps (HD-2D only).
+    pub underwater: f32,
     /// Warp portal positions drawn each frame.
     pub warps: Vec<glam::Vec3>,
     warp_texture: Option<wgpu::BindGroup>,
@@ -515,6 +517,7 @@ impl Renderer {
             ui_free: Vec::new(),
             ui: None,
             actors: vec![],
+            underwater: 0.0,
             warps: vec![],
             warp_texture: None,
             fx_pipeline,
@@ -1185,6 +1188,10 @@ impl Renderer {
                 focus: cam.distance,
                 fog_color: fog.to_array(),
                 sun_uv: (sun.w > 0.0).then(|| [sun.x / sun.w * 0.5 + 0.5, 0.5 - sun.y / sun.w * 0.5]),
+                underwater: self.underwater,
+                time: self.started.elapsed().as_secs_f32(),
+                eye: cam.eye(),
+                inv_view_proj: vp.inverse(),
             }
         };
         self.post.record(&self.device, &self.queue, &mut enc, &targets.post, view, &self.post_settings, &frame);

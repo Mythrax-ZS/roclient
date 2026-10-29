@@ -97,6 +97,12 @@ struct Params {
     rays: [f32; 4],
     /// x: AO strength, y: sample radius (pixels at the focus distance)
     ao: [f32; 4],
+    /// Underwater: x strength (0 off), y seconds, z aspect ratio
+    water: [f32; 4],
+    /// Eye position (world), for rebuilding world positions from depth.
+    eye: [f32; 4],
+    /// Inverse view-projection.
+    inv_vp: [[f32; 4]; 4],
 }
 
 /// What the post chain needs from the frame besides the settings.
@@ -107,6 +113,12 @@ pub struct FrameInfo {
     pub fog_color: [f32; 3],
     /// Where the sun sits on screen (uv), if in front of the camera.
     pub sun_uv: Option<[f32; 2]>,
+    /// 0..1: the underwater look (absorption, caustics, shafts, drifting particles).
+    pub underwater: f32,
+    /// Seconds, for the underwater animation.
+    pub time: f32,
+    pub eye: glam::Vec3,
+    pub inv_view_proj: glam::Mat4,
 }
 
 /// Intermediate textures, sized from the window.
@@ -310,6 +322,9 @@ impl Post {
                 None => [0.5, -0.5, 0.0, 0.0],
             },
             ao: [s.ambient_occlusion, 14.0 * h / 1080.0, 0.0, 0.0],
+            water: [if s.enabled { frame.underwater } else { 0.0 }, frame.time, w / h, 0.0],
+            eye: frame.eye.extend(1.0).to_array(),
+            inv_vp: frame.inv_view_proj.to_cols_array_2d(),
             ..Default::default()
         };
         let mut n = 0;

@@ -52,6 +52,8 @@ pub struct Visual {
     pub god_rays: f32,
     pub ambient_occlusion: f32,
     pub pixel_snap: bool,
+    /// Strength of the underwater look on submerged maps (caustics, murk, shafts, motes).
+    pub underwater: f32,
 }
 
 impl Default for Visual {
@@ -76,6 +78,7 @@ impl Default for Visual {
             god_rays: p.god_rays,
             ambient_occlusion: p.ambient_occlusion,
             pixel_snap: p.pixel_snap,
+            underwater: 1.0,
         }
     }
 }
@@ -207,6 +210,7 @@ impl Settings {
                     ("Fog", &mut v.fog, 1.0),
                     ("God rays", &mut v.god_rays, 1.0),
                     ("Ambient occlusion", &mut v.ambient_occlusion, 1.0),
+                    ("Underwater", &mut v.underwater, 1.0),
                 ] {
                     ui.add_enabled_ui(v.hd2d, |ui| ui.label(label));
                     ui.add_enabled(v.hd2d, egui::Slider::new(value, 0.0..=max));

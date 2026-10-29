@@ -404,6 +404,8 @@ struct World {
     gat: Option<ro_formats::gat::Gat>,
     /// Indoor maps: the cells of the room we are in, plus its walls (one byte per cell).
     room: Option<Vec<u8>>,
+    /// A sunken map (dense bubble emitters, like Byalan's lower levels): drawn underwater.
+    submerged: bool,
 }
 
 /// Cells around a room's floor still drawn, so its walls and furniture show.
@@ -834,6 +836,8 @@ struct App {
     fx: fx::FxLib,
     /// The current map's ambient effect emitters (RSW torches, bubbles, fireflies).
     map_fx: Vec<fx::MapEmitter>,
+    /// Countdown to the player's next breath of bubbles on submerged maps.
+    breath_ms: f32,
     /// Sprite effects playing once: (actor, ms left).
     sprite_fx: Vec<(ro_render::Actor, f32)>,
     /// When each unit last showed an area burst (one per cast, not per monster hit).
@@ -1021,6 +1025,7 @@ impl App {
                 if let Some((mesh, images)) = map.water {
                     r.set_water(&mesh, images);
                 }
+                let submerged = map.effects.iter().filter(|e| e.0 == 109).count() >= 40;
                 // Ambient map effects play from the frame loop.
                 self.map_fx = map.effects.into_iter().enumerate().map(|(i, (id, pos, delay))| fx::MapEmitter::new(id, pos, delay, i)).collect();
                 tracing::info!(emitters = self.map_fx.len(), drawn = self.map_fx.iter().filter(|e| e.visual.is_some()).count(), first = ?self.map_fx.first().map(|e| (e.pos, e.every_ms)), "map effects");
@@ -1038,7 +1043,7 @@ impl App {
                     a.enter_map(vfs, name);
                 }
                 r.set_room_mask(None);
-                self.world = Some(World { name: name.to_string(), ground: map.mesh, gat, room: None });
+                self.world = Some(World { name: name.to_string(), ground: map.mesh, gat, room: None, submerged });
                 self.ready_at = Some(std::time::Instant::now());
             }
             Err(e) => tracing::error!("map {name}: {e:#}"),
@@ -5070,6 +5075,16 @@ impl App {
                         None => {}
                     }
                 }
+                // Underwater, the player breathes out a few bubbles now and then.
+                if w.submerged {
+                    self.breath_ms -= dt;
+                    if self.breath_ms <= 0.0 {
+                        self.breath_ms = 2600.0 + (me.x * 7.3 + me.z * 3.1).rem_euclid(1400.0);
+                        if let Some(asset) = self.fx.get(r, vfs, "bubble1") {
+                            r.effects.push(ro_render::Fx { asset, pos: me + glam::Vec3::new(0.0, ro_render::CELL * 2.0, 0.0), time_ms: 0.0, looping: false, tag: 0 });
+                        }
+                    }
+                }
             }
             if let (Some(name), true, Some(vfs), Some(p)) = (self.fx_test.filter(|n| !n.starts_with("skill:")), r.effects.is_empty(), self.vfs.as_ref(), self.player.as_ref()) {
                 if let Some(asset) = self.fx.get(r, vfs, name) {
@@ -5139,6 +5154,7 @@ impl App {
         }
 
         r.post_settings = self.settings.visual.post();
+        r.underwater = if self.world.as_ref().is_some_and(|w| w.submerged) { self.settings.visual.underwater } else { 0.0 };
         r.set_water_settings(self.settings.visual.water_settings());
         // HUD: names under actors, status, chat. Laid out for the capture size when capturing.
         let size = self.capture.as_ref().map_or_else(|| r.size(), |(_, w, h)| (*w, *h));
@@ -6036,6 +6052,7 @@ fn main() -> anyhow::Result<()> {
         casts: Default::default(),
         fx: Default::default(),
         map_fx: vec![],
+        breath_ms: 0.0,
         sprite_fx: vec![],
         burst_at: Default::default(),
         emotes: Default::default(),
