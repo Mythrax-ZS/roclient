@@ -2751,6 +2751,11 @@ impl App {
                 let name = self.units.values().find(|m| m.class == class as i16).map(|m| m.name.clone()).or_else(|| self.class_names.get(&(class as i16)).cloned()).unwrap_or_else(|| format!("Monster #{class}"));
                 self.sense.info = Some(sense::MonsterInfo { name, level, size, hp, def, race, mdef, element, mods });
             }
+            GuildTitle { id, position } => {
+                if let Some(t) = self.mob_mut(id).and_then(|m| m.titles.as_mut()) {
+                    t.2 = position;
+                }
+            }
             CellType { x, y, kind, map } => {
                 if let Some(w) = self.world.as_mut().filter(|w| map.trim_end_matches(".gat") == w.name) {
                     if let Some(g) = w.gat.as_mut() {

@@ -416,6 +416,8 @@ pub enum Event {
     /// Orbs circling a unit. `kind`: 0 spirit spheres, 1 soul energy, 2 Millennium Shields,
     /// 10 + element for Kagerou/Oboro charms (1 water, 2 earth, 3 fire, 4 wind).
     Spirits { id: u32, count: u16, kind: u8 },
+    /// ZC_GUILD_POSITION: a player's guild rank title changed (empty: none).
+    GuildTitle { id: u32, position: String },
     /// ZC_MONSTER_INFO (Sense).
     MonsterInfo { class: u16, level: u16, size: u16, hp: u32, def: i16, race: u16, mdef: i16, element: u16, mods: [u8; 9] },
     /// ZC_UPDATE_MAPINFO: a cell's GAT type changed (setcell / setwall / skills).
@@ -1242,6 +1244,11 @@ impl MapSession {
                         0x01a3 | 0x022f if data.len() >= 5 => Some(Event::Fed { homun: opcode == 0x022f, ok: data[2] != 0, item: u16::from_le_bytes([data[3], data[4]]) }),
                         // The wire flag is inverted: 0 means "in the favourites tab".
                         0x0908 if data.len() >= 5 => Some(Event::ItemFavorite { index: u16::from_le_bytes([data[2], data[3]]), favorite: data[4] == 0 }),
+                        0x0afd if data.len() >= 8 => {
+                            let raw = data.get(8..).unwrap_or_default();
+                            let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+                            Some(Event::GuildTitle { id: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), position: String::from_utf8_lossy(&raw[..end]).into_owned() })
+                        }
                         0x018c if data.len() >= 29 => {
                             let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
                             let mut mods = [0u8; 9];

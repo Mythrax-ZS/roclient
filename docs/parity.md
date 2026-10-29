@@ -64,7 +64,7 @@ Ticked items are handled and tested in game against the local server.
 - [x] Guild emblems in the guild window (download, upload from Emblem*.bmp)
 - [x] Guild emblems beside player names (guild id from spawn packets, fetched per guild)
 - [x] ZC_CHANGE_GUILD
-- [ ] ZC_GUILD_POSITION
+- [x] ZC_GUILD_POSITION (rank title under names updates live)
 - [x] Guild alliances and enemies (request, answer, list in the guild window)
 - [x] Guild disorganize
 - [x] ZC_CONFIG, ZC_PARTY_CONFIG, party options: Game Options window
