@@ -51,6 +51,10 @@ pub struct Guild {
     pub relations: Vec<(u32, u32, String)>,
     /// An alliance offer waiting for an answer: (inviter, their guild).
     pub ally_offer: Option<(u32, String)>,
+    /// Expelled characters (name, reason).
+    pub bans: Vec<(String, String)>,
+    /// The master typing the guild name to confirm disbanding.
+    disband_key: Option<String>,
 }
 
 /// What the window needs from the rest of the client.
@@ -77,6 +81,7 @@ impl Guild {
             out.push(Command::Guild(GuildRequest::Info(1)));
             out.push(Command::Guild(GuildRequest::Info(2)));
             out.push(Command::Guild(GuildRequest::Info(3)));
+            out.push(Command::Guild(GuildRequest::Info(4)));
         }
         let mut open = true;
         let title = if self.id == 0 { "Guild".to_string() } else { format!("Guild — {}", self.name) };
@@ -167,6 +172,34 @@ impl Guild {
             ui.add(egui::ProgressBar::new(frac.clamp(0.0, 1.0)).text(format!("{} / {}", i.exp, i.max_exp)).desired_width(220.0));
             ui.end_row();
         });
+        if !self.bans.is_empty() {
+            ui.separator();
+            ui.label(RichText::new("Expelled").strong());
+            for (name, why) in &self.bans {
+                ui.label(if why.trim().is_empty() { name.clone() } else { format!("{name} — {}", why.trim()) });
+            }
+        }
+        if self.master {
+            ui.separator();
+            match &mut self.disband_key {
+                None => {
+                    if ui.button("Disband guild").clicked() {
+                        self.disband_key = Some(String::new());
+                    }
+                }
+                Some(key) => {
+                    ui.label("Type the guild name to disband it (all other members must have left):");
+                    ui.text_edit_singleline(key);
+                    let (go, cancel) = ui.horizontal(|ui| (ui.add_enabled(*key == i.name, egui::Button::new("Disband")).clicked(), ui.button("Cancel").clicked())).inner;
+                    if go {
+                        out.push(Command::Guild(GuildRequest::Disband(key.clone())));
+                    }
+                    if go || cancel {
+                        self.disband_key = None;
+                    }
+                }
+            }
+        }
     }
 
     fn members(&mut self, ui: &mut egui::Ui, c: &Ctx, out: &mut Vec<Command>) {

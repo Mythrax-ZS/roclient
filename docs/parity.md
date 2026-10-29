@@ -60,16 +60,17 @@ Ticked items are handled and tested in game against the local server.
 ## Social
 - [x] Guild emblems in the guild window (download, upload from Emblem*.bmp)
 - [x] Guild emblems beside player names (guild id from spawn packets, fetched per guild)
-- [ ] ZC_GUILD_POSITION, ZC_CHANGE_GUILD
+- [x] ZC_CHANGE_GUILD
+- [ ] ZC_GUILD_POSITION
 - [x] Guild alliances and enemies (request, answer, list in the guild window)
-- [ ] Guild disorganize
+- [x] Guild disorganize
 - [x] ZC_CONFIG, ZC_PARTY_CONFIG, party options: Game Options window
 - [x] ZC_PARTY_JOIN_REQ_ACK, ZC_ITEM_PICKUP_PARTY
 - [x] Store search (Universal Catalog: search, pages, click to locate)
-- [ ] ZC_ACK_OPENSTORE2
+- [x] ZC_ACK_OPENSTORE2
 - [x] Ranking window (ZC_ACK_RANKING2 + names by char id; /blacksmith /alchemist /taekwon /pk)
 - [x] ZC_CONGRATULATION, ZC_DIVORCE (chat notices; no wedding effect yet)
-- [ ] ZC_BAN_LIST
+- [x] ZC_BAN_LIST
 
 ## Found while testing
 - [x] `specialeffect` (ZC_NOTIFY_EFFECT2): 110 EF_* ids matched to STR files, plus the most-used code-drawn ones (heal, grand cross, steal, bash, ...) shown with their skill effect; the hit sparks and screen quake still missing

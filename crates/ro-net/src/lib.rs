@@ -394,6 +394,12 @@ pub enum Event {
     Merged { index: u16, amount: u16, reason: u8 },
     /// Guild relations: the list, an alliance request (inviter, their guild), and results.
     GuildRelations(Vec<(u32, u32, String)>),
+    /// ZC_BAN_LIST: expelled characters (name, reason).
+    GuildBans(Vec<(String, String)>),
+    /// ZC_ACK_DISORGANIZE_GUILD_RESULT: 0 disbanded, 1 wrong name, 2 members remain.
+    GuildBroken(u32),
+    /// ZC_CHANGE_GUILD: a unit's guild (and emblem) changed.
+    UnitGuild { id: u32, guild: u32 },
     AllyRequest { inviter: u32, guild: String },
     RelationNotice(String),
     RelationRemoved { guild: u32, relation: u32 },
@@ -902,6 +908,12 @@ impl MapSession {
                         0x0989 => Some(Event::ClanLeft),
                         0x096d => Some(Event::MergeOpen(data.get(4..).unwrap_or_default().chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect())),
                         0x096f if data.len() >= 7 => Some(Event::Merged { index: u16::from_le_bytes([data[2], data[3]]), amount: u16::from_le_bytes([data[4], data[5]]), reason: data[6] }),
+                        0x0b7c => Some(Event::GuildBans(data.get(4..).unwrap_or_default().chunks_exact(68).map(|c| {
+                            let s = |b: &[u8]| String::from_utf8_lossy(&b[..b.iter().position(|&x| x == 0).unwrap_or(b.len())]).into_owned();
+                            (s(&c[44..68]), s(&c[4..44]))
+                        }).collect())),
+                        0x015e if data.len() >= 6 => Some(Event::GuildBroken(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x01b4 if data.len() >= 12 => Some(Event::UnitGuild { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), guild: u32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
                         0x014c => Some(Event::GuildRelations(ro_proto::guild::parse_relations(&data))),
                         0x0171 if data.len() >= 30 => Some(Event::AllyRequest { inviter: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), guild: ro_proto::packets::get_fixed_str(&mut &data[6..30], 24) }),
                         0x0173 if data.len() >= 3 => Some(Event::RelationNotice(match data[2] { 0 => "You are already allied with that guild.", 1 => "The alliance was declined.", 2 => "The alliance was accepted.", 3 => "Their guild has too many alliances.", 4 => "Your guild has too many alliances.", _ => "Alliances are disabled." }.into())),
@@ -954,7 +966,7 @@ impl MapSession {
                             _ => Some(Event::Notice("The item could not be identified.".into())),
                         },
                         0x013c if data.len() >= 4 => Some(Event::ArrowEquipped(u16::from_le_bytes([data[2], data[3]]))),
-                        0x013b | 0x0189 | 0x011e | 0x012c | 0x02bb | 0x0223 | 0x01fe | 0x0b17 | 0x0bae | 0x02c5 | 0x0205 | 0x01ea | 0x0aa7 => notice_text(opcode, &data).map(Event::Notice),
+                        0x013b | 0x0189 | 0x0a28 | 0x011e | 0x012c | 0x02bb | 0x0223 | 0x01fe | 0x0b17 | 0x0bae | 0x02c5 | 0x0205 | 0x01ea | 0x0aa7 => notice_text(opcode, &data).map(Event::Notice),
                         0x0152 if data.len() >= 12 => Some(Event::GuildEmblem { guild: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), version: u32::from_le_bytes([data[8], data[9], data[10], data[11]]), data: data[12..].to_vec() }),
                         0x010c if data.len() >= 6 => Some(Event::Mvp(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x010a if data.len() >= 6 => Some(Event::MvpItem(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
@@ -1492,6 +1504,13 @@ fn notice_text(opcode: u16, data: &[u8]) -> Option<String> {
             1 => "You can't attack or use skills because your weight limit has been exceeded.",
             2 => "You can't use skills because your weight limit has been exceeded.",
             3 => "You have equipped throwing daggers.",
+            _ => return None,
+        }
+        .into(),
+        // ZC_ACK_OPENSTORE2
+        0x0a28 => match data.get(2)? {
+            1 => "Failed to open stalls.",
+            3 => "Unable to open a shop at the current location.",
             _ => return None,
         }
         .into(),

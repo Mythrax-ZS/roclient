@@ -2599,6 +2599,37 @@ impl App {
                 self.hud.push_chat(ro_net::ChatKind::System, msg.into());
             }
             GuildRelations(list) => self.guild.relations = list,
+            GuildBans(list) => self.guild.bans = list,
+            GuildBroken(r) => {
+                let text = match r {
+                    0 => {
+                        self.guild.id = 0;
+                        self.guild.master = false;
+                        self.guild.name.clear();
+                        self.guild.info = None;
+                        self.guild.members.clear();
+                        self.guild.bans.clear();
+                        self.guild.relations.clear();
+                        if let Some(p) = self.player.as_mut() {
+                            p.guild = 0;
+                            p.titles = None;
+                        }
+                        "The guild has been disbanded."
+                    }
+                    1 => "The guild name you entered does not match.",
+                    _ => "You cannot disband the guild while it still has members.",
+                };
+                self.hud.push_chat(ro_net::ChatKind::Guild, text.into());
+            }
+            UnitGuild { id, guild } => {
+                if let Some(m) = self.mob_mut(id) {
+                    m.guild = guild;
+                }
+                if guild != 0 && !self.emblems.contains_key(&guild) {
+                    self.emblems.insert(guild, None);
+                    self.send(ro_net::Command::Guild(ro_net::GuildRequest::Emblem(guild)));
+                }
+            }
             AllyRequest { inviter, guild } => self.guild.ally_offer = Some((inviter, guild)),
             RelationNotice(text) => self.hud.push_chat(ro_net::ChatKind::Guild, text),
             RelationRemoved { guild, relation } => self.guild.relations.retain(|r| !(r.0 == relation && r.1 == guild)),

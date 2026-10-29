@@ -23,6 +23,8 @@ pub enum GuildRequest {
     Positions(Vec<Position>),
     /// Move a member to a rank.
     SetRank { account_id: u32, char_id: u32, position: i32 },
+    /// CZ_REQ_DISORGANIZE_GUILD: disband; the key is the guild's name.
+    Disband(String),
     /// CZ_REQ_GUILD_EMBLEM_IMG: ask for a guild's emblem.
     Emblem(u32),
     /// CZ_REGISTER_GUILD_EMBLEM_IMG: upload a zlib-compressed 24x24 BMP.
@@ -72,6 +74,10 @@ impl Encode for GuildRequest {
                 d.put_slice(&body);
             }
             // CZ_REQ_CHANGE_MEMBERPOS (0x0155).
+            GuildRequest::Disband(key) => {
+                d.put_u16_le(0x015d);
+                put_fixed_str(d, key, 40);
+            }
             GuildRequest::Emblem(guild) => {
                 d.put_u16_le(0x0151);
                 d.put_u32_le(*guild);
