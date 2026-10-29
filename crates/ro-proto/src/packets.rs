@@ -136,6 +136,16 @@ impl Encode for CzEnter {
 }
 
 /// CZ_NOTIFY_ACTORINIT: map loaded, start sending world state.
+/// A packet that is only its opcode: CZ_PROGRESS (0x02f1, a script progress bar finished),
+/// CZ_PING_LIVE (0x0b1c, the answer to ZC_PING_LIVE).
+pub struct Bare(pub u16);
+
+impl Encode for Bare {
+    fn encode(&self, d: &mut BytesMut) {
+        d.put_u16_le(self.0);
+    }
+}
+
 pub struct CzLoadEndAck;
 
 impl Encode for CzLoadEndAck {

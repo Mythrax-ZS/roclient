@@ -71,6 +71,10 @@ pub struct Label {
 
 #[derive(Default)]
 pub struct Hud {
+    /// `showdigit` clock text, drawn large at the top of the screen.
+    pub digit_text: Option<String>,
+    /// Our PvP rank on this map ("rank / players").
+    pub pvp_text: Option<String>,
     pub status: Status,
     /// Script overrides for the NPC dialog's layout; cleared when the dialog ends.
     pub dialog_layout: DialogLayout,
@@ -185,6 +189,7 @@ impl Hud {
         floaters: &[(glam::Vec2, String, Color32, f32)],
         bars: &[(glam::Vec2, f32)],
         casts: &[(glam::Vec2, f32)],
+        says: &[(glam::Vec2, String)],
     ) -> Option<String> {
         // Names under actors, outlined for readability on any background.
         let painter = ctx.layer_painter(egui::LayerId::background());
@@ -241,6 +246,29 @@ impl Hud {
             let mut fill = rect;
             fill.set_width(rect.width() * frac.clamp(0.0, 1.0));
             painter.rect_filled(fill, 2.0, Color32::from_rgb(90, 200, 90));
+        }
+        // showscript call-outs over heads, outlined like names.
+        for (feet, text) in says {
+            let p = egui::pos2(feet.x / ppp, feet.y / ppp - 118.0);
+            let font = FontId::proportional(15.0);
+            for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+                painter.text(p + Vec2::new(dx, dy), egui::Align2::CENTER_BOTTOM, text, font.clone(), Color32::BLACK);
+            }
+            painter.text(p, egui::Align2::CENTER_BOTTOM, text, font, Color32::from_rgb(255, 240, 160));
+        }
+        if let Some(t) = &self.digit_text {
+            let p = egui::pos2(ctx.content_rect().center().x, 70.0);
+            let font = FontId::monospace(34.0);
+            for (dx, dy) in [(-2.0, 0.0), (2.0, 0.0), (0.0, -2.0), (0.0, 2.0)] {
+                painter.text(p + Vec2::new(dx, dy), egui::Align2::CENTER_TOP, t, font.clone(), Color32::BLACK);
+            }
+            painter.text(p, egui::Align2::CENTER_TOP, t, font, Color32::from_rgb(255, 210, 90));
+        }
+        if let Some(t) = &self.pvp_text {
+            let p = egui::pos2(ctx.content_rect().right() - 20.0, 300.0);
+            let font = FontId::proportional(22.0);
+            painter.text(p + Vec2::splat(1.5), egui::Align2::RIGHT_TOP, t, font.clone(), Color32::BLACK);
+            painter.text(p, egui::Align2::RIGHT_TOP, t, font, Color32::from_rgb(255, 120, 120));
         }
         // Damage numbers rise and fade over their lifetime.
         for (pos, text, color, age) in floaters {

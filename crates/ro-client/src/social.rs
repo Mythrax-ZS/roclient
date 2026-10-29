@@ -58,6 +58,8 @@ pub struct Social {
     pub storage: Storage,
     pub trade: Option<Trade>,
     pub party: Option<Party>,
+    /// Party members the server reported dead (ZC_GROUP_ISALIVE), by account id.
+    pub party_dead: std::collections::HashSet<u32>,
     pub friends: Vec<Friend>,
     pub guild: Option<String>,
     pub prompts: Vec<Prompt>,
@@ -429,9 +431,11 @@ impl Social {
                     ui.label(RichText::new(&p.name).strong());
                     for m in &p.members {
                         ui.horizontal(|ui| {
-                            let color = if m.online { Color32::WHITE } else { Color32::GRAY };
+                            let dead = self.party_dead.contains(&m.account_id);
+                            let color = if dead { Color32::from_rgb(200, 90, 90) } else if m.online { Color32::WHITE } else { Color32::GRAY };
                             let crown = if m.leader { "[Leader] " } else { "" };
-                            ui.label(RichText::new(format!("{crown}{} (Lv {})", m.name, m.level)).color(crate::classic::ink(color)));
+                            let tomb = if dead { " (dead)" } else { "" };
+                            ui.label(RichText::new(format!("{crown}{} (Lv {}){tomb}", m.name, m.level)).color(crate::classic::ink(color)));
                             ui.label(RichText::new(&m.map).size(11.0).color(crate::classic::ink(Color32::GRAY)));
                         });
                         if let Some(&(hp, max)) = p.hp.get(&m.account_id) {

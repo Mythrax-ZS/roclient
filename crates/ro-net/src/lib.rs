@@ -287,6 +287,38 @@ pub enum Event {
     Fed { homun: bool, ok: bool, item: u16 },
     /// ZC_DISPEL: the unit's cast was interrupted.
     CastCancel(u32),
+    /// ZC_PROGRESS: a script `progressbar` over our head for `secs` (always drawn green, as
+    /// the original). The script waits for `Command::ProgressDone` when it fills.
+    Progress { secs: u32 },
+    /// ZC_PROGRESS_CANCEL: the server aborted our progress bar (we moved).
+    ProgressCancel,
+    /// ZC_PROGRESS_ACTOR: a `progressbar_npc` over a unit; `secs` left.
+    UnitProgress { id: u32, secs: u32 },
+    /// ZC_SHOWSCRIPT: `showscript` text called out over a unit (not in the chat log).
+    ShowScript { id: u32, text: String },
+    /// ZC_SHOWDIGIT: `showdigit`: 0 show 5 s, 1 count up, 2 count down, 3 fast countdown.
+    ShowDigit { kind: u8, value: i32 },
+    /// ZC_MEMORIALDUNGEON_*: instance creation queue, status and notices.
+    Instance(InstanceNote),
+    /// ZC_NOTIFY_EXP2 (`@showexp`): experience gained; kind 1 base, 2 job; negative = lost.
+    ExpGain { amount: i64, kind: u16, quest: bool },
+    /// ZC_RECOVERY: HP (kind 5) or SP (kind 7) regained.
+    Recovery { kind: u16, amount: i32 },
+    /// ZC_USER_COUNT (/who).
+    UserCount(u32),
+    /// ZC_NOTIFY_RANKING (PvP): a unit's rank among `total` players on the map.
+    PvpRank { id: u32, rank: u32, total: u32 },
+    /// ZC_ACK_PVPPOINT (/pvpinfo).
+    PvpInfo { won: u32, lost: u32, points: u32 },
+    /// ZC_PARTY_LEADER_CHANGED.
+    PartyLeader { old: u32, new: u32 },
+    /// ZC_GROUP_ISALIVE: a party member died or revived.
+    PartyDead { id: u32, dead: bool },
+    /// ZC_BROADCASTING_SPECIAL_ITEM_OBTAIN: someone got a rare item from a box (`from_box`)
+    /// or a monster/NPC (`source` is its name, empty for NPCs).
+    ItemObtained { who: String, item: u32, from_box: Option<u32>, source: String },
+    /// ZC_BROADCAST_ITEMREFINING_RESULT.
+    RefineBroadcast { who: String, item: u32, level: i8, ok: bool },
     /// Our skill was refused (see `parse_skill_fail` causes).
     SkillFailed { skill: u16, cause: u8, amount: i32, item: u32 },
     /// A non-damaging skill went off (heal, buff...).
@@ -689,6 +721,8 @@ pub enum Command {
     ViewEquip(u32),
     /// Let others look at ours.
     ShowEquip(bool),
+    /// Our script progress bar filled (CZ_PROGRESS); the script continues.
+    ProgressDone,
     /// Login screen.
     Login { user: String, pass: String },
     SelectServer(usize),
@@ -847,6 +881,7 @@ impl MapSession {
                     Some(Command::Booking(r)) => self.send(r).await?,
                     Some(Command::ViewEquip(aid)) => self.send(CzViewEquip(aid)).await?,
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
+                    Some(Command::ProgressDone) => self.send(Bare(0x02f1)).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
@@ -1299,6 +1334,31 @@ impl MapSession {
                         // ZC_TARGET_SPIRITS: Enchanting Shadow spheres on a target.
                         0x0b68 if data.len() >= 12 => Some(Event::Spirits { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), count: u16::from_le_bytes([data[10], data[11]]), kind: 3 }),
                         0x01b9 if data.len() >= 6 => Some(Event::CastCancel(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        0x02f0 if data.len() >= 10 => Some(Event::Progress { secs: l(&data, 6) }),
+                        0x02f2 => Some(Event::ProgressCancel),
+                        0x09d1 if data.len() >= 14 => Some(Event::UnitProgress { id: l(&data, 2), secs: l(&data, 10) }),
+                        0x08b3 if data.len() >= 8 => Some(Event::ShowScript { id: l(&data, 4), text: ro_proto::packets::get_fixed_str(&mut &data[8..], data.len() - 8) }),
+                        0x01b1 if data.len() >= 7 => Some(Event::ShowDigit { kind: data[2], value: l(&data, 3) as i32 }),
+                        0x02cb if data.len() >= 65 => Some(Event::Instance(InstanceNote::Queued { name: ro_proto::packets::get_fixed_str(&mut &data[2..63], 61), place: u16::from_le_bytes([data[63], data[64]]) })),
+                        0x02cc if data.len() >= 4 => Some(Event::Instance(InstanceNote::Place(u16::from_le_bytes([data[2], data[3]])))),
+                        0x02cd if data.len() >= 71 => Some(Event::Instance(InstanceNote::Status { name: ro_proto::packets::get_fixed_str(&mut &data[2..63], 61), live: l(&data, 63), enter: l(&data, 67) })),
+                        0x02ce if data.len() >= 10 => Some(Event::Instance(InstanceNote::Notice { kind: l(&data, 2), limit: l(&data, 6) })),
+                        0x0acc if data.len() >= 18 => Some(Event::ExpGain { amount: i64::from_le_bytes(data[6..14].try_into().unwrap()), kind: u16::from_le_bytes([data[14], data[15]]), quest: data[16] != 0 }),
+                        0x0a27 if data.len() >= 8 => Some(Event::Recovery { kind: u16::from_le_bytes([data[2], data[3]]), amount: l(&data, 4) as i32 }),
+                        0x00c2 if data.len() >= 6 => Some(Event::UserCount(l(&data, 2))),
+                        0x019a if data.len() >= 14 => Some(Event::PvpRank { id: l(&data, 2), rank: l(&data, 6), total: l(&data, 10) }),
+                        0x0210 if data.len() >= 22 => Some(Event::PvpInfo { won: l(&data, 10), lost: l(&data, 14), points: l(&data, 18) }),
+                        0x07fc if data.len() >= 10 => Some(Event::PartyLeader { old: l(&data, 2), new: l(&data, 6) }),
+                        0x0ab2 if data.len() >= 7 => Some(Event::PartyDead { id: l(&data, 2), dead: data[6] != 0 }),
+                        0x07fd if data.len() >= 9 => parse_item_obtained(&data),
+                        0x0ada if data.len() >= 32 => Some(Event::RefineBroadcast { who: ro_proto::packets::get_fixed_str(&mut &data[2..26], 24), item: l(&data, 26), level: data[30] as i8, ok: data[31] != 0 }),
+                        // ZC_PING_LIVE: answer like the original client, so the link counts as alive.
+                        0x0b1d => {
+                            self.send(Bare(0x0b1c)).await?;
+                            None
+                        }
+                        // ZC_INVENTORY_END: the item lists already arrived; nothing to do.
+                        0x0b0b => None,
                         // ZC_HIGHJUMP: instant slide to a cell (Taekwon jump, knockback snaps).
                         0x01ff if data.len() >= 10 => Some(Event::Stop { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), x: u16::from_le_bytes([data[6], data[7]]), y: u16::from_le_bytes([data[8], data[9]]) }),
                         0x0b1a => Some(Event::Casting(parse_cast(&data))),
@@ -1590,6 +1650,43 @@ pub enum MapExit {
 }
 
 /// The chat line the original client shows for small server notices.
+/// Little-endian u32 at `at`.
+fn l(data: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes([data[at], data[at + 1], data[at + 2], data[at + 3]])
+}
+
+/// Memorial dungeon (instance) messages.
+#[derive(Debug, Clone)]
+pub enum InstanceNote {
+    /// ZC_MEMORIALDUNGEON_SUBSCRIPTION_INFO: queued for `name` at `place`.
+    Queued { name: String, place: u16 },
+    /// ZC_MEMORIALDUNGEON_SUBSCRIPTION_NOTIFY: our place in the queue changed.
+    Place(u16),
+    /// ZC_MEMORIALDUNGEON_INFO: created; unix times when it closes and when entry closes.
+    Status { name: String, live: u32, enter: u32 },
+    /// ZC_MEMORIALDUNGEON_NOTIFY: 0 new limit, 1 time out, 2 not entered in time, 3 destroyed
+    /// on request, 4 creation failed.
+    Notice { kind: u32, limit: u32 },
+}
+
+/// ZC_BROADCASTING_SPECIAL_ITEM_OBTAIN (0x07fd): type 0 box (name, box item), 1 monster
+/// (name, monster name), 2 NPC; item ids are u32 at this packet version.
+fn parse_item_obtained(data: &[u8]) -> Option<Event> {
+    let kind = *data.get(4)?;
+    let item = l(data, 5);
+    let len = *data.get(9)? as usize;
+    let who = ro_proto::packets::get_fixed_str(&mut data.get(10..10 + len)?, len);
+    let rest = data.get(10 + len..)?;
+    match kind {
+        0 => Some(Event::ItemObtained { who, item, from_box: Some(l(rest, 1)), source: String::new() }),
+        _ => {
+            let n = *rest.first()? as usize;
+            let source = if n > 0 { ro_proto::packets::get_fixed_str(&mut rest.get(1..1 + n)?, n) } else { String::new() };
+            Some(Event::ItemObtained { who, item, from_box: None, source })
+        }
+    }
+}
+
 fn notice_text(opcode: u16, data: &[u8]) -> Option<String> {
     let w = |i: usize| data.get(i..i + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
     Some(match opcode {

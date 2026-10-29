@@ -508,6 +508,23 @@ fn load_texture(ctx: &egui::Context, vfs: &ro_vfs::Vfs, path: &str) -> Option<eg
     uitex::load(ctx, vfs, path, egui::TextureOptions::NEAREST)
 }
 
+/// What `showdigit` shows `t` ms after it arrived: 0 the value for 5 s, 1 counting up, 2
+/// counting down (past zero), 3 a two-digit countdown at 2 ticks/s that stops at zero. All
+/// but type 3 are seconds, shown as days/hours/minutes/seconds.
+fn digit_text(kind: u8, value: i32, t: f32) -> String {
+    let secs = (t / 1000.0) as i64;
+    let v = match kind {
+        // The server sends counters' start negated (as the original client expects).
+        1 => (value as i64).abs() + secs,
+        2 => (value as i64).abs() - secs,
+        3 => return format!("{:02}", (value as i64 - (t / 500.0) as i64).clamp(0, 99)),
+        _ => value as i64,
+    };
+    let (sign, v) = if v < 0 { ("-", -v) } else { ("", v) };
+    let (d, h, m, s) = (v / 86400, v / 3600 % 24, v / 60 % 60, v % 60);
+    if d > 0 { format!("{sign}{d}d {h:02}:{m:02}:{s:02}") } else { format!("{sign}{h:02}:{m:02}:{s:02}") }
+}
+
 /// Expanded-cell budget when planning a long (multi-hop) walk.
 const LONG_WALK_NODES: usize = 200_000;
 /// Steps per server walk request. rAthena refuses walks longer than `max_walk_path`
@@ -841,6 +858,16 @@ struct App {
     fx: fx::FxLib,
     /// The current map's ambient effect emitters (RSW torches, bubbles, fireflies).
     map_fx: Vec<fx::MapEmitter>,
+    /// Script `progressbar` over our head: (when it started, total ms).
+    script_progress: Option<(std::time::Instant, f32)>,
+    /// `progressbar_npc` over other units: id -> (elapsed ms, total ms).
+    unit_progress: std::collections::HashMap<u32, (f32, f32)>,
+    /// `showscript` call-outs over units: id -> (text, age ms).
+    shouts: std::collections::HashMap<u32, (String, f32)>,
+    /// `showdigit`: (type, value, ms since shown).
+    digit: Option<(u8, i32, f32)>,
+    /// Our PvP rank on this map: (rank, players).
+    pvp_rank: Option<(u32, u32)>,
     /// Countdown to the player's next breath of bubbles on submerged maps.
     breath_ms: f32,
     /// Sprite effects playing once: (actor, ms left).
@@ -1031,6 +1058,10 @@ impl App {
                     r.set_water(&mesh, images);
                 }
                 let submerged = map.effects.iter().filter(|e| e.0 == 109).count() >= 40;
+                self.unit_progress.clear();
+                self.shouts.clear();
+                self.digit = None;
+                self.pvp_rank = None;
                 // Ambient map effects play from the frame loop.
                 self.map_fx = map.effects.into_iter().enumerate().map(|(i, (id, pos, delay))| fx::MapEmitter::new(id, pos, delay, i)).collect();
                 tracing::info!(emitters = self.map_fx.len(), drawn = self.map_fx.iter().filter(|e| e.visual.is_some()).count(), first = ?self.map_fx.first().map(|e| (e.pos, e.every_ms)), "map effects");
@@ -2523,6 +2554,82 @@ impl App {
                         self.hud.push_chat(ro_net::ChatKind::Public, format!("{name} : {line}"));
                     }
                 }
+            }
+            Progress { secs } => {
+                tracing::debug!(secs, "script progress bar");
+                self.script_progress = Some((std::time::Instant::now(), secs.max(1) as f32 * 1000.0));
+            }
+            ProgressCancel => self.script_progress = None,
+            UnitProgress { id, secs } => {
+                self.unit_progress.insert(id, (0.0, secs.max(1) as f32 * 1000.0));
+            }
+            ShowScript { id, text } => {
+                self.shouts.insert(id, (text, 0.0));
+            }
+            ShowDigit { kind, value } => self.digit = Some((kind, value, 0.0)),
+            Instance(note) => {
+                let text = match note {
+                    ro_net::InstanceNote::Queued { name, place } => format!("Memorial Dungeon, [{name}] is booked. Your Standby Priority: {place}"),
+                    ro_net::InstanceNote::Place(place) => format!("Your Standby Priority: {place}"),
+                    ro_net::InstanceNote::Status { name, enter, .. } => {
+                        let left = (enter as i64 - std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)).max(0);
+                        format!("Memorial Dungeon, [{name}] is created. Please enter within {} min {} s.", left / 60, left % 60)
+                    }
+                    ro_net::InstanceNote::Notice { kind, .. } => match kind {
+                        1 | 2 => "No one entered the Memorial Dungeon within its duration; the dungeon has disappeared.".to_string(),
+                        3 => "The Memorial Dungeon has been destroyed.".to_string(),
+                        4 => "Failed to create the Memorial Dungeon. Please try again.".to_string(),
+                        _ => return,
+                    },
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, text);
+            }
+            ExpGain { amount, kind, .. } => {
+                let what = if kind == 2 { "Job" } else { "Base" };
+                let text = if amount < 0 { format!("{} {what} Experience lost", -amount) } else { format!("{amount} {what} Experience obtained") };
+                self.hud.push_chat(ro_net::ChatKind::System, text);
+            }
+            Recovery { kind, amount } => {
+                // HP in green, SP in blue, rising over our head like the original.
+                let color = if kind == 7 { egui::Color32::from_rgb(110, 160, 255) } else { egui::Color32::from_rgb(110, 255, 110) };
+                if let Some(p) = self.player.as_ref() {
+                    self.floaters.push((p.actor.pos, amount.to_string(), color, 0.0));
+                }
+            }
+            UserCount(n) => self.hud.push_chat(ro_net::ChatKind::System, format!("There are {n} Players Currently Connected.")),
+            PvpRank { id, rank, total } => {
+                if id == self.account_id {
+                    self.pvp_rank = Some((rank, total));
+                }
+            }
+            PvpInfo { won, lost, points } => {
+                self.hud.push_chat(ro_net::ChatKind::System, format!("You have won {won} times and have lost {lost} times in PVP. Current points {points}."));
+            }
+            PartyLeader { old, new } => {
+                for m in self.social.party.iter_mut().flat_map(|p| p.members.iter_mut()) {
+                    m.leader = m.account_id == new || (m.leader && m.account_id != old);
+                }
+            }
+            PartyDead { id, dead } => {
+                if dead {
+                    self.social.party_dead.insert(id);
+                } else {
+                    self.social.party_dead.remove(&id);
+                }
+            }
+            ItemObtained { who, item, from_box, source } => {
+                let name = |id: u32| self.item_db.as_ref().map_or_else(|| format!("item {id}"), |db| db.name(id, true));
+                let text = match from_box {
+                    Some(b) => format!("[{who}] has obtained [{}] from [{}].", name(item), name(b)),
+                    None if !source.is_empty() => format!("[{who}] has obtained [{}] from [{source}].", name(item)),
+                    None => format!("[{who}] has obtained [{}].", name(item)),
+                };
+                self.hud.push_chat(ro_net::ChatKind::Broadcast, text);
+            }
+            RefineBroadcast { who, item, level, ok } => {
+                let name = self.item_db.as_ref().map_or_else(|| format!("item {item}"), |db| db.name(item, true));
+                let text = if ok { format!("[{who}] successfully upgrades an equipment, [+{level} {name}] obtained.") } else { format!("[{who}] fails to upgrade [+{level} {name}].") };
+                self.hud.push_chat(ro_net::ChatKind::Broadcast, text);
             }
             CastCancel(id) => {
                 self.casts.remove(&id);
@@ -4878,6 +4985,34 @@ impl App {
             f.3 += dt;
             f.3 < 1200.0
         });
+        // Script progress bars: ours tells the server when it fills, so the script resumes.
+        // Wall-clock timed, and reported a little late: the server takes a report that
+        // arrives before its own timer runs out as a cancel and ends the script.
+        if let Some((start, total)) = self.script_progress {
+            if start.elapsed().as_secs_f32() * 1000.0 >= total + 150.0 {
+                self.script_progress = None;
+                if let Some((tx, _)) = self.net.as_ref() {
+                    tracing::debug!("script progress bar filled");
+                    let _ = tx.send(ro_net::Command::ProgressDone);
+                }
+            }
+        }
+        self.unit_progress.retain(|_, (t, total)| {
+            *t += dt;
+            *t < *total
+        });
+        // showscript call-outs stay up a few seconds.
+        self.shouts.retain(|_, (_, t)| {
+            *t += dt;
+            *t < 4000.0
+        });
+        if let Some((kind, _, t)) = self.digit.as_mut() {
+            *t += dt;
+            // Type 0 shows for 5 s; the counters run until replaced or the map changes.
+            if *kind == 0 && *t > 5000.0 {
+                self.digit = None;
+            }
+        }
 
         if self.auto_attack {
             let me = self.player.as_ref().map(|p| p.walker.cell);
@@ -5232,7 +5367,22 @@ impl App {
                 let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) }?;
                 Some((r.project(m.actor.pos, size)?, t / total))
             })
+            // Script progress bars draw like cast bars (green, as the original).
+            .chain(self.script_progress.map(|(start, total)| (self.account_id, start.elapsed().as_secs_f32() * 1000.0 / total)).into_iter().chain(self.unit_progress.iter().map(|(id, (t, total))| (*id, t / total))).filter_map(|(id, frac)| {
+                let m = if id == self.account_id { self.player.as_ref() } else { self.units.get(&id) }?;
+                Some((r.project(m.actor.pos, size)?, frac))
+            }))
             .collect();
+        let says: Vec<(glam::Vec2, String)> = self
+            .shouts
+            .iter()
+            .filter_map(|(id, (text, _))| {
+                let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) }?;
+                Some((r.project(m.actor.pos, size)?, text.clone()))
+            })
+            .collect();
+        self.hud.digit_text = self.digit.map(|(kind, value, t)| digit_text(kind, value, t));
+        self.hud.pvp_text = self.pvp_rank.map(|(rank, total)| format!("{rank} / {total}"));
         if let Some(state) = self.egui_state.as_mut() {
             let mut input = state.take_egui_input(window);
             if let Some(p) = self.fake_pointer.take() {
@@ -5349,7 +5499,7 @@ impl App {
                     front_action = front.show(ui.ctx(), &fctx);
                     return;
                 }
-                sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars);
+                sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars, &says);
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
                     {
                         let now = std::time::Instant::now();
@@ -6061,6 +6211,11 @@ fn main() -> anyhow::Result<()> {
         casts: Default::default(),
         fx: Default::default(),
         map_fx: vec![],
+        script_progress: None,
+        unit_progress: Default::default(),
+        shouts: Default::default(),
+        digit: None,
+        pvp_rank: None,
         breath_ms: 0.0,
         sprite_fx: vec![],
         burst_at: Default::default(),
