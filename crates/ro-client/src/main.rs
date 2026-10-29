@@ -2317,6 +2317,34 @@ impl App {
                 self.social.shop = Some(social::Shop::Buy { items, cart: Default::default() });
                 self.load_shop_icons();
             }
+            RankPoints { kind, gained, total } => {
+                let (id, en) = match kind {
+                    0 => (901, "Blacksmith rank"),
+                    1 => (902, "Alchemist rank"),
+                    2 => (926, "Tae-Kwon Mission rank"),
+                    3 => (953, "Slayer rank"),
+                    _ => (1209, "Ranking"),
+                };
+                let (g, t) = (gained.to_string(), total.to_string());
+                let text = msgstr::get(id, &[&g, &t]).unwrap_or_else(|| format!("[Point] You have been rewarded with {g} {en} points. Your point total is {t}."));
+                self.hud.push_chat(ro_net::ChatKind::System, text);
+            }
+            MannerResult(result) => {
+                let text = match result {
+                    0 => Some(msgstr::get(854, &[]).unwrap_or_else(|| "A manner point has been successfully aligned.".into())),
+                    3 => Some("Chat Block has been applied by GM due to your ill-mannerous action.".into()),
+                    4 => Some("Automated Chat Block has been applied due to Anti-Spam System.".into()),
+                    _ => None,
+                };
+                if let Some(text) = text {
+                    self.hud.push_chat(ro_net::ChatKind::System, text);
+                }
+            }
+            Muted { muted, by } => {
+                let (id, en) = if muted { (388, "negative") } else { (387, "positive") };
+                let text = msgstr::get(id, &[&by]).unwrap_or_else(|| format!("Received {en} manner point from {by}."));
+                self.hud.push_chat(ro_net::ChatKind::System, text);
+            }
             PointShop { cash, kafra, items } => {
                 self.dialog = None;
                 if let Some(id) = self.auto_buy.take() {

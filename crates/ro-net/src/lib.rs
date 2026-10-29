@@ -368,6 +368,12 @@ pub enum Event {
     Recovery { kind: u16, amount: i32 },
     /// ZC_USER_COUNT (/who).
     UserCount(u32),
+    /// Fame points gained in a ranking (0 Blacksmith, 1 Alchemist, 2 Taekwon, 3 Slayer...).
+    RankPoints { kind: u16, gained: u32, total: u32 },
+    /// A GM muted (true) or unmuted us (ZC_NOTIFY_MANNER_POINT_GIVEN).
+    Muted { muted: bool, by: String },
+    /// ZC_ACK_GIVE_MANNER_POINT result (0 aligned, 3 GM chat block, 4 anti-spam block...).
+    MannerResult(u32),
     /// ZC_NOTIFY_RANKING (PvP): a unit's rank among `total` players on the map.
     PvpRank { id: u32, rank: u32, total: u32 },
     /// ZC_ACK_PVPPOINT (/pvpinfo).
@@ -1523,6 +1529,9 @@ impl MapSession {
                         0x0acc if data.len() >= 18 => Some(Event::ExpGain { amount: i64::from_le_bytes(data[6..14].try_into().unwrap()), kind: u16::from_le_bytes([data[14], data[15]]), quest: data[16] != 0 }),
                         0x0a27 if data.len() >= 8 => Some(Event::Recovery { kind: u16::from_le_bytes([data[2], data[3]]), amount: l(&data, 4) as i32 }),
                         0x00c2 if data.len() >= 6 => Some(Event::UserCount(l(&data, 2))),
+                        0x097e if data.len() >= 12 => Some(Event::RankPoints { kind: u16::from_le_bytes([data[2], data[3]]), gained: l(&data, 4), total: l(&data, 8) }),
+                        0x014a if data.len() >= 6 => Some(Event::MannerResult(l(&data, 2))),
+                        0x014b if data.len() >= 27 => Some(Event::Muted { muted: data[2] != 0, by: ro_proto::packets::get_fixed_str(&mut &data[3..27], 24) }),
                         0x019a if data.len() >= 14 => Some(Event::PvpRank { id: l(&data, 2), rank: l(&data, 6), total: l(&data, 10) }),
                         0x0210 if data.len() >= 22 => Some(Event::PvpInfo { won: l(&data, 10), lost: l(&data, 14), points: l(&data, 18) }),
                         0x07fc if data.len() >= 10 => Some(Event::PartyLeader { old: l(&data, 2), new: l(&data, 6) }),
