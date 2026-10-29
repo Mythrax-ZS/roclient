@@ -1,4 +1,5 @@
 """Regression fixtures for placement, transparency and paired RO timelines."""
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -7,7 +8,7 @@ import unittest
 
 from PIL import Image
 
-from compile import compile_package, preview_layout, reflect_layer, sampled_cell, validate_package, weapon_layer
+from compile import compile_package, preview_layout, reflect_layer, sampled_cell, sampled_weapon_png, validate_package, weapon_layer
 from ro_formats import FormatError, read_act, read_spr, write_act, write_spr
 
 
@@ -121,6 +122,52 @@ class CompilerTest(unittest.TestCase):
         path.write_text(json.dumps(config))
         with self.assertRaisesRegex(ValueError, "each group"):
             compile_package(path, self.root / "compiled")
+
+    def test_png_weapon_roundtrip_preserves_sampled_rgba_and_grip(self):
+        config = self.config()
+        image = Image.new("RGBA", (8, 8))
+        image.putpixel((3, 3), (210, 120, 40, 97))
+        image.putpixel((5, 3), (30, 40, 50, 255))
+        image.putpixel((7, 5), (90, 80, 70, 128))
+        source = self.root / "weapon.png"
+        image.save(source)
+        config["weapon"] = dict(png="weapon.png", rect=[2, 2, 8, 6], downsample=2, source_grip=[1, 1])
+        for poses in config["groups"][5]["weapon_poses"].values():
+            poses[0] = dict(grip=[-2, -4], rotation=90)
+        path = self.root / "build.json"
+        path.write_text(json.dumps(config))
+        output = self.root / "compiled"
+        report = compile_package(path, output)
+        encoded = read_spr(output / "katana.spr")["images"][0]
+        expected = bytes((210, 120, 40, 97, 30, 40, 50, 255, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0, 90, 80, 70, 128))
+        self.assertEqual((encoded["width"], encoded["height"]), (3, 2))
+        self.assertEqual(encoded["pixels"], expected)
+        self.assertEqual(report["source_sha256"]["weapon.png"], hashlib.sha256(source.read_bytes()).hexdigest())
+        layer = read_act(output / "katana.act")["actions"][40]["frames"][0]["layers"][0]
+        # The source grip is at (1,1) within a 3x2 image, not original PNG (1,1).
+        self.assertEqual((layer["x"], layer["y"], layer["rotation"]), (-2, -4, 90))
+        self.assertTrue(report["paired_timelines"])
+
+    def test_png_weapon_defaults_keep_entire_image_and_invalid_inputs_fail(self):
+        image = Image.new("RGBA", (6, 4))
+        image.putpixel((3, 2), (3, 7, 9, 65))
+        path = self.root / "weapon.png"
+        image.save(path)
+        sampled = sampled_weapon_png(path, {})
+        self.assertEqual((sampled.size, sampled.tobytes()), (image.size, image.tobytes()))
+        for rect in ([0, 0, 7, 4], [-1, 0, 6, 4], [2, 0, 2, 4], [0, 0, 6], [0, 0, 6.0, 4]):
+            with self.subTest(rect=rect), self.assertRaisesRegex(ValueError, "rectangle"):
+                sampled_weapon_png(path, dict(rect=rect))
+        for factor in (0, -1, 1.5, True):
+            with self.subTest(factor=factor), self.assertRaisesRegex(ValueError, "positive integer"):
+                sampled_weapon_png(path, dict(downsample=factor))
+        config = self.config()
+        config["weapon"]["png"] = "weapon.png"
+        build = self.root / "build.json"
+        build.write_text(json.dumps(config))
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            compile_package(build, self.root / "compiled")
 
 
 if __name__ == "__main__":

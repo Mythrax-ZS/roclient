@@ -19,6 +19,9 @@ The game job is **Samurai** (4500); **Ember Ronin** remains the asset filename.
   relative to the actor's ground origin; do not apply a head-anchor offset.
 - Katana layers are present in ready and attack groups 4, 5, 10 and 11.
   All other weapon frames have empty layers.
+- The katana uses native scale 1.0 in every armed pose. Its curved blade and
+  wrapped hilt occupy about 69 pixels of the 72-by-10 source canvas; do not
+  restore the old 0.75 scale, which made the thin blade hard to read in-game.
 - Equipped swords with view 2, 3 or 49 use the matching katana. Dual wielding is a
   server mechanic; separate offhand and katar artwork are not supplied.
 - Both pairs use SPR 2.1 truecolor RGBA and ACT 2.5. Keep the four files together

@@ -107,6 +107,23 @@ def weapon_layer(pose, size, source_grip):
                 rotation=rotation, mirror=mirrored, scale_x=sx, scale_y=sy)
 
 
+def sampled_weapon_png(path, spec):
+    """Sample an authored rectangle once, retaining its transparent margins."""
+    image = Image.open(path).convert("RGBA")
+    rect = spec.get("rect", [0, 0, image.width, image.height])
+    if (not isinstance(rect, (list, tuple)) or len(rect) != 4
+            or any(type(value) is not int for value in rect)
+            or not (0 <= rect[0] < rect[2] <= image.width and 0 <= rect[1] < rect[3] <= image.height)):
+        raise ValueError(f"Weapon PNG rectangle {rect} is outside {image.size} or is not four integers")
+    factor = spec.get("downsample", 1)
+    if type(factor) is not int or factor < 1:
+        raise ValueError("Weapon PNG downsample must be a positive integer")
+    cell = image.crop(rect)
+    size = tuple(math.ceil(value / factor) for value in cell.size)
+    return cell.transform(size, Image.Transform.AFFINE, (factor, 0, 0, 0, factor, 0),
+                          Image.Resampling.NEAREST, fillcolor=(0, 0, 0, 0))
+
+
 def compile_package(config_path, destination):
     config_path, destination = Path(config_path).resolve(), Path(destination).resolve()
     config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -133,10 +150,18 @@ def compile_package(config_path, destination):
             raise ValueError("Mirrors must map one known direction to an unmirrored known direction")
     weapon_config = config.get("weapon")
     if weapon_config:
-        weapon_path = (config_path.parent / weapon_config["spr"]).resolve()
-        weapon_images = rgba_images(read_spr(weapon_path))
-        weapon_image = weapon_images[weapon_config.get("image", 0)]
-        source_hashes[weapon_config["spr"]] = hashlib.sha256(weapon_path.read_bytes()).hexdigest()
+        source_types = [key for key in ("spr", "png") if key in weapon_config]
+        if len(source_types) != 1:
+            raise ValueError("Weapon must specify exactly one of spr or png")
+        source_type = source_types[0]
+        source_name = weapon_config[source_type]
+        weapon_path = (config_path.parent / source_name).resolve()
+        if source_type == "png":
+            weapon_image = sampled_weapon_png(weapon_path, weapon_config)
+        else:
+            weapon_images = rgba_images(read_spr(weapon_path))
+            weapon_image = weapon_images[weapon_config.get("image", 0)]
+        source_hashes[source_name] = hashlib.sha256(weapon_path.read_bytes()).hexdigest()
     else:
         weapon_image = Image.new("RGBA", (2, 2))
     weapon_actions = []

@@ -7,8 +7,12 @@ reference copied unchanged. The movement and action sheets were restyled to
 match that design with imagegen.
 
 The full-body images include head and hair. The katana remains a separate
-layer. `source/katana.spr` retains the existing generated blade; its handle
-grip is at pixel (10, 4), to the left of the gold guard.
+layer. `source/katana.png` is the generated curved silver blade with a red and
+black wrapped hilt. Its authored rectangle is sampled once into a 72-by-10
+pixel canvas, with about 69 visible pixels of length. The grip is at (14, 5)
+in that sampled canvas. Every armed ACT pose uses scale 1.0; the former 0.75
+scale made the old thin blade disappear into a needle-like line in-game.
+`source/katana.prompt.json` records the exact prompt and sampling parameters.
 
 The build preserves the accepted animation contract: 104 directional actions,
 304 timeline frames, eight walking poses at 100 ms each, and paired body/weapon
@@ -28,7 +32,7 @@ py tools/samurai_assets/compile.py tools/samurai_assets/artwork/build.json --out
 ```
 
 The master, walk, utility and attack audits record registration decisions.
-`prompts_root.json` and the action prompt files retain generation instructions
+`prompts_root.json` and the action and katana prompt files retain generation instructions
 from the built-in image-generation tool. The compiled package supplies decoded
 contact sheets, an animated HTML preview, binary checksums and source-edge
 diagnostics. Stock RO comparison images are not included in this source package.

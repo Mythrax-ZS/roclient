@@ -106,8 +106,28 @@ Existing weapon art can be decoded from an SPR without changing its pixels:
 }
 ```
 
-`source_grip` is the handle's authored grip position in that SPR image. Add
-`weapon_poses` to each armed group. It maps each **unmirrored direction** to
+`source_grip` is the handle's authored grip position in that SPR image. Use
+`png` instead of `spr` to import a generated RGBA source directly:
+
+```json
+"weapon": {
+  "png": "source/katana.png",
+  "rect": [0, 0, 1024, 256],
+  "downsample": 16,
+  "source_grip": [9, 8]
+}
+```
+
+Exactly one of `spr` or `png` is required. For PNG, `rect` is an explicit
+integer rectangle inside the source (default: the whole image); `downsample`
+is a positive integer (default: 1). The compiler crops that rectangle and takes
+one nearest-neighbor sample, preserving the sampled RGBA values. Output width
+and height are the rectangle dimensions divided by `downsample`, rounded up.
+Transparent margins remain; the compiler never crops to a detected silhouette.
+`source_grip` is measured in the resulting sampled image, not the original PNG.
+The source PNG hash is recorded, and the runtime weapon is still an SPR/ACT pair.
+
+Add `weapon_poses` to each armed group. It maps each **unmirrored direction** to
 exactly one entry per body timeline frame:
 
 ```json

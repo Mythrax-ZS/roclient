@@ -1,0 +1,26 @@
+{
+  "mode": "built-in image_gen",
+  "use_case": "stylized-concept",
+  "date": "2026-10-30",
+  "prompt": "Use case: stylized-concept. Asset type: one production pixel-art katana weapon sprite for a Ragnarok-style RPG character. Input image is COSTUME/PALETTE reference only; do not draw the character. Create one isolated katana in strict flat side view, horizontal, hilt at LEFT and blade tip at RIGHT. Match the reference's charcoal, red, small gold accents, crisp shaded pixel-art style. A readable gently curved SINGLE-EDGED silver blade with dark steel spine, pale silver face and clean bright cutting edge, distinct pointed kissaki, no double-edge/fantasy jagged blade. Long charcoal hilt with red diamond wrapping, small restrained antique-gold oval tsuba seen edge-on and gold pommel. No scabbard. The sword needs to stay readable when sampled down to about64pixels long: blade thickness at the base equivalent to4pixels and taper slowly, handle about14pixels long and4pixels thick, guard about8pixels tall. Sword silhouette length about64pixels, not oversized broadsword and not a one-pixel needle. Render crisp coherent pixel clusters at a large integer preview scale with no antialias haze or painterly microtexture. Composition: square1024x1024 canvas with sword spanning x64 through960, centered around y512; hilt axis exactly horizontal, gentle blade curve lifts toward right only. Entire object with generous transparent margin. Genuinely transparent RGBA background; alpha0 outside sword, no scene, shadow, hand, text, labels, grid, glow, blur or motion trail. Output only ONE complete sword.",
+  "reference": "source/idle_ready.png",
+  "output": "source/katana.png",
+  "sampling": {
+    "rect": [
+      32,
+      352,
+      1760,
+      576
+    ],
+    "downsample": 24,
+    "source_grip": [
+      14,
+      5
+    ],
+    "act_scale": [
+      1,
+      1
+    ]
+  },
+  "note": "Generated PNG retained unchanged; compiler samples the authored rectangle once with nearest-neighbor and preserves alpha."
+}
