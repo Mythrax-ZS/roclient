@@ -1041,7 +1041,16 @@ impl App {
 
     /// Actor template for an NPC / monster class: data\sprite\npc\ or data\sprite\몬스터\.
     fn class_actor(&mut self, job: i16) -> Option<ro_render::Actor> {
-        let name = self.class_names.get(&job)?.clone();
+        // Newer NPC classes (10000+) this client has no name or sprite for still need a
+        // body to be clicked (e.g. 10243, the Zonda teleporters): a stock townsman stands in.
+        let name = match self.class_names.get(&job) {
+            Some(n) => n.clone(),
+            None if (10000..20000).contains(&(job as i32)) => {
+                tracing::debug!(job, "unknown NPC class, using a stand-in sprite");
+                "4_M_01".to_string()
+            }
+            None => return None,
+        };
         let key = format!("class:{name}");
         if let Some(a) = self.sprites.get(&key) {
             return a.clone();
@@ -1056,7 +1065,11 @@ impl App {
         // a weapon from 인간족\용병\.
         // Monster classes look in 몬스터 first: some names (poring) are also NPC sprites.
         let folders: &[&str] = if (1000..4000).contains(&(job as i32)) || job as i32 >= 20000 || job < 0 { &["몬스터", "npc", "homun", "인간족\\몸통"] } else { &["npc", "몬스터", "homun", "인간족\\몸통"] };
-        let found = folders.iter().find_map(|folder| read(&format!("data\\sprite\\{folder}\\{name}")));
+        let found = folders.iter().find_map(|folder| read(&format!("data\\sprite\\{folder}\\{name}"))).or_else(|| {
+            // Its sprite is missing from this client's data (e.g. 10243 4_m_drzonda01).
+            (10000..20000).contains(&(job as i32)).then(|| tracing::debug!(job, %name, "missing NPC sprite, using a stand-in"))?;
+            read("data\\sprite\\npc\\4_m_01")
+        });
         let merc_weapon = name.rsplit('\\').next().and_then(|n| ["활", "창", "검"].iter().find_map(|w| read(&format!("data\\sprite\\인간족\\용병\\{n}_{w}"))));
         // Mercenary bodies are headless; the original adds a player head, its style set by
         // the mercenary's grade (classes 6017.. come in tens: archers, lancers, swordsmen).

@@ -77,7 +77,7 @@ Ticked items are handled and tested in game against the local server.
 
 ## Found while testing
 - [x] `specialeffect` (ZC_NOTIFY_EFFECT2): 110 EF_* ids matched to STR files, plus the most-used code-drawn ones (heal, grand cross, steal, bash, ...) shown with their skill effect; the hit sparks and screen quake still missing
-- [ ] Some NPC classes have no sprite name (e.g. 10243 4_m_drzonda01)
+- [x] NPC classes whose sprite iRO lacks (e.g. 10243 4_m_drzonda01, Zonda teleporters) get a stand-in body so they stay usable
 - Note: `setnpcdisplay` to a monster class makes rAthena send class 0 (a Novice); the original client shows the same
 - [x] ZC_ACK_REQNAMEALL: party, guild and rank under player names
 - [x] ZC_EQUIPMENT_EFFECT: hat effects (145 from hateffectinfo), following the wearer
