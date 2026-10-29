@@ -41,7 +41,7 @@ Ticked items are handled and tested in game against the local server.
 - [ ] ZC_COMBODELAY, ZC_BLADESTOP
 - [ ] ZC_NOTIFY_BIND_ON_EQUIP, ZC_CHANGE_ITEM_OPTION, ZC_UPDATE_CARDSLOT
 - [x] ZC_ACK_TAKEOFF_EQUIP_ALL ("Take off all" button per equipment tab), ZC_MOVE_ITEM_FAILED
-- [x] ZC_INVENTORY_TAB (favourites live in the "etc" tab, as PlaceETCTab says); ZC_INVENTORY_END is a no-op marker
+- [x] ZC_INVENTORY_TAB (own fourth "fav" tab; the server flag is PlaceETCTab); ZC_INVENTORY_END is a no-op marker
 - [x] ZC_EXTEND_BODYITEM_SIZE (+ ACK / MSGBOX): slot count, + button, confirmation
 
 ## World

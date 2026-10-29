@@ -96,6 +96,8 @@ enum InvTab {
     Items,
     Equip,
     Etc,
+    /// Our own fourth tab: items marked as favourites (PlaceETCTab).
+    Fav,
 }
 
 /// Everything the windows draw.
@@ -564,13 +566,14 @@ fn item_slot(ui: &mut egui::Ui, icons: &HashMap<u32, egui::TextureHandle>, it: &
 }
 
 impl Windows {
-    /// Test hook: open the inventory on a tab (0 item, 1 equip, 2 etc).
+    /// Test hook: open the inventory on a tab (0 item, 1 equip, 2 etc, 3 favourites).
     pub fn inventory_tab(&mut self, n: u8) {
         self.inventory = true;
         self.tab = match n {
             0 => InvTab::Items,
             1 => InvTab::Equip,
-            _ => InvTab::Etc,
+            2 => InvTab::Etc,
+            _ => InvTab::Fav,
         };
     }
 
@@ -684,9 +687,10 @@ impl Windows {
                 .iter()
                 .filter(|it| it.equipped == 0)
                 .filter(|it| match tab {
-                    InvTab::Items => !it.favorite && !it.is_equipment(),
+                    InvTab::Items => !it.favorite && it.is_usable(),
                     InvTab::Equip => !it.favorite && it.is_equipment(),
-                    InvTab::Etc => it.favorite,
+                    InvTab::Etc => !it.favorite && !it.is_usable() && !it.is_equipment(),
+                    InvTab::Fav => it.favorite,
                 })
                 .collect();
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
@@ -707,9 +711,27 @@ impl Windows {
                         InvTab::Items => "tab_itm_01",
                         InvTab::Equip => "tab_itm_02",
                         InvTab::Etc => "tab_itm_03",
+                        InvTab::Fav => "tab_itm_01",
                     };
                     let strip_rect = egui::Rect::from_min_size(area.min, Vec2::new(20.0, 82.0));
                     skin.draw(&p, strip, strip_rect.min);
+                    // The art has three tabs; "fav" is drawn below them in the same style.
+                    let fav_rect = egui::Rect::from_min_size(strip_rect.left_bottom(), Vec2::new(20.0, 30.0));
+                    let on = tab == InvTab::Fav;
+                    if on {
+                        // Dim the strip's "item" tab so none of the three looks selected.
+                        p.rect_filled(egui::Rect::from_min_size(strip_rect.min, Vec2::new(20.0, 27.0)), 0.0, Color32::from_rgba_unmultiplied(214, 218, 230, 170));
+                    }
+                    p.rect_filled(fav_rect.shrink2(Vec2::new(1.0, 0.0)), 2.0, if on { Color32::WHITE } else { Color32::from_rgb(226, 230, 242) });
+                    p.rect_stroke(fav_rect.shrink2(Vec2::new(1.0, 0.0)), 2.0, egui::Stroke::new(1.0, Color32::from_rgb(170, 176, 196)), egui::StrokeKind::Inside);
+                    let galley = p.layout_no_wrap("fav".into(), egui::FontId::proportional(11.0), if on { Color32::BLACK } else { Color32::from_rgb(110, 110, 120) });
+                    // Reads bottom-to-top like the art's labels.
+                    let at = egui::pos2(fav_rect.center().x - galley.size().y / 2.0, fav_rect.center().y + galley.size().x / 2.0);
+                    p.add(egui::epaint::TextShape::new(at, galley, Color32::BLACK).with_angle(-std::f32::consts::FRAC_PI_2));
+                    if ui.interact(fav_rect, ui.scope_id().with("inv_fav_tab"), egui::Sense::click()).clicked() {
+                        tab = InvTab::Fav;
+                        scroll = 0;
+                    }
                     let resp = ui.interact(strip_rect, ui.scope_id().with("inv_tabs"), egui::Sense::click());
                     if let Some(at) = resp.clicked().then(|| resp.interact_pointer_pos()).flatten() {
                         tab = match ((at.y - strip_rect.min.y) / (82.0 / 3.0)) as i32 {
@@ -791,6 +813,7 @@ impl Windows {
                     ui.selectable_value(&mut self.tab, InvTab::Items, "Items");
                     ui.selectable_value(&mut self.tab, InvTab::Equip, "Equip");
                     ui.selectable_value(&mut self.tab, InvTab::Etc, "Etc");
+                    ui.selectable_value(&mut self.tab, InvTab::Fav, "Favorites");
                 });
                 ui.separator();
                 let shown: Vec<&&InvItem> = v
@@ -798,9 +821,10 @@ impl Windows {
                     .iter()
                     .filter(|it| it.equipped == 0)
                     .filter(|it| match self.tab {
-                        InvTab::Items => !it.favorite && !it.is_equipment(),
+                        InvTab::Items => !it.favorite && it.is_usable(),
                         InvTab::Equip => !it.favorite && it.is_equipment(),
-                        InvTab::Etc => it.favorite,
+                        InvTab::Etc => !it.favorite && !it.is_usable() && !it.is_equipment(),
+                        InvTab::Fav => it.favorite,
                     })
                     .collect();
                 egui::Grid::new("inv").spacing(Vec2::splat(4.0)).show(ui, |ui| {
