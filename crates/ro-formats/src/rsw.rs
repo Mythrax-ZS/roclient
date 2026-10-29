@@ -72,6 +72,10 @@ pub struct Effect {
     pub pos: [f32; 3],
     pub id: i32,
     pub delay: f32,
+    /// The object name (EF_EMITTER: names its emitterInfo entry in some tools).
+    pub name: String,
+    /// Four effect-specific parameters.
+    pub params: [f32; 4],
 }
 
 #[derive(Debug)]
@@ -110,7 +114,8 @@ impl Rsw {
             0
         };
         if v(2, 5) {
-            r.i32()?; // unknown
+            // One byte (not an i32): the GND name sits at offset 51 = 11 + 40 in 2.5+ files.
+            r.u8()?; // unknown
         }
 
         let _ini = r.string(40)?;
@@ -142,6 +147,11 @@ impl Rsw {
         if v(1, 6) {
             r.bytes(16)?; // ground bounds: top, bottom, left, right
         }
+        if v(2, 7) {
+            // A counted list of 4-byte values (colours, by their look) precedes the objects.
+            let n = r.u32()? as usize;
+            r.bytes(n * 4)?;
+        }
 
         let count = r.u32()? as usize;
         let (mut models, mut lights, mut sounds, mut effects) = (vec![], vec![], vec![], vec![]);
@@ -159,6 +169,9 @@ impl Rsw {
                     };
                     if v(2, 6) && build >= 186 {
                         r.u8()?; // unknown
+                    }
+                    if v(2, 7) {
+                        r.i32()?; // unknown (-1 in every 2.7 map seen); records are 4 bytes longer
                     }
                     let file = r.string(80)?;
                     let _node = r.string(80)?;
@@ -186,12 +199,12 @@ impl Rsw {
                     sounds.push(Sound { file, pos, volume, range, cycle });
                 }
                 4 => {
-                    let _name = r.string(80)?;
+                    let name = r.string(80)?;
                     let pos = vec3(&mut r)?;
                     let id = r.i32()?;
                     let delay = r.f32()?;
-                    r.bytes(16)?; // params
-                    effects.push(Effect { pos, id, delay });
+                    let params = [r.f32()?, r.f32()?, r.f32()?, r.f32()?];
+                    effects.push(Effect { pos, id, delay, name, params });
                 }
                 t => bail!("unknown RSW object type {t}"),
             }
@@ -213,6 +226,73 @@ mod tests {
         assert!(light.direction()[1] > 0.0);
         let overhead = Light { latitude: 0, ..light };
         assert!((overhead.direction()[1] - 1.0).abs() < 1e-6);
+    }
+
+    /// A minimal RSW of the given version (build 227) with one model and one effect, laid
+    /// out like the client's 2.5 / 2.6 / 2.7 files.
+    fn sample(minor: u8) -> Vec<u8> {
+        let mut d = b"GRSW".to_vec();
+        d.extend([2, minor]);
+        d.extend(227i32.to_le_bytes());
+        d.push(1); // the one-byte unknown of 2.5+
+        let name = |s: &str, n: usize| {
+            let mut v = s.as_bytes().to_vec();
+            v.resize(n, 0);
+            v
+        };
+        for s in ["", "m.gnd", "m.gat", ""] {
+            d.extend(name(s, 40));
+        }
+        if minor < 6 {
+            d.extend(10f32.to_le_bytes()); // water level
+            d.extend(0i32.to_le_bytes());
+            d.extend([1f32, 2.0, 50.0].iter().flat_map(|f| f.to_le_bytes()));
+            d.extend(3i32.to_le_bytes());
+        }
+        d.extend(45i32.to_le_bytes());
+        d.extend(45i32.to_le_bytes());
+        d.extend([1f32; 7].iter().flat_map(|f| f.to_le_bytes()));
+        d.extend([0u8; 16]);
+        if minor >= 7 {
+            d.extend(2u32.to_le_bytes());
+            d.extend([0xffu8; 8]);
+        }
+        d.extend(2u32.to_le_bytes());
+        // Model.
+        d.extend(1i32.to_le_bytes());
+        d.extend(name("tree", 40));
+        d.extend(0i32.to_le_bytes());
+        d.extend(1f32.to_le_bytes());
+        d.extend(0i32.to_le_bytes());
+        if minor >= 6 {
+            d.push(0);
+        }
+        if minor >= 7 {
+            d.extend((-1i32).to_le_bytes());
+        }
+        d.extend(name("tree.rsm", 80));
+        d.extend(name("", 80));
+        d.extend([1f32, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0].iter().flat_map(|f| f.to_le_bytes()));
+        // Effect.
+        d.extend(4i32.to_le_bytes());
+        d.extend(name("e", 80));
+        d.extend([1f32, 2.0, 3.0].iter().flat_map(|f| f.to_le_bytes()));
+        d.extend(974i32.to_le_bytes());
+        d.extend([5f32, 0.0, 0.0, 0.0, 0.0].iter().flat_map(|f| f.to_le_bytes()));
+        d
+    }
+
+    #[test]
+    fn parses_2_5_to_2_7() {
+        for minor in [5, 6, 7] {
+            let rsw = Rsw::parse(&sample(minor)).unwrap_or_else(|e| panic!("2.{minor}: {e:#}"));
+            assert_eq!(rsw.gnd, "m.gnd");
+            assert_eq!(rsw.models.len(), 1, "2.{minor}");
+            assert_eq!(rsw.models[0].file, "tree.rsm");
+            assert_eq!(rsw.models[0].pos, [1.0, 2.0, 3.0]);
+            assert_eq!(rsw.effects[0].id, 974);
+            assert_eq!(rsw.water.is_some(), minor < 6);
+        }
     }
 
     #[test]
