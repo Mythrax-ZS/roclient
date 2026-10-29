@@ -35,7 +35,7 @@ pub use ro_proto::chatroom::{BookingAd, BookingRequest, ChatRoomRequest, IgnoreR
 use ro_proto::chatroom::*;
 use ro_proto::quests::*;
 use ro_proto::menus::*;
-pub use ro_proto::social::{ClanInfo, OptionRequest, StyleRequest, Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
+pub use ro_proto::social::{AgencyAsk, ClanInfo, OptionRequest, StyleRequest, Friend, FriendRequest, PartyMember, PartyRequest, SellOffer, ShopItem, ShopRequest, StorageRequest, TradeRequest};
 use ro_proto::social::*;
 
 type Conn = Framed<TcpStream, RoCodec<ServerTable>>;
@@ -184,6 +184,8 @@ pub async fn enter_map(zone: &ZoneServer, auth: &AcceptLogin) -> anyhow::Result<
 pub enum Event {
     /// Entered a map with this character.
     Entered { map: String, x: u16, y: u16, dir: u8, account_id: u32, character: CharInfo },
+    /// The web server's token for this login, and the char server's name (its WorldName).
+    WebAuth { account_id: u32, token: String, world: String },
     /// Our walk was accepted: walk from -> to.
     Walk { from: (u16, u16), to: (u16, u16) },
     /// The server placed a unit (us or another) at a cell, ending or correcting a walk.
@@ -233,6 +235,10 @@ pub enum Event {
     PartyHp { account_id: u32, hp: i32, max_hp: i32 },
     PartyInvite { party: u32, name: String },
     PartyCreated { ok: bool },
+    /// Someone asks to join our party through the Adventurer's Agency.
+    AgencyAsk(AgencyAsk),
+    /// The answer to our Adventurer's Agency join request.
+    AgencyResult { leader: String, party: String, refused: bool },
     Guild { id: u32, name: String },
     /// Which guild we belong to (0: none) and whether we lead it.
     GuildBelong { id: u32, master: bool, name: String },
@@ -850,6 +856,9 @@ pub fn spawn_session(cfg: SessionConfig) -> (tokio::sync::mpsc::UnboundedSender<
                     let back_to_select = loop {
                         let map = enter_map(&zone, &auth).await?;
                         let name = zone.map.trim_end_matches(".gat").to_string();
+                        if first {
+                            let _ = ev_tx.send(Event::WebAuth { account_id: auth.account_id, token: auth.web_token.clone(), world: server.name.clone() });
+                        }
                         let event = if first {
                             Event::Entered {
                                 map: name,
@@ -1044,6 +1053,8 @@ impl MapSession {
                             Some(Event::PartyInvite { party, name })
                         }
                         0x00fa => Some(Event::PartyCreated { ok: data[2] == 0 }),
+                        0x0ae7 => parse_agency_ask(&data).map(Event::AgencyAsk),
+                        0x0afa => parse_agency_result(&data).map(|(leader, party, refused)| Event::AgencyResult { leader, party, refused }),
                         0x0109 => Some(Event::Chat { kind: ChatKind::Party, from: None, text: parse_party_chat(&data) }),
                         0x017f => Some(Event::Chat { kind: ChatKind::Guild, from: None, text: parse_guild_chat(&data) }),
                         0x098e => Some(Event::Chat { kind: ChatKind::Clan, from: None, text: parse_clan_chat(&data) }),

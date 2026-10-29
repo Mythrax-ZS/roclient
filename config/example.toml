@@ -4,6 +4,9 @@
 #   LAN server:   "192.168.1.50" or "192.168.1.50:6900"
 # Override per run with:  --login <addr>  (or --login-addr <addr>)
 login_addr = "127.0.0.1:6900"
+# rAthena's web-server (Adventurer's Agency party board). Defaults to the login host on
+# port 8888; set it when web-server runs elsewhere, e.g. "192.168.1.50:8888".
+# web_addr = "127.0.0.1:8888"
 username = "test"
 password = "test"
 char_slot = 0

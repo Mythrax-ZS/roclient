@@ -276,6 +276,8 @@ pub struct AcceptLogin {
     pub account_id: u32,
     pub login_id2: u32,
     pub sex: u8,
+    /// The web server's session token (AuthToken), refreshed each login.
+    pub web_token: String,
     pub servers: Vec<CharServerInfo>,
 }
 
@@ -288,7 +290,7 @@ pub fn parse_accept_login(data: &[u8]) -> AcceptLogin {
     let _last_ip = b.get_u32_le();
     b.advance(26);
     let sex = b.get_u8();
-    b.advance(17); // web auth token
+    let web_token = get_fixed_str(&mut b, 17);
     let mut servers = Vec::new();
     while b.len() >= 160 {
         let ip = b.get_u32_le();
@@ -298,7 +300,7 @@ pub fn parse_accept_login(data: &[u8]) -> AcceptLogin {
         b.advance(2 + 2 + 128);
         servers.push(CharServerInfo { addr: std::net::SocketAddrV4::new(ipv4(ip), port), name, users });
     }
-    AcceptLogin { login_id1, account_id, login_id2, sex, servers }
+    AcceptLogin { login_id1, account_id, login_id2, sex, web_token, servers }
 }
 
 /// 0x083e error code.

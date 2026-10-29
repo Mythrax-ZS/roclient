@@ -30,6 +30,7 @@ mod quests;
 mod refine;
 mod screens;
 mod ai;
+mod agency;
 mod booking;
 mod battle;
 mod clan;
@@ -112,6 +113,9 @@ struct Config {
     /// Map shown in the window until it follows the network session.
     #[serde(default = "default_map")]
     map: String,
+    /// rAthena's web server (Adventurer's Agency, …); defaults to the login host on port 8888.
+    #[serde(default)]
+    web_addr: Option<String>,
 }
 
 fn default_grfs() -> Vec<String> {
@@ -377,6 +381,19 @@ fn normalize_login_addr(s: &str) -> String {
     } else {
         format!("{s}:6900")
     }
+}
+
+/// The web server's base URL: `web_addr` as given (scheme optional), else the login host on 8888.
+fn web_url(web_addr: Option<&str>, login_addr: &str) -> String {
+    let addr = match web_addr.map(str::trim).filter(|a| !a.is_empty()) {
+        Some(a) => a.to_string(),
+        None => {
+            let host = login_addr.rsplit_once(':').map_or(login_addr, |(h, _)| h);
+            format!("{host}:8888")
+        }
+    };
+    let addr = addr.trim_end_matches('/');
+    if addr.contains("://") { addr.to_string() } else { format!("http://{addr}") }
 }
 
 fn load_config() -> anyhow::Result<Config> {
@@ -958,6 +975,9 @@ struct App {
     rooms: chatrooms::ChatRooms,
     /// Party booking.
     booking: booking::Booking,
+    /// Adventurer's Agency, and the web server it talks to.
+    agency: agency::Agency,
+    web_url: String,
     /// The last /ex or /in sent: (name, block).
     ignore_pending: Option<(String, bool)>,
     /// A companion window request, handled after the UI pass.
@@ -2392,6 +2412,13 @@ impl App {
                 }
             }
             PartyInvite { party, name } => self.social.prompts.push(social::Prompt::Party { party, name }),
+            WebAuth { account_id, token, world } => self.agency.set_login(agency::Login { url: self.web_url.clone(), aid: account_id, token, world }),
+            AgencyAsk(ask) => self.social.prompts.push(social::Prompt::Agency(ask)),
+            AgencyResult { leader, refused, .. } => {
+                let (id, en) = if refused { (3499, "rejected") } else { (3498, "approved") };
+                let text = msgstr::get(id, &[&leader]).unwrap_or_else(|| format!("[{leader}]'s party leader has {en} your join request."));
+                self.hud.push_chat(ro_net::ChatKind::System, text);
+            }
             PartyCreated { ok } => {
                 let msg = if ok { "Party created." } else { "Could not create the party (name taken, or already in one)." };
                 self.hud.push_chat(ro_net::ChatKind::System, msg.into());
@@ -4232,6 +4259,10 @@ impl App {
                 self.reporter.toggle();
                 return;
             }
+            if text.trim() == "/agency" {
+                self.agency.toggle();
+                return;
+            }
             if text.trim() == "/limitedsale" {
                 let _ = tx.send(ro_net::Command::Sale(self.account_id, ro_net::SaleRequest::Open));
                 return;
@@ -5139,6 +5170,33 @@ impl App {
                         self.send(ro_net::Command::Sale(self.account_id, ro_net::SaleRequest::Search(name.to_string())));
                         None
                     }
+                    // agency: open the Adventurer's Agency; agencyadd:purpose:min:max:memo registers
+                    // our party; agencyjoin:name asks that ad's leader to let us in.
+                    Some(("agency", _)) => {
+                        if !self.agency.open {
+                            self.agency.toggle();
+                        }
+                        None
+                    }
+                    Some(("agencyadd", spec)) => {
+                        let mut f = spec.splitn(4, ':');
+                        let mut num = || f.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                        let (purpose, min_lv, max_lv) = (num(), num(), num());
+                        let memo = f.next().unwrap_or("").to_string();
+                        let name = self.hud.status.name.clone();
+                        self.agency.register(agency::Ad { gid: self.char_id, char_name: name, purpose, min_lv, max_lv, dealer: 1, memo, ..Default::default() });
+                        None
+                    }
+                    Some(("partyleave", _)) => {
+                        self.send(ro_net::Command::Party(ro_net::PartyRequest::Leave));
+                        None
+                    }
+                    Some(("agencyjoin", name)) => {
+                        if let Some(ad) = self.agency.find(name) {
+                            self.send(ro_net::Command::Party(ro_net::PartyRequest::AgencyJoin { char_id: ad.gid, account_id: ad.aid }));
+                        }
+                        None
+                    }
                     Some(("saleadd", spec)) => {
                         let v: Vec<u32> = spec.split(':').filter_map(|s| s.parse().ok()).collect();
                         if let [item, amount, hours] = v[..] {
@@ -6033,6 +6091,23 @@ impl App {
                     self.queued_commands.push(ro_net::Command::ChatRoom(req));
                 }
                 let my_level = self.hud.status.base_level.clamp(1, 999) as u16;
+                if std::mem::take(&mut self.social.open_agency) {
+                    self.agency.toggle();
+                }
+                for line in self.agency.poll() {
+                    self.hud.push_chat(ro_net::ChatKind::System, line);
+                }
+                let leader = self.social.party.as_ref().map(|p| p.members.iter().any(|m| m.leader && m.char_id == self.char_id));
+                let agency_me = agency::Me { char_id: self.char_id, name: &me, level: my_level, leader };
+                for a in self.agency.show(ui.ctx(), &agency_me) {
+                    match a {
+                        agency::AgencyAction::Join { char_id, account_id } => {
+                            self.queued_commands.push(ro_net::Command::Party(ro_net::PartyRequest::AgencyJoin { char_id, account_id }));
+                        }
+                        agency::AgencyAction::Whisper(name) => self.hud.set_input(format!("/w \"{name}\" ")),
+                        agency::AgencyAction::Notice(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
+                    }
+                }
                 let job_name = |j: u16| jobs::title(j as i16).to_string();
                 for a in self.booking.show(ui.ctx(), my_level, &job_name) {
                     match a {
@@ -6689,6 +6764,8 @@ fn main() -> anyhow::Result<()> {
         grade: Default::default(),
         rooms: Default::default(),
         booking: Default::default(),
+        agency: Default::default(),
+        web_url: web_url(cfg.web_addr.as_deref(), &cfg.login_addr),
         ignore_pending: None,
         companion_action: None,
         follow_at: std::time::Instant::now(),

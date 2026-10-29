@@ -26,3 +26,5 @@ rodio = { version = "0.23.0", default-features = false, features = ["playback", 
 encoding_rs = "0.8"
 gilrs = "0.11.2"
 mlua = { version = "0.12.2", features = ["lua51", "vendored"] }
+serde_json = "1"
+ureq = { version = "3", default-features = false }

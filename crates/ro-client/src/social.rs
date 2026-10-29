@@ -50,6 +50,8 @@ pub enum Prompt {
     Party { party: u32, name: String },
     Friend { account_id: u32, char_id: u32, name: String },
     Guild { guild: u32, name: String },
+    /// An Adventurer's Agency join request to our party.
+    Agency(ro_net::AgencyAsk),
 }
 
 #[derive(Default)]
@@ -65,6 +67,8 @@ pub struct Social {
     pub prompts: Vec<Prompt>,
     pub show_party: bool,
     pub show_friends: bool,
+    /// The party window's Recruit button was pressed (opens the Adventurer's Agency).
+    pub open_agency: bool,
     party_name: String,
     invite_name: String,
     friend_name: String,
@@ -105,6 +109,7 @@ impl Social {
             Prompt::Party { party, .. } => Command::Party(PartyRequest::Answer { party, accept: true }),
             Prompt::Friend { account_id, char_id, .. } => Command::Friend(FriendRequest::Answer { account_id, char_id, accept: true }),
             Prompt::Guild { guild, .. } => Command::Guild(ro_net::GuildRequest::Answer { guild, accept: true }),
+            Prompt::Agency(a) => Command::Party(PartyRequest::AgencyAnswer { char_id: a.char_id, account_id: a.account_id, accept: true }),
         })
     }
 
@@ -127,6 +132,10 @@ impl Social {
                 Prompt::Party { name, .. } => format!("You are invited to the party \"{name}\"."),
                 Prompt::Friend { name, .. } => format!("{name} wants to be your friend."),
                 Prompt::Guild { name, .. } => format!("You are invited to the guild \"{name}\"."),
+                Prompt::Agency(a) => {
+                    let asked = crate::msgstr::get(3378, &[&a.name]).unwrap_or_else(|| format!("[{}] has requested to join the party.", a.name));
+                    format!("{asked}\nLv {} {}", a.level, crate::jobs::title(a.job as i16))
+                }
             };
             crate::classic::show(ctx, egui::Window::new("Request").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_TOP, Vec2::new(0.0, 120.0)), "Request", false, |ui| {
                 ui.label(text);
@@ -142,6 +151,7 @@ impl Social {
                                 Command::Friend(FriendRequest::Answer { account_id: *account_id, char_id: *char_id, accept: yes })
                             }
                             Prompt::Guild { guild, .. } => Command::Guild(ro_net::GuildRequest::Answer { guild: *guild, accept: yes }),
+                            Prompt::Agency(a) => Command::Party(PartyRequest::AgencyAnswer { char_id: a.char_id, account_id: a.account_id, accept: yes }),
                         });
                     }
                 });
@@ -454,6 +464,11 @@ impl Social {
                         out.push(Command::Party(PartyRequest::Leave));
                     }
                 }
+            }
+            let recruit = crate::msgstr::get(1763, &[]).unwrap_or_else(|| "Recruit".into());
+            let tip = crate::msgstr::get(1764, &[]).unwrap_or_else(|| "Open party recruitment window.".into());
+            if ui.button(recruit).on_hover_text(tip).clicked() {
+                self.open_agency = true;
             }
             if let Some(g) = &self.guild {
                 ui.separator();

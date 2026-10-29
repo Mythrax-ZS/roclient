@@ -288,6 +288,35 @@ pub fn parse_party_invite(data: &[u8]) -> (u32, String) {
     (id, get_fixed_str(&mut b, 24))
 }
 
+/// An Adventurer's Agency join request, as the ad's leader sees it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgencyAsk {
+    pub char_id: u32,
+    pub account_id: u32,
+    pub name: String,
+    pub level: u16,
+    pub job: u16,
+}
+
+/// ZC_PARTY_REQ_MASTER_TO_JOIN (0x0ae7). rAthena sends the requester's base level and job
+/// in the fields named x and y.
+pub fn parse_agency_ask(data: &[u8]) -> Option<AgencyAsk> {
+    let mut b = data.get(2..38)?;
+    let char_id = b.get_u32_le();
+    let account_id = b.get_u32_le();
+    let name = get_fixed_str(&mut b, 24);
+    Some(AgencyAsk { char_id, account_id, name, level: b.get_u16_le(), job: b.get_u16_le() })
+}
+
+/// ZC_PARTY_JOIN_REQ_ACK_FROM_MASTER (0x0afa): (leader name, party name, refused).
+pub fn parse_agency_result(data: &[u8]) -> Option<(String, String, bool)> {
+    let mut b = data.get(2..58)?;
+    let leader = get_fixed_str(&mut b, 24);
+    let party = get_fixed_str(&mut b, 24);
+    b.advance(4);
+    Some((leader, party, b.get_u32_le() != 0))
+}
+
 /// ZC_NOTIFY_CHAT_PARTY (0x0109) / ZC_GUILD_CHAT (0x017f): message text ("Name : text").
 pub fn parse_party_chat(data: &[u8]) -> String {
     text_from(data, 8)
@@ -315,6 +344,10 @@ pub enum PartyRequest {
     Chat { speaker: String, text: String },
     GuildChat { speaker: String, text: String },
     ClanChat { speaker: String, text: String },
+    /// CZ_PARTY_REQ_MASTER_TO_JOIN: ask an Adventurer's Agency ad's leader to let us in.
+    AgencyJoin { char_id: u32, account_id: u32 },
+    /// CZ_PARTY_REQ_ACK_MASTER_TO_JOIN: the leader's answer to a join request.
+    AgencyAnswer { char_id: u32, account_id: u32, accept: bool },
 }
 
 impl Encode for PartyRequest {
@@ -339,6 +372,17 @@ impl Encode for PartyRequest {
             PartyRequest::Chat { speaker, text } => put_var(d, 0x0108, &euc(&format!("{speaker} : {text}"))),
             PartyRequest::GuildChat { speaker, text } => put_var(d, 0x017e, &euc(&format!("{speaker} : {text}"))),
             PartyRequest::ClanChat { speaker, text } => put_var(d, 0x098d, &euc(&format!("{speaker} : {text}"))),
+            PartyRequest::AgencyJoin { char_id, account_id } => {
+                d.put_u16_le(0x0ae6);
+                d.put_u32_le(*char_id);
+                d.put_u32_le(*account_id);
+            }
+            PartyRequest::AgencyAnswer { char_id, account_id, accept } => {
+                d.put_u16_le(0x0af8);
+                d.put_u32_le(*char_id);
+                d.put_u32_le(*account_id);
+                d.put_u8(*accept as u8);
+            }
         }
     }
 }
