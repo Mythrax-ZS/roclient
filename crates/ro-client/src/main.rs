@@ -217,6 +217,8 @@ struct LoadedMap {
     /// Light sources (torches, lamps) in world space.
     lights: Vec<ro_render::PointLight>,
     water: Option<(ro_render::WaterMesh, Vec<Option<ro_render::Rgba>>)>,
+    /// Ambient effect emitters (EF_* id, world position): torches, bubbles, fireflies.
+    effects: Vec<(i32, glam::Vec3, f32)>,
 }
 
 fn load_map(vfs: &ro_vfs::Vfs, name: &str) -> anyhow::Result<LoadedMap> {
@@ -301,7 +303,8 @@ fn load_map(vfs: &ro_vfs::Vfs, name: &str) -> anyhow::Result<LoadedMap> {
             range: l.range,
         })
         .collect();
-    Ok(LoadedMap { mesh, images, water, lighting: ro_render::Lighting::from_rsw(&rsw.light), lights })
+    let effects = rsw.effects.iter().map(|e| (e.id, glam::Vec3::new(e.pos[0] + gnd.width as f32 * gnd.zoom / 2.0, -e.pos[1], e.pos[2] + gnd.height as f32 * gnd.zoom / 2.0), e.delay)).collect();
+    Ok(LoadedMap { mesh, images, water, lighting: ro_render::Lighting::from_rsw(&rsw.light), lights, effects })
 }
 
 fn default_ui_scale() -> f32 {
@@ -829,6 +832,8 @@ struct App {
     /// Casts in progress: caster -> (elapsed ms, total ms).
     casts: std::collections::HashMap<u32, (f32, f32)>,
     fx: fx::FxLib,
+    /// The current map's ambient effect emitters (RSW torches, bubbles, fireflies).
+    map_fx: Vec<fx::MapEmitter>,
     /// Sprite effects playing once: (actor, ms left).
     sprite_fx: Vec<(ro_render::Actor, f32)>,
     /// When each unit last showed an area burst (one per cast, not per monster hit).
@@ -1016,6 +1021,9 @@ impl App {
                 if let Some((mesh, images)) = map.water {
                     r.set_water(&mesh, images);
                 }
+                // Ambient map effects play from the frame loop.
+                self.map_fx = map.effects.into_iter().enumerate().map(|(i, (id, pos, delay))| fx::MapEmitter::new(id, pos, delay, i)).collect();
+                tracing::info!(emitters = self.map_fx.len(), drawn = self.map_fx.iter().filter(|e| e.visual.is_some()).count(), first = ?self.map_fx.first().map(|e| (e.pos, e.every_ms)), "map effects");
                 let gat = vfs
                     .read(&format!("data\\{name}.gat"))
                     .ok()
@@ -5020,6 +5028,49 @@ impl App {
                 }
                 r.actors.push(a);
             }
+            // Ambient map effects (RSW emitters, EF_* ids): torches loop in place; bubbles and
+            // fireflies fire again on each emitter's own timer while the player is near.
+            if let (Some(vfs), Some(p)) = (self.vfs.as_ref(), self.player.as_ref()) {
+                let me = p.actor.pos;
+                for e in &mut self.map_fx {
+                    let near = e.pos.distance(me) < fx::MAP_FX_RANGE * ro_render::CELL;
+                    match e.visual {
+                        Some(fx::MapVisual::Sprite(name)) => {
+                            e.clock_ms += dt;
+                            if let (true, Some(body)) = (w.shows_cell((e.pos.x / ro_render::CELL) as i32, (e.pos.z / ro_render::CELL) as i32), self.fx.sprite(r, vfs, name)) {
+                                r.actors.push(ro_render::Actor { pos: e.pos, body, head: None, headgear: vec![], weapon: vec![], shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: e.clock_ms, once: false, alpha: 1.0 });
+                            }
+                        }
+                        Some(visual) => {
+                            e.clock_ms -= dt;
+                            if e.clock_ms > 0.0 {
+                                continue;
+                            }
+                            e.clock_ms = e.every_ms;
+                            if !near {
+                                continue;
+                            }
+                            e.fired += 1;
+                            match visual {
+                                fx::MapVisual::Str(names) => {
+                                    if let Some(asset) = self.fx.get(r, vfs, names[(e.fired as usize * 7) % names.len()]) {
+                                        r.effects.push(ro_render::Fx { asset, pos: e.pos, time_ms: 0.0, looping: false, tag: 0 });
+                                    }
+                                }
+                                _ => {
+                                    if let Some(tex) = self.fx.texture(r, vfs, "pok1.bmp") {
+                                        let a = e.fired as f32 * 2.399;
+                                        let drift = glam::Vec3::new(a.cos(), 0.25, a.sin()) * ro_render::CELL * 0.8;
+                                        let shape = ro_render::Shape::Motes { drift, size: 1.6 };
+                                        r.procs.push(ro_render::ProcFx { tex, shape, pos: e.pos, color: [0.85, 0.95, 0.8], time_ms: 0.0, duration_ms: e.every_ms.clamp(1500.0, 4000.0) });
+                                    }
+                                }
+                            }
+                        }
+                        None => {}
+                    }
+                }
+            }
             if let (Some(name), true, Some(vfs), Some(p)) = (self.fx_test.filter(|n| !n.starts_with("skill:")), r.effects.is_empty(), self.vfs.as_ref(), self.player.as_ref()) {
                 if let Some(asset) = self.fx.get(r, vfs, name) {
                     r.effects.push(ro_render::Fx { asset, pos: p.actor.pos, time_ms: 0.0, looping: false, tag: 0 });
@@ -5984,6 +6035,7 @@ fn main() -> anyhow::Result<()> {
         hotkey_row: 0,
         casts: Default::default(),
         fx: Default::default(),
+        map_fx: vec![],
         sprite_fx: vec![],
         burst_at: Default::default(),
         emotes: Default::default(),

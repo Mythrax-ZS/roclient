@@ -75,6 +75,9 @@ pub enum Shape {
     /// A camera-facing crescent (effect\purpleslash.tga) flying along `travel`, its curved
     /// edge leading, growing from `size.0` to `size.1` cells (Soul Breaker, Meteor Assault).
     Slash { travel: Vec3, size: (f32, f32) },
+    /// A camera-facing patch of motes (effect\pok1.bmp) drifting along `drift` and slowly
+    /// turning, `size` cells across (map fireflies).
+    Motes { drift: Vec3, size: f32 },
 }
 
 /// A playing code-drawn effect.
@@ -166,6 +169,20 @@ impl ProcFx {
                 let side = lead.cross(fwd);
                 let s = CELL * (size.0 + (size.1 - size.0) * t);
                 let (a, b) = (-lead * s, side * s);
+                let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color };
+                let (p0, p1, p2, p3) = (v(centre - a - b, 0.0, 1.0), v(centre + a - b, 1.0, 1.0), v(centre + a + b, 1.0, 0.0), v(centre - a + b, 0.0, 0.0));
+                out.extend([p0, p1, p2, p0, p2, p3]);
+            }
+            Shape::Motes { drift, size } => {
+                let secs = self.time_ms / 1000.0;
+                let wobble = Vec3::new((secs * 1.3).sin(), (secs * 0.9).sin() * 0.5, (secs * 1.1).cos()) * CELL * 0.3;
+                let centre = self.pos + drift * t + wobble;
+                let fwd = (centre - eye).normalize_or_zero();
+                let right = fwd.cross(Vec3::Y).normalize_or_zero();
+                let up = right.cross(fwd);
+                let (s, c) = (secs * 0.4).sin_cos();
+                let half = CELL * size * 0.5;
+                let (a, b) = ((right * c + up * s) * half, (up * c - right * s) * half);
                 let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color };
                 let (p0, p1, p2, p3) = (v(centre - a - b, 0.0, 1.0), v(centre + a - b, 1.0, 1.0), v(centre + a + b, 1.0, 0.0), v(centre - a + b, 0.0, 0.0));
                 out.extend([p0, p1, p2, p0, p2, p3]);

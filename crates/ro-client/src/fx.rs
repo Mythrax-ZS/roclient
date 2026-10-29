@@ -128,6 +128,49 @@ pub fn misc_effect(effect: u32) -> Option<&'static str> {
     }
 }
 
+/// How an RSW ambient effect (its id is an EF_* id) looks.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MapVisual {
+    /// One of these STRs, chosen at random, fired once per emit.
+    Str(&'static [&'static str]),
+    /// A sprite effect looping in place for as long as the map is loaded.
+    Sprite(&'static str),
+    /// Code-drawn drifting motes (fireflies).
+    Motes,
+}
+
+pub fn map_effect(id: i32) -> Option<MapVisual> {
+    Some(match id {
+        45 => MapVisual::Motes,
+        47 => MapVisual::Sprite("torch_01"),
+        109 => MapVisual::Str(&["bubble1", "bubble2", "bubble3", "bubble4"]),
+        _ => return None,
+    })
+}
+
+/// Emitters re-fire only while the player is this close (cells), as the original client.
+pub const MAP_FX_RANGE: f32 = 25.0;
+
+/// An RSW effect emitter on the current map.
+pub struct MapEmitter {
+    pub visual: Option<MapVisual>,
+    pub pos: glam::Vec3,
+    /// Milliseconds between emits (the RSW value × 10).
+    pub every_ms: f32,
+    /// Countdown to the next emit; sprites use it as their animation clock.
+    pub clock_ms: f32,
+    /// Emits so far (varies which STR plays).
+    pub fired: u32,
+}
+
+impl MapEmitter {
+    /// `index` staggers emitters so a field of them doesn't fire in step.
+    pub fn new(id: i32, pos: glam::Vec3, delay: f32, index: usize) -> Self {
+        let every_ms = (delay * 10.0).max(200.0);
+        Self { visual: map_effect(id), pos, every_ms, clock_ms: (index as f32 * 397.0) % every_ms, fired: index as u32 }
+    }
+}
+
 #[derive(Default)]
 pub struct FxLib {
     cache: HashMap<String, Option<ro_render::FxId>>,
