@@ -117,32 +117,66 @@ fn caustic(pos: vec2<f32>, t: f32) -> f32 {
     return clamp(pow(abs(c), 8.0), 0.0, 3.0);
 }
 
-// Marine snow: three depth layers of motes drifting down and sideways (screen space).
-fn marine_snow(uv: vec2<f32>, t: f32, aspect: f32) -> f32 {
+fn noise2(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let a = hash2(i).x;
+    let b = hash2(i + vec2(1.0, 0.0)).x;
+    let c = hash2(i + vec2(0.0, 1.0)).x;
+    let d = hash2(i + vec2(1.0, 1.0)).x;
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// Direction light travels down through the water (slanted, like a low sun above the waves).
+const SHAFT_DIR: vec3<f32> = vec3<f32>(0.32, -1.0, 0.18);
+
+// Light shafts in the world: where the surface above focuses light, a slanted column of
+// brighter water runs down along SHAFT_DIR. A point is lit by the patch it traces back to
+// (its projection along the light onto the y = 0 plane). The patches drift and swell, so
+// shafts sway, brighten and fade over time; being in the world they hold still as the
+// camera moves.
+fn shaft_density(pos: vec3<f32>, t: f32) -> f32 {
+    let q = pos.xz - SHAFT_DIR.xz / SHAFT_DIR.y * pos.y;
+    let a = noise2(q / 38.0 + vec2(t * 0.020, t * 0.013));
+    let b = noise2(q / 17.0 - vec2(t * 0.031, -t * 0.017));
+    let pulse = noise2(q / 90.0 + vec2(t * 0.05, 0.0));
+    return smoothstep(0.66, 0.86, a * 0.65 + b * 0.35) * (0.3 + 1.1 * pulse * pulse);
+}
+
+// In-scattered shaft light along the view ray: march back from the visible surface
+// toward the eye through the lowest stretch of water.
+fn shafts(eye: vec3<f32>, dir: vec3<f32>, dist: f32, t: f32) -> f32 {
+    let span = min(dist, 160.0);
+    let steps = 16;
+    var sum = 0.0;
+    for (var i = 0; i < steps; i++) {
+        let s = eye + dir * (dist - span * (f32(i) + 0.5) / f32(steps));
+        sum += shaft_density(s, t);
+    }
+    return sum / f32(steps);
+}
+
+// Marine snow: motes fixed in the water and sinking slowly. Three shells at different
+// distances along the view ray each look up a world grid, so motes keep their place (and
+// parallax) as the camera moves.
+fn marine_snow(eye: vec3<f32>, dir: vec3<f32>, dist: f32, t: f32) -> f32 {
     var s = 0.0;
     for (var l = 0; l < 3; l++) {
         let fl = f32(l);
-        let scale = 11.0 + fl * 9.0;
-        let drift = vec2(sin(t * 0.13 + fl * 1.7) * 0.03 + t * 0.004, t * (0.010 + 0.006 * fl));
-        let g = (uv * vec2(aspect, 1.0) - drift) * scale;
-        let cell = floor(g);
-        let f = fract(g);
+        let pos = eye + dir * dist * (0.52 + 0.15 * fl);
+        let cell_size = 6.0 + fl * 2.0;
+        // Sinking: the pattern slides down (y), and drifts with a slow current.
+        let w = vec2(pos.x + t * 0.6, pos.z + (pos.y + t * 1.4) * 0.7) / cell_size;
+        let cell = floor(w);
+        let f = fract(w);
         let h = hash2(cell + fl * 37.0);
-        let wob = vec2(sin(t * (0.7 + h.x) + h.y * 6.28), cos(t * (0.5 + h.y) + h.x * 6.28)) * 0.12;
+        let wob = vec2(sin(t * (0.6 + h.x) + h.y * 6.28), cos(t * (0.45 + h.y) + h.x * 6.28)) * 0.1;
         let d = length(f - (h * 0.7 + 0.15 + wob));
-        let size = (0.025 + 0.035 * h.x) * (1.0 + fl * 0.3);
-        // Only some cells hold a mote; nearer layers (larger) are brighter and softer.
-        s += smoothstep(size, size * 0.2, d) * step(0.6, h.y) * (0.35 + 0.25 * fl);
+        let size = (0.05 + 0.05 * h.x) / (1.0 + fl * 0.4);
+        s += smoothstep(size, size * 0.2, d) * step(0.55, h.y) * (0.6 - 0.15 * fl);
     }
     return s;
-}
-
-// Slanted shafts of light from the surface above, swaying slowly, brightest at the top.
-fn shafts(uv: vec2<f32>, t: f32) -> f32 {
-    let x = uv.x + uv.y * 0.35;
-    let a = pow(0.5 + 0.5 * sin(x * 21.0 + t * 0.35 + sin(x * 6.0 - t * 0.21) * 2.0), 8.0);
-    let b = pow(0.5 + 0.5 * sin(x * 37.0 - t * 0.27 + sin(x * 11.0 + t * 0.17) * 1.5), 10.0);
-    return (a * 0.7 + b * 0.5) * pow(1.0 - uv.y, 1.6);
 }
 
 @fragment
@@ -159,12 +193,15 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
     // Ambient occlusion darkens the world (not sprites, which carry their own shading).
     let ao = textureSample(ao_tex, samp, uv).r;
     var sharp = textureSample(src, samp, uv).rgb * mix(1.0, ao, 1.0 - inf.y);
+    // The view ray through this pixel (underwater effects live in the world).
+    let ndc = vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.5, 1.0);
+    let far = p.inv_vp * ndc;
+    let dir = normalize(far.xyz / far.w - p.eye.xyz);
+    // The void around rooms has no real distance: treat it as a little past the player.
+    let ray_len = select(depth, p.depth.x * 1.6, depth > 50000.0);
     if uw > 0.0 && depth < 50000.0 && inf.y < 0.5 {
         // Caustics dance over the floor and walls (not sprites): rebuild the world point
         // from the linear depth and light it by a pattern fixed to the world.
-        let ndc = vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.5, 1.0);
-        let far = p.inv_vp * ndc;
-        let dir = normalize(far.xyz / far.w - p.eye.xyz);
         let world = p.eye.xyz + dir * depth;
         let k = caustic(world.xz / 9.0, secs * 0.55) * 0.8 + caustic(world.xz / 5.3 + vec2(1.7, 3.1), secs * 0.4) * 0.35;
         sharp += (sharp * 2.2 + vec3(0.025, 0.06, 0.065)) * vec3(0.6, 1.0, 1.0) * k * uw;
@@ -192,8 +229,8 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
         let deep = vec3(0.008, 0.045, 0.065);
         c = c * transmit + deep * (1.0 - transmit);
         let light = vec3(0.30, 0.62, 0.70);
-        c += light * shafts(in.uv, secs) * 0.22 * uw;
-        c += vec3(0.55, 0.75, 0.8) * marine_snow(in.uv, secs, p.water.z) * 0.18 * uw;
+        c += light * shafts(p.eye.xyz, dir, ray_len, secs) * 0.35 * uw;
+        c += vec3(0.55, 0.75, 0.8) * marine_snow(p.eye.xyz, dir, ray_len, secs) * 0.16 * uw;
     }
 
     c *= p.grade.x;
