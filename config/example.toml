@@ -10,6 +10,9 @@ login_addr = "127.0.0.1:6900"
 username = "test"
 password = "test"
 char_slot = 0
+# PIN code for auto_login / scripted runs when the server has pincode_enabled (the login
+# screens show a PIN pad instead).
+# pincode = "2580"
 # vulkan | dx12 | gl | metal | auto
 backend = "vulkan"
 # --headless: seconds to stay on the map after entering

@@ -7,7 +7,7 @@ use crate::uitex::UiSize;
 use std::collections::HashMap;
 
 use egui::{Align2, Color32, RichText, Vec2};
-use ro_net::{CharInfo, CharRequest, Command};
+use ro_net::{CharInfo, CharRequest, Command, PinRequest};
 
 use crate::preview;
 
@@ -17,6 +17,74 @@ const HAIR_COLORS: std::ops::RangeInclusive<u16> = 0..=8;
 /// Doram have fewer hair styles.
 const DORAM_HAIR: u16 = 10;
 const SLOTS_PER_PAGE: u8 = 3;
+
+/// The PIN code prompt, answered with the mouse on a shuffled keypad as in the original.
+struct PinPad {
+    /// What the server asked (HC_SECOND_PASSWD_LOGIN): 1 enter, 2/4 make, 3 change.
+    state: u16,
+    /// Codes already typed in this prompt: make [new]; change [old] then [old, new].
+    entries: Vec<String>,
+    typed: String,
+    keys: [u8; 10],
+    note: Option<String>,
+}
+
+impl PinPad {
+    fn new(state: u16, note: Option<String>) -> Self {
+        let mut keys: [u8; 10] = std::array::from_fn(|i| i as u8);
+        let mut s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.subsec_nanos() as u64 | 1);
+        for i in (1..keys.len()).rev() {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            keys.swap(i, (s % (i as u64 + 1)) as usize);
+        }
+        Self { state, entries: vec![], typed: String::new(), keys, note }
+    }
+
+    fn prompt(&self) -> &'static str {
+        match (self.state, self.entries.len()) {
+            (1, _) => "Enter your PIN code.",
+            (3, 0) => "Your PIN code has expired. Enter your current PIN code.",
+            (3, 1) | (2 | 4, 0) => "Choose a new 4-digit PIN code.",
+            _ => "Enter the new PIN code again.",
+        }
+    }
+
+    /// OK with four digits typed: the request to send, once the prompt has all it needs.
+    fn submit(&mut self) -> Option<PinRequest> {
+        let typed = std::mem::take(&mut self.typed);
+        self.note = None;
+        let confirming = |entries: &Vec<String>, at: usize| entries.get(at).cloned();
+        match self.state {
+            1 => Some(PinRequest::Check(typed)),
+            3 if self.entries.len() < 2 => {
+                self.entries.push(typed);
+                None
+            }
+            3 => match confirming(&self.entries, 1) {
+                Some(new) if new == typed => Some(PinRequest::Change { old: self.entries[0].clone(), new }),
+                _ => {
+                    self.entries.truncate(1);
+                    self.note = Some("The PIN codes did not match.".into());
+                    None
+                }
+            },
+            _ if self.entries.is_empty() => {
+                self.entries.push(typed);
+                None
+            }
+            _ => match confirming(&self.entries, 0) {
+                Some(new) if new == typed => Some(PinRequest::Make(new)),
+                _ => {
+                    self.entries.clear();
+                    self.note = Some("The PIN codes did not match.".into());
+                    None
+                }
+            },
+        }
+    }
+}
 
 pub enum Screen {
     Login,
@@ -52,6 +120,8 @@ pub struct Front {
     moving: Option<u8>,
     /// Characters the server blocks, and when they can play again.
     blocked: HashMap<u32, String>,
+    /// The character server wants the account's PIN code before anything else.
+    pin: Option<PinPad>,
     // Character creation.
     name: String,
     male: bool,
@@ -104,6 +174,7 @@ impl Front {
             renaming: None,
             moving: None,
             blocked: HashMap::new(),
+            pin: None,
             name: String::new(),
             male: true,
             hair: 1,
@@ -310,6 +381,18 @@ impl Front {
                 self.message = Some(if *ok { ("The character has been moved.".into(), false) } else { ("The character could not be moved there.".into(), true) });
             }
             CharsBlocked(list) => self.blocked = list.iter().cloned().collect(),
+            Pin(state) => {
+                self.busy = false;
+                let mode = self.pin.as_ref().map(|p| p.state);
+                self.pin = match (*state, mode) {
+                    (0, _) => None,
+                    (s @ 1..=4, _) => Some(PinPad::new(s, None)),
+                    // Wrong or not allowed: ask again the way we were asking.
+                    (8, m) => Some(PinPad::new(m.unwrap_or(1), Some("The PIN code is incorrect.".into()))),
+                    (5, m) => Some(PinPad::new(m.unwrap_or(4), Some("That PIN code cannot be used: avoid repeated or sequential digits.".into()))),
+                    (s, m) => Some(PinPad::new(m.unwrap_or(1), Some(format!("The PIN code was refused ({s}).")))),
+                };
+            }
             CharDeleteCanceled { char_id, result } => {
                 self.busy = false;
                 if *result == 1 {
@@ -460,6 +543,7 @@ impl Front {
                     }
                 });
             }
+            Screen::Select if self.pin.is_some() => action = self.pin_pad(ctx),
             Screen::Select => action = self.select(ctx, c),
             Screen::Create { slot } => {
                 let slot = *slot;
@@ -671,6 +755,59 @@ impl Front {
             }
         });
         action
+    }
+
+    /// The PIN code window, shown over character select until the server lets us through.
+    fn pin_pad(&mut self, ctx: &egui::Context) -> Option<Action> {
+        let mut action = None;
+        let busy = self.busy;
+        let Some(pad) = self.pin.as_mut() else { return None };
+        let mut send = None;
+        crate::classic::show(ctx, egui::Window::new("PIN Code").collapsible(false).resizable(false).anchor(Align2::CENTER_CENTER, Vec2::ZERO), "PIN Code", false, |ui| {
+            ui.label(pad.prompt());
+            let dots: String = (0..4).map(|i| if i < pad.typed.len() { "* " } else { "_ " }).collect();
+            ui.label(RichText::new(dots).size(22.0).color(Color32::from_rgb(170, 210, 255)));
+            if let Some(note) = &pad.note {
+                ui.label(RichText::new(note).color(Color32::from_rgb(235, 120, 100)));
+            }
+            let key = |ui: &mut egui::Ui, text: &str| ui.add_enabled(!busy, egui::Button::new(RichText::new(text).size(18.0)).min_size(Vec2::new(56.0, 40.0))).clicked();
+            egui::Grid::new("pin keys").num_columns(3).spacing([6.0, 6.0]).show(ui, |ui| {
+                for row in 0..3 {
+                    for col in 0..3 {
+                        let d = pad.keys[row * 3 + col];
+                        if key(ui, &d.to_string()) && pad.typed.len() < 4 {
+                            pad.typed.push(char::from(b'0' + d));
+                        }
+                    }
+                    ui.end_row();
+                }
+                if key(ui, "Clear") {
+                    pad.typed.clear();
+                }
+                let d = pad.keys[9];
+                if key(ui, &d.to_string()) && pad.typed.len() < 4 {
+                    pad.typed.push(char::from(b'0' + d));
+                }
+                if key(ui, "OK") && pad.typed.len() == 4 {
+                    send = pad.submit();
+                }
+                ui.end_row();
+            });
+            ui.add_space(4.0);
+            if ui.button("Logout").clicked() {
+                action = Some(Action::Logout);
+            }
+        });
+        if let Some(req) = send {
+            self.busy = true;
+            action = Some(Action::Send(Command::Pin(req)));
+        }
+        action
+    }
+
+    /// The PIN code is still wanted (scripted runs wait before picking a character).
+    pub fn pin_pending(&self) -> bool {
+        self.pin.is_some()
     }
 
     fn start_create(&mut self, slot: u8) {

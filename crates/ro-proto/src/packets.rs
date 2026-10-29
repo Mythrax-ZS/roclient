@@ -71,6 +71,56 @@ impl Encode for ChCharlistReq {
     }
 }
 
+/// A PIN code answer to HC_SECOND_PASSWD_LOGIN's prompt.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PinRequest {
+    /// CH_SECOND_PASSWD_ACK (0x08b8): the PIN, when asked for it.
+    Check(String),
+    /// CH_MAKE_SECOND_PASSWD (0x08ba): the first PIN of the account.
+    Make(String),
+    /// CH_EDIT_SECOND_PASSWD (0x08be): replace the PIN.
+    Change { old: String, new: String },
+}
+
+/// A [`PinRequest`] scrambled with the seed of the latest prompt.
+pub struct PinPacket<'a> {
+    pub account_id: u32,
+    pub seed: u32,
+    pub req: &'a PinRequest,
+}
+
+/// The digits the server turns back into `pin`: it maps each digit d it gets to tab[d], with
+/// tab a permutation of 0-9 shuffled from the seed (char_pincode_decrypt).
+pub fn pin_scramble(seed: u32, pin: &str) -> [u8; 4] {
+    let mut tab: [u8; 10] = std::array::from_fn(|i| i as u8);
+    let mut s = seed;
+    for i in 1..10u32 {
+        s = 0x881234u32.wrapping_add(s.wrapping_mul(0x3498));
+        tab.swap(i as usize, (s % (i + 1)) as usize);
+    }
+    let mut out = [b'0'; 4];
+    for (o, c) in out.iter_mut().zip(pin.bytes()) {
+        let want = c.wrapping_sub(b'0');
+        *o = b'0' + tab.iter().position(|&t| t == want).unwrap_or(0) as u8;
+    }
+    out
+}
+
+impl Encode for PinPacket<'_> {
+    fn encode(&self, d: &mut BytesMut) {
+        let (op, pins): (u16, Vec<&str>) = match self.req {
+            PinRequest::Check(p) => (0x08b8, vec![p]),
+            PinRequest::Make(p) => (0x08ba, vec![p]),
+            PinRequest::Change { old, new } => (0x08be, vec![old, new]),
+        };
+        d.put_u16_le(op);
+        d.put_u32_le(self.account_id);
+        for p in pins {
+            d.put_slice(&pin_scramble(self.seed, p));
+        }
+    }
+}
+
 pub struct ChSelectChar {
     pub slot: u8,
 }
@@ -1156,5 +1206,35 @@ impl Encode for CaptchaRequest {
                 d.put_u32_le(*aid);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod pin_tests {
+    use super::*;
+
+    /// rAthena's char_pincode_decrypt.
+    fn decrypt(mut seed: u32, sent: [u8; 4]) -> String {
+        let mut tab: [u8; 10] = std::array::from_fn(|i| i as u8);
+        for i in 1..10u32 {
+            seed = 0x881234u32.wrapping_add(seed.wrapping_mul(0x3498));
+            let pos = (seed % (i + 1)) as usize;
+            if i as usize != pos {
+                tab.swap(i as usize, pos);
+            }
+        }
+        sent.iter().map(|&c| char::from(b'0' + tab[(c - b'0') as usize])).collect()
+    }
+
+    #[test]
+    fn pin_survives_the_servers_decrypt() {
+        for seed in [0, 1, 12345, 0xfffe, 40000] {
+            for pin in ["2580", "0000", "9137"] {
+                assert_eq!(decrypt(seed, pin_scramble(seed, pin)), pin);
+            }
+        }
+        let mut d = BytesMut::new();
+        PinPacket { account_id: 7, seed: 0, req: &PinRequest::Change { old: "1111".into(), new: "2580".into() } }.encode(&mut d);
+        assert_eq!((d.len(), &d[..2]), (14, &[0xbe, 0x08][..]));
     }
 }

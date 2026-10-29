@@ -11,7 +11,7 @@ use ro_proto::{id, packets::*, Frame, RoCodec, ServerTable};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-pub use ro_proto::packets::{sp, Act, AdoptRequest, MacroReport, CharInfo, CharRequest, ChatKind, Look, RouletteRequest, CaptchaRequest, NpcDialog, NpcReply, UnitInfo, UnitPos};
+pub use ro_proto::packets::{sp, Act, AdoptRequest, MacroReport, CharInfo, CharRequest, PinRequest, ChatKind, Look, RouletteRequest, CaptchaRequest, NpcDialog, NpcReply, UnitInfo, UnitPos};
 pub use ro_proto::items::{SwitchRequest, Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
 pub use ro_proto::guild::{RelationRequest, GuildInfo, GuildMember, GuildRequest, GuildSkill, Position, StorageLogEntry};
@@ -84,6 +84,14 @@ pub struct CharSession {
     account_id: u32,
     /// HC_BLOCK_CHARACTER at login: (char id, when it can play again).
     pub blocked: Vec<(u32, String)>,
+    /// The latest HC_SECOND_PASSWD_LOGIN: (seed for scrambling the PIN, state; 0 = passed).
+    pub pin: (u32, u16),
+}
+
+/// HC_SECOND_PASSWD_LOGIN (0x08b9): (seed, state).
+fn parse_pin_state(data: &[u8]) -> (u32, u16) {
+    let seed = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
+    (seed, u16::from_le_bytes([data[10], data[11]]))
 }
 
 pub async fn enter_char(server: &CharServerInfo, auth: &AcceptLogin) -> anyhow::Result<CharSession> {
@@ -101,6 +109,7 @@ pub async fn enter_char(server: &CharServerInfo, auth: &AcceptLogin) -> anyhow::
     let mut characters = Vec::new();
     let mut slots = 9;
     let mut blocked = vec![];
+    let mut pin = (0, 0);
     loop {
         match next(&mut conn).await? {
             Frame::Raw(_) => {}
@@ -120,21 +129,43 @@ pub async fn enter_char(server: &CharServerInfo, auth: &AcceptLogin) -> anyhow::
                     break;
                 }
             }
-            Frame::Packet { opcode: id::HC_SECOND_PASSWD_LOGIN, data } => {
-                let state = u16::from_le_bytes(data[10..12].try_into()?);
-                if state != 0 {
-                    bail!("pincode required (state {state}); set pincode_enabled: no in char_athena.conf for now");
-                }
-            }
+            Frame::Packet { opcode: id::HC_SECOND_PASSWD_LOGIN, data } => pin = parse_pin_state(&data),
             f => ignored("char", &f),
         }
     }
     characters.sort_by_key(|c| c.slot);
     characters.dedup_by_key(|c| c.char_id);
-    Ok(CharSession { conn, characters, slots, account_id: auth.account_id, blocked })
+    Ok(CharSession { conn, characters, slots, account_id: auth.account_id, blocked, pin })
 }
 
 impl CharSession {
+    /// Answers a PIN code prompt with `pin` (scripted runs): enters it, sets it as the first
+    /// PIN, or re-enters it when it has expired, until the server lets us through.
+    pub async fn unlock(&mut self, pin: &str) -> anyhow::Result<()> {
+        while self.pin.1 != 0 {
+            let req = match self.pin.1 {
+                1 => PinRequest::Check(pin.into()),
+                2 | 4 => PinRequest::Make(pin.into()),
+                3 => PinRequest::Change { old: pin.into(), new: pin.into() },
+                s => bail!("PIN code refused (state {s})"),
+            };
+            if pin.len() != 4 {
+                bail!("this account needs a PIN code: set pincode = \"1234\" in the config");
+            }
+            self.conn.send(PinPacket { account_id: self.account_id, seed: self.pin.0, req: &req }).await?;
+            loop {
+                match next(&mut self.conn).await? {
+                    Frame::Packet { opcode: id::HC_SECOND_PASSWD_LOGIN, data } => {
+                        self.pin = parse_pin_state(&data);
+                        break;
+                    }
+                    f => ignored("pin", &f),
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn select(mut self, slot: u8) -> anyhow::Result<ZoneServer> {
         self.conn.send(ChSelectChar { slot }).await?;
         loop {
@@ -734,6 +765,9 @@ pub enum Event {
     CharMoved { ok: bool, moves: u16 },
     /// HC_BLOCK_CHARACTER: (char id, "YYYY-MM-DD HH:MM:SS" it can play again).
     CharsBlocked(Vec<(u32, String)>),
+    /// HC_SECOND_PASSWD_LOGIN: the PIN code state (0 passed, 1 enter it, 2/4 make one,
+    /// 3 change it, 5 not allowed, 8 wrong).
+    Pin(u16),
     /// Back at character select after Esc > Character Select (Characters follows).
     LeftGame,
     Disconnected(String),
@@ -826,6 +860,8 @@ pub enum Command {
     SelectServer(usize),
     /// Character select screen: create / delete / cancel deletion.
     Char(CharRequest),
+    /// Answer the character server's PIN code prompt.
+    Pin(PinRequest),
     SelectChar(u8),
 }
 
@@ -838,6 +874,8 @@ pub struct SessionConfig {
     /// Log straight in with these credentials and slot (headless and scripted runs).
     /// Otherwise the session waits for Login / SelectChar commands from the UI.
     pub auto: bool,
+    /// The account's PIN code, for `auto` runs on servers with pincode_enabled.
+    pub pincode: String,
 }
 
 /// Runs login -> char select -> map on its own thread and runtime. Events arrive on the
@@ -864,7 +902,8 @@ pub fn spawn_session(cfg: SessionConfig) -> (tokio::sync::mpsc::UnboundedSender<
                         // Scripted / headless runs: straight in with the configured account and slot.
                         let auth = login(&cfg.login_addr, &cfg.username, &cfg.password).await?;
                         let server = auth.servers.first().context("no char servers offered")?.clone();
-                        let chars = enter_char(&server, &auth).await?;
+                        let mut chars = enter_char(&server, &auth).await?;
+                        chars.unlock(&cfg.pincode).await?;
                         let character = chars
                             .characters
                             .iter()
@@ -998,7 +1037,7 @@ impl MapSession {
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
                     // Login and character-select screen commands mean nothing once in game.
-                    Some(Command::Login { .. } | Command::SelectServer(_) | Command::Char(_) | Command::SelectChar(_)) => {}
+                    Some(Command::Login { .. } | Command::SelectServer(_) | Command::Char(_) | Command::Pin(_) | Command::SelectChar(_)) => {}
                     Some(Command::Npc { npc, reply }) => self.send(CzNpc { npc, reply: &reply }).await?,
                     Some(Command::Item(r)) => self.send(r).await?,
                     Some(Command::Shop(r)) => self.send(r).await?,
@@ -1786,6 +1825,10 @@ async fn front_end(
                 continue 'login;
             }
         };
+        // The PIN prompt first, so the screens know it is wanted when the list arrives.
+        if chars.pin.1 != 0 {
+            let _ = events.send(Event::Pin(chars.pin.1));
+        }
         let _ = events.send(Event::Characters { chars: chars.characters.clone(), slots: chars.slots });
         if !chars.blocked.is_empty() {
             let _ = events.send(Event::CharsBlocked(chars.blocked.clone()));
@@ -1803,6 +1846,7 @@ async fn front_end(
                         chars.conn.send(CharRequest::CheckName { account_id: chars.account_id, char_id, name }).await?
                     }
                     Some(Command::Char(req)) => chars.conn.send(req).await?,
+                    Some(Command::Pin(req)) => chars.conn.send(PinPacket { account_id: chars.account_id, seed: chars.pin.0, req: &req }).await?,
                     Some(Command::SelectChar(slot)) => {
                         let Some(character) = chars.characters.iter().find(|c| c.slot == slot).cloned() else { continue };
                         let zone = chars.select(slot).await?;
@@ -1845,6 +1889,10 @@ async fn front_end(
                     }
                     Frame::Packet { opcode: id::HC_BLOCK_CHARACTER, data } => {
                         let _ = events.send(Event::CharsBlocked(parse_blocked_chars(&data)));
+                    }
+                    Frame::Packet { opcode: id::HC_SECOND_PASSWD_LOGIN, data } => {
+                        chars.pin = parse_pin_state(&data);
+                        let _ = events.send(Event::Pin(chars.pin.1));
                     }
                     Frame::Packet { opcode: id::HC_ACCEPT_ENTER, data } => relist = Some(parse_hc_accept_enter(&data)),
                     Frame::Packet { opcode: id::HC_CHARLIST_NOTIFY, .. } => {

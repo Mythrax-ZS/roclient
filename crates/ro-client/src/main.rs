@@ -80,6 +80,9 @@ struct Config {
     login_addr: String,
     username: String,
     password: String,
+    /// PIN code for auto-login on servers with pincode_enabled (4 digits).
+    #[serde(default)]
+    pincode: String,
     #[serde(default)]
     char_slot: u8,
     #[serde(default = "default_backend")]
@@ -1055,6 +1058,8 @@ struct App {
     talk_to: Option<String>,
     /// --front-rename / --front-move: the character they act on, once the list arrives.
     front_hook: Option<u32>,
+    /// --front-start: the slot to play once the PIN code (if any) is through.
+    front_start: Option<u8>,
     /// Script minimap marks (viewpoint): (npc, mark id) -> (cell, colour, blinking until).
     viewpoints: std::collections::HashMap<(u32, u8), ((f32, f32), egui::Color32, Option<std::time::Instant>)>,
     /// Party and guild members elsewhere on the map: id -> (cell, guild?).
@@ -1457,7 +1462,23 @@ impl App {
             if front.event(&event) {
                 if let (Characters { chars, .. }, true) = (&event, std::env::args().any(|a| a == "--front-start")) {
                     if let Some(c) = chars.first() {
-                        self.queued_commands.push(ro_net::Command::SelectChar(c.slot));
+                        self.front_start = Some(c.slot);
+                    }
+                }
+                // --front-pin 1234 answers PIN prompts (entering, making or renewing it).
+                let pin_arg = std::env::args().skip_while(|a| a != "--front-pin").nth(1);
+                if let (Pin(state @ 1..=4), Some(pin)) = (&event, pin_arg) {
+                    let req = match state {
+                        1 => ro_net::PinRequest::Check(pin),
+                        3 => ro_net::PinRequest::Change { old: pin.clone(), new: pin },
+                        _ => ro_net::PinRequest::Make(pin),
+                    };
+                    self.queued_commands.push(ro_net::Command::Pin(req));
+                }
+                // --front-start waits for the PIN code to be accepted.
+                if !front.pin_pending() {
+                    if let Some(slot) = self.front_start.take() {
+                        self.queued_commands.push(ro_net::Command::SelectChar(slot));
                     }
                 }
                 if let (Characters { chars, .. }, true) = (&event, std::env::args().any(|a| a == "--front-make")) {
@@ -3590,7 +3611,7 @@ impl App {
                 }
             }
             // Login and character-select replies (handled by the screens above).
-            LoginFailed(_) | Servers(_) | Characters { .. } | CharCreated(_) | CharCreateFailed(_) | CharDeleteStarted { .. } | CharDeleted { .. } | CharDeleteCanceled { .. } | CharNameOk(_) | CharRenamed(_) | CharMoved { .. } | CharsBlocked(_) => {}
+            LoginFailed(_) | Servers(_) | Characters { .. } | CharCreated(_) | CharCreateFailed(_) | CharDeleteStarted { .. } | CharDeleted { .. } | CharDeleteCanceled { .. } | CharNameOk(_) | CharRenamed(_) | CharMoved { .. } | CharsBlocked(_) | Pin(_) => {}
             Disconnected(reason) => {
                 tracing::error!("disconnected: {reason}");
                 self.status = Some(format!("disconnected: {reason}"));
@@ -6835,7 +6856,7 @@ fn main() -> anyhow::Result<()> {
     // account; otherwise the login and character screens drive the session.
     const SCRIPTED: [&str; 10] = ["--capture", "--do", "--say", "--attack", "--talk", "--walk", "--windows", "--deal", "--accept", "--auto-trade"];
     // `--front` keeps the screens for captures; `--front-login` also submits the configured login.
-    let front_test = args.iter().any(|a| matches!(a.as_str(), "--front" | "--front-login" | "--front-create" | "--front-make" | "--front-start" | "--front-rename" | "--front-move"));
+    let front_test = args.iter().any(|a| matches!(a.as_str(), "--front" | "--front-login" | "--front-create" | "--front-make" | "--front-start" | "--front-rename" | "--front-move" | "--front-pin"));
     let auto = !front_test && (cfg.auto_login || args.iter().any(|a| SCRIPTED.contains(&a.as_str())));
     let (cfg_user, cfg_pass) = (cfg.username.clone(), cfg.password.clone());
     let session = ro_net::SessionConfig {
@@ -6843,6 +6864,7 @@ fn main() -> anyhow::Result<()> {
         username: cfg.username.clone(),
         password: cfg.password.clone(),
         char_slot: cfg.char_slot,
+        pincode: cfg.pincode.clone(),
         auto,
     };
     let online = !args.iter().any(|a| a == "--offline") && vfs.is_some();
@@ -7006,6 +7028,7 @@ fn main() -> anyhow::Result<()> {
         script: arg("--do").map(|s| s.split(",").map(str::to_string).collect()).unwrap_or_default(),
         talk_to: arg("--talk"),
         front_hook: None,
+        front_start: None,
         viewpoints: Default::default(),
         member_pos: Default::default(),
         spirits: Default::default(),
@@ -7056,7 +7079,7 @@ fn main() -> anyhow::Result<()> {
     app.guild.client_dir = app.client_dir.clone();
     app.hat_files = app.vfs.as_ref().map(fx::hat_effects).unwrap_or_default();
     app.ui_scale = app.settings.ui_scale;
-    if args.iter().any(|a| matches!(a.as_str(), "--front-login" | "--front-create" | "--front-make" | "--front-start" | "--front-rename" | "--front-move")) {
+    if args.iter().any(|a| matches!(a.as_str(), "--front-login" | "--front-create" | "--front-make" | "--front-start" | "--front-rename" | "--front-move" | "--front-pin")) {
         app.queued_commands.push(ro_net::Command::Login { user: cfg_user.clone(), pass: cfg_pass.clone() });
     }
     app.cursor_sprite = app.vfs.as_ref().and_then(|v| hud::CursorSprite::load(&app.egui_ctx, v));
