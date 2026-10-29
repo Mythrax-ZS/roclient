@@ -399,7 +399,9 @@ pub enum Event {
     /// ZC_CHANGE_DIRECTION: a unit turned (head direction, body direction).
     Turned { id: u32, dir: u8 },
     /// ZC_SPIRITS: spirit spheres (or coins, servants...) around a unit.
-    Spirits { id: u32, count: u16 },
+    /// Orbs circling a unit. `kind`: 0 spirit spheres, 1 soul energy, 2 Millennium Shields,
+    /// 10 + element for Kagerou/Oboro charms (1 water, 2 earth, 3 fire, 4 wind).
+    Spirits { id: u32, count: u16, kind: u8 },
     /// ZC_ADD_SKILL / ZC_SKILLINFO_UPDATE2: a skill added or changed (script `skill`, item bonuses).
     SkillAdded(Skill),
     /// ZC_SKILLINFO_DELETE.
@@ -902,7 +904,10 @@ impl MapSession {
                         0x019e => Some(Event::StartCapture),
                         0x01a0 if data.len() >= 3 => Some(Event::Captured(data[2] != 0)),
                         0x009c if data.len() >= 9 => Some(Event::Turned { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), dir: ro_proto::packets::server_dir(data[8]) }),
-                        0x01d0 if data.len() >= 8 => Some(Event::Spirits { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), count: u16::from_le_bytes([data[6], data[7]]) }),
+                        0x01d0 | 0x01e1 if data.len() >= 8 => Some(Event::Spirits { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), count: u16::from_le_bytes([data[6], data[7]]), kind: 0 }),
+                        0x0b73 if data.len() >= 8 => Some(Event::Spirits { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), count: u16::from_le_bytes([data[6], data[7]]), kind: 1 }),
+                        0x0440 if data.len() >= 8 => Some(Event::Spirits { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), count: i16::from_le_bytes([data[6], data[7]]).max(0) as u16, kind: 2 }),
+                        0x08cf if data.len() >= 10 => Some(Event::Spirits { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), count: i16::from_le_bytes([data[8], data[9]]).max(0) as u16, kind: 10 + data[6] }),
                         0x0111 if data.len() >= 39 => parse_skill_list(&[&[0u8; 4][..], &data[2..]].concat()).into_iter().next().map(Event::SkillAdded),
                         0x07e1 if data.len() >= 15 => {
                             let mut b = &data[2..];

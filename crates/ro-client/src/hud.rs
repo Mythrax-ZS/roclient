@@ -64,6 +64,8 @@ pub struct Label {
     pub emblem: Option<egui::TextureId>,
     /// Spirit spheres circling the unit.
     pub orbs: u16,
+    /// What they are (see `ro_net::Event::Spirits`); sets the colour.
+    pub orb_kind: u8,
 }
 
 #[derive(Default)]
@@ -205,8 +207,17 @@ impl Hud {
                 for k in 0..l.orbs.min(15) {
                     let a = t * 1.6 + k as f32 * std::f32::consts::TAU / l.orbs.min(15) as f32;
                     let p = centre + Vec2::new(a.cos() * 26.0, a.sin() * 9.0);
-                    painter.circle_filled(p, 7.0, Color32::from_rgba_unmultiplied(255, 160, 30, 90));
-                    painter.circle(p, 4.0, Color32::from_rgb(255, 215, 80), egui::Stroke::new(1.0, Color32::from_rgb(140, 70, 0)));
+                    let (glow, core) = match l.orb_kind {
+                        1 => ((170, 80, 255), (215, 170, 255)),
+                        2 => ((80, 200, 255), (200, 240, 255)),
+                        11 => ((40, 110, 255), (140, 190, 255)),
+                        12 => ((150, 100, 40), (210, 170, 100)),
+                        13 => ((255, 60, 30), (255, 150, 90)),
+                        14 => ((60, 220, 90), (160, 255, 170)),
+                        _ => ((255, 160, 30), (255, 215, 80)),
+                    };
+                    painter.circle_filled(p, 7.0, Color32::from_rgba_unmultiplied(glow.0, glow.1, glow.2, 90));
+                    painter.circle(p, 4.0, Color32::from_rgb(core.0, core.1, core.2), egui::Stroke::new(1.0, Color32::from_rgb(glow.0 / 2, glow.1 / 2, glow.2 / 2)));
                 }
                 ctx.request_repaint();
             }

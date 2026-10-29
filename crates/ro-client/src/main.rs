@@ -926,7 +926,7 @@ struct App {
     /// Party and guild members elsewhere on the map: id -> (cell, guild?).
     member_pos: std::collections::HashMap<u32, ((f32, f32), bool)>,
     /// Spirit spheres per unit (ZC_SPIRITS).
-    spirits: std::collections::HashMap<u32, u16>,
+    spirits: std::collections::HashMap<u32, (u16, u8)>,
     /// Our normal attack reach (ZC_ATTACK_RANGE).
     attack_range: i32,
     /// A taming item is waiting for a monster to be clicked.
@@ -2603,11 +2603,11 @@ impl App {
                     }
                 }
             }
-            Spirits { id, count } => {
+            Spirits { id, count, kind } => {
                 if count == 0 {
                     self.spirits.remove(&id);
                 } else {
-                    self.spirits.insert(id, count);
+                    self.spirits.insert(id, (count, kind));
                 }
             }
             SkillAdded(mut s) => {
@@ -4835,8 +4835,8 @@ impl App {
                     }
                 }
                 let emblem = (m.guild != 0).then(|| self.emblems.get(&m.guild).cloned().flatten()).flatten().map(|t| t.id());
-                let orbs = self.spirits.get(&uid).copied().unwrap_or(0);
-                labels.push(hud::Label { feet, text, color, emblem, orbs });
+                let (orbs, orb_kind) = self.spirits.get(&uid).copied().unwrap_or((0, 0));
+                labels.push(hud::Label { feet, text, color, emblem, orbs, orb_kind });
             }
         }
         let floaters: Vec<_> = self.floaters.iter().filter_map(|(pos, text, color, age)| Some((r.project(*pos, size)?, text.clone(), *color, *age))).collect();

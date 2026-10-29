@@ -35,7 +35,8 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_ATTACK_RANGE, ZC_OVERWEIGHT_PERCENT, ZC_MAPPROPERTY_R2 (PvP/GvG: click enemy players to attack, Shift when the map requires it)
 - [x] ZC_CARTOFF
 - [x] ZC_SPIRITS (spheres circling the unit)
-- [ ] ZC_SPIRITS2 / SPIRITS_ATTRIBUTE / SOULENERGY / TARGET_SPIRITS, ZC_MILLENNIUMSHIELD
+- [x] ZC_SPIRITS2 / SPIRITS_ATTRIBUTE / SOULENERGY, ZC_MILLENNIUMSHIELD (orbs coloured by kind)
+- [ ] ZC_TARGET_SPIRITS
 - [ ] ZC_COMBODELAY, ZC_BLADESTOP, ZC_DISPEL, ZC_HIGHJUMP, ZC_NOTIFY_SKILL_POSITION
 - [ ] ZC_NOTIFY_BIND_ON_EQUIP, ZC_CHANGE_ITEM_OPTION, ZC_UPDATE_CARDSLOT
 - [x] ZC_ACK_TAKEOFF_EQUIP_ALL ("Take off all" button per equipment tab), ZC_MOVE_ITEM_FAILED
