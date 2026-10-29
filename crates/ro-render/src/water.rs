@@ -782,13 +782,13 @@ impl Water {
         self.waders = wet.iter().map(|(p, walking, depth)| [p.x, p.z, *depth, if *walking { 1.0 } else { 0.0 }]).collect();
         for (p, walking, _) in wet {
             let near = |radius: f32, age: f32| self.ripples.iter().any(|r| now - r[2] < age && glam::Vec2::new(r[0] - p.x, r[1] - p.z).length() < radius);
-            if if walking { near(3.5, RIPPLE_LIFE) } else { near(1.0, 1.4) } {
+            if if walking { near(2.8, RIPPLE_LIFE) } else { near(1.0, 1.1) } {
                 continue;
             }
             if self.ripples.len() >= MAX_RIPPLES {
                 self.ripples.remove(0);
             }
-            self.ripples.push([p.x, p.z, now, if walking { 1.0 } else { 0.45 }]);
+            self.ripples.push([p.x, p.z, now, if walking { 1.0 } else { 0.6 }]);
         }
     }
 

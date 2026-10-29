@@ -270,33 +270,41 @@ fn disturb(p: vec2<f32>, t: f32) -> vec3<f32> {
         }
         let d = p - r.xy;
         let dist = length(d);
-        let width = 0.6 + age * 0.7;
-        let x = (dist - (0.8 + age * 5.5)) / width;
-        if abs(x) > 3.0 {
-            continue;
-        }
         let life = 1.0 - age / RIPPLE_LIFE;
         let env = r.w * life * life;
-        let bell = exp(-x * x);
-        // d/dr of sin(2.4x)·exp(-x²): the ring's slope, pointing away from its centre.
-        let dh = (2.4 * cos(2.4 * x) - 2.0 * x * sin(2.4 * x)) * bell / width;
-        slope += d / max(dist, 1e-3) * dh * env * 0.45;
-        foam += env * exp(-x * x * 2.0) * (1.0 - smoothstep(0.0, 0.9, age)) * 0.6;
+        // The splash itself: a burst of churned water at the centre for the first moments.
+        let burst = 1.0 - smoothstep(0.0, 0.45, age);
+        foam += r.w * burst * (1.0 - smoothstep(0.5 + age * 6.0, 1.2 + age * 7.0, dist)) * 1.3;
+        let width = 0.7 + age * 0.8;
+        let x = (dist - (1.0 + age * 6.5)) / width;
+        if abs(x) > 4.5 {
+            continue;
+        }
+        let bell = exp(-x * x * 0.5);
+        // A wave train of crests behind the leading one (sin(2.4x)·bell); d/dr is the ring's
+        // slope, pointing away from its centre.
+        let dh = (2.4 * cos(2.4 * x) - x * sin(2.4 * x)) * bell / width;
+        slope += d / max(dist, 1e-3) * dh * env * 1.1;
+        // Foam rides the leading crest and breaks up as the ring spreads.
+        let lead = exp(-pow((x - 0.6) * 1.6, 2.0));
+        foam += env * lead * (1.0 - smoothstep(0.3, 1.6, age)) * 1.1;
     }
     for (var i = 0u; i < min(w.flags.w, 16u); i++) {
         let a = w.waders[i];
         let d = p - a.xy;
         let dist = length(d);
-        if dist > 6.0 {
+        if dist > 7.0 {
             continue;
         }
         let ang = atan2(d.y, d.x);
-        let edge = 2.7 + 0.25 * sin(ang * 5.0 + t * 2.3) + 0.14 * sin(ang * 3.0 - t * 3.1);
-        let x = (dist - edge) / (0.5 + 0.3 * a.w);
+        let edge = 3.4 + 0.3 * sin(ang * 5.0 + t * 2.3) + 0.14 * sin(ang * 3.0 - t * 3.1);
+        let x = (dist - edge) / (0.6 + 0.5 * a.w);
         let shallow = smoothstep(0.3, 1.5, a.z);
-        foam += exp(-x * x) * (0.55 + 0.35 * a.w) * shallow;
-        // The water piles up slightly against the legs.
-        slope += d / max(dist, 1e-3) * -2.0 * x * exp(-x * x) * 0.12 * shallow;
+        foam += exp(-x * x) * (0.8 + 0.5 * a.w) * shallow;
+        // Walking churns the water inside the collar too.
+        foam += a.w * (1.0 - smoothstep(edge * 0.4, edge, dist)) * 0.7 * shallow;
+        // The water piles up against the legs.
+        slope += d / max(dist, 1e-3) * -2.0 * x * exp(-x * x) * (0.25 + 0.2 * a.w) * shallow;
     }
     return vec3(slope, foam);
 }
@@ -483,6 +491,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let foam = clamp(stir.z * (0.45 + 0.75 * stir_pattern), 0.0, 1.0) * w.foam_color.a;
         let lit = w.foam_color.rgb * (g.ambient.rgb + g.diffuse.rgb * max(sun_dir.y, 0.2));
         color = mix(color, lit, foam);
+        // Spray: the brightest flecks of churned water flash above white (bloom catches them).
+        color += lit * pow(stir_pattern, 3.0) * clamp(stir.z - 0.3, 0.0, 1.0) * 1.8;
         alpha = max(alpha, foam);
     }
     return vec4(color, alpha);
