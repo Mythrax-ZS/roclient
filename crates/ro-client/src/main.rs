@@ -2744,7 +2744,10 @@ impl App {
                     self.floaters.push((p.actor.pos, amount.to_string(), color, 0.0));
                 }
             }
-            UserCount(n) => self.hud.push_chat(ro_net::ChatKind::System, format!("There are {n} Players Currently Connected.")),
+            UserCount(n) => {
+                let text = msgstr::get(178, &[&n.to_string()]).unwrap_or_else(|| format!("There are {n} Players Currently Connected."));
+                self.hud.push_chat(ro_net::ChatKind::System, text);
+            }
             PvpRank { id, rank, total } => {
                 if id == self.account_id {
                     // PvP switched off sends 0 of 0: hide the rank.
@@ -4226,8 +4229,96 @@ impl App {
         }
     }
 
+    /// The original client's slash commands for parties, options and help (msgstringtable
+    /// wording). Returns false for anything else.
+    fn client_command(&mut self, text: &str) -> bool {
+        let t = text.trim();
+        let (head, arg) = t.split_once(' ').map_or((t, ""), |(h, a)| (h, a.trim().trim_matches('"')));
+        let say = |id: usize, en: &str| msgstr::get(id, &[]).unwrap_or_else(|| en.to_string());
+        let mut notes = vec![];
+        match head {
+            "/h" | "/help" => notes.extend((33..=46).chain(132..=142).chain([157, 211]).filter_map(|id| msgstr::get(id, &[]))),
+            "/who" | "/w" | "/player" if arg.is_empty() => self.send(ro_net::Command::Who),
+            "/organize" if !arg.is_empty() => self.send(ro_net::Command::Party(ro_net::PartyRequest::Create { name: arg.to_string() })),
+            "/invite" if !arg.is_empty() => self.send(ro_net::Command::Party(ro_net::PartyRequest::Invite { name: arg.to_string() })),
+            "/leave" => self.send(ro_net::Command::Party(ro_net::PartyRequest::Leave)),
+            "/expel" if !arg.is_empty() => {
+                let member = self.social.party.as_ref().and_then(|p| p.members.iter().find(|m| m.name.eq_ignore_ascii_case(arg)));
+                match member.map(|m| (m.account_id, m.name.clone())) {
+                    Some((account_id, name)) => self.send(ro_net::Command::Party(ro_net::PartyRequest::Expel { account_id, name })),
+                    None => notes.push(say(148, "There is no such character name or the user is offline.")),
+                }
+            }
+            "/accept" | "/refuse" => {
+                self.game_opts.deny_invites = head == "/refuse";
+                self.send(ro_net::Command::Option(ro_net::OptionRequest::DenyPartyInvites(head == "/refuse")));
+            }
+            "/call" => {
+                let on = !self.game_opts.call;
+                self.game_opts.call = on;
+                self.send(ro_net::Command::Option(ro_net::OptionRequest::Config { kind: 1, on }));
+                notes.push(if on { say(2978, "You can be called with various skills (Emergency Call,...). (/call)") } else { say(2979, "You cannot be called with various skills (Emergency Call,...). (/call)") });
+            }
+            "/memo" => self.send(ro_net::Command::Memo),
+            "/deal" if !arg.is_empty() => match self.units.iter().find(|(_, u)| u.name.eq_ignore_ascii_case(arg)).map(|(id, _)| *id) {
+                Some(target) => self.send(ro_net::Command::Trade(ro_net::TradeRequest::Ask { target })),
+                None => notes.push(say(148, "There is no such character name or the user is offline.")),
+            },
+            "/chat" => {
+                let me = self.hud.status.name.clone();
+                self.rooms.open_create(&me);
+            }
+            "/q" => self.send(ro_net::Command::ChatRoom(ro_net::ChatRoomRequest::Leave)),
+            "/bgm" | "/music" => {
+                self.settings.bgm_off = !self.settings.bgm_off;
+                notes.push(if self.settings.bgm_off { say(32, "BGM Off") } else { say(31, "BGM On") });
+            }
+            "/sound" => {
+                self.settings.sfx_off = !self.settings.sfx_off;
+                notes.push(if self.settings.sfx_off { say(28, "Sound Effects Off") } else { say(27, "Sound Effects On") });
+            }
+            "/effect" => {
+                self.settings.effects_off = !self.settings.effects_off;
+                notes.push(if self.settings.effects_off { say(24, "Effects Off") } else { say(23, "Effects On") });
+            }
+            "/v" | "/bv" if !arg.is_empty() => {
+                let Ok(v) = arg.parse::<u8>() else { return false };
+                let v = v.min(127) as f32 / 127.0;
+                if head == "/v" {
+                    self.settings.sfx_volume = v;
+                } else {
+                    self.settings.bgm_volume = v;
+                }
+            }
+            _ => return false,
+        }
+        if matches!(head, "/bgm" | "/music" | "/sound" | "/effect" | "/v" | "/bv") {
+            self.apply_sound_and_effects();
+            self.settings.save();
+        }
+        for n in notes {
+            self.hud.push_chat(ro_net::ChatKind::System, n);
+        }
+        true
+    }
+
+    /// Volumes and the effect switch, as the settings and /bgm, /sound, /effect leave them.
+    fn apply_sound_and_effects(&mut self) {
+        let s = &self.settings;
+        if let Some(a) = self.audio.as_mut() {
+            a.set_bgm_volume(if s.bgm_off { 0.0 } else { s.bgm_volume });
+            a.sfx_volume = if s.sfx_off { 0.0 } else { s.sfx_volume };
+        }
+        if let Some(r) = self.renderer.as_mut() {
+            r.show_effects = !s.effects_off;
+        }
+    }
+
     /// Sends a chat line, handling the client's own commands (whispers, emotes, /where...).
     fn submit_chat(&mut self, text: String) {
+        if self.client_command(&text) {
+            return;
+        }
         let Some((tx, _)) = self.net.as_ref() else { return };
             // "/p text" goes to the party, "/g text" to the guild.
             let speaker = self.hud.status.name.clone();
@@ -6152,8 +6243,8 @@ impl App {
                     self.ui_scale = self.settings.ui_scale;
                     uitex::set_upscaler(ro_render::Upscaler::new(self.settings.upscale.clone()));
                     if let Some(a) = self.audio.as_mut() {
-                        a.set_bgm_volume(self.settings.bgm_volume);
-                        a.sfx_volume = self.settings.sfx_volume;
+                        a.set_bgm_volume(if self.settings.bgm_off { 0.0 } else { self.settings.bgm_volume });
+                        a.sfx_volume = if self.settings.sfx_off { 0.0 } else { self.settings.sfx_volume };
                     }
                 }
                 self.books.show(ui.ctx());
@@ -6428,6 +6519,7 @@ impl ApplicationHandler for App {
                     r.camera.distance = d;
                 }
                 self.renderer = Some(r);
+                self.apply_sound_and_effects();
             }
             Err(e) => {
                 tracing::error!("renderer init failed: {e:#}");
@@ -6697,6 +6789,7 @@ fn main() -> anyhow::Result<()> {
             visual: Default::default(),
             last_id: String::new(),
             upscale: Default::default(),
+            ..Default::default()
         }),
         audio: None,
         pending_npc: None,
@@ -6870,6 +6963,7 @@ fn main() -> anyhow::Result<()> {
     // Captures and headless runs stay silent.
     if app.capture.is_none() {
         app.audio = app.vfs.as_ref().and_then(|v| audio::Audio::new(v, app.settings.bgm_volume, app.settings.sfx_volume));
+        app.apply_sound_and_effects();
         // Title theme while the login screens show.
         if let (Some(a), Some(v), true) = (app.audio.as_mut(), app.vfs.as_ref(), app.front.is_some()) {
             a.title(v);

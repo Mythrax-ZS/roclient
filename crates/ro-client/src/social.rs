@@ -439,6 +439,7 @@ impl Social {
                 }
                 Some(p) => {
                     ui.label(RichText::new(&p.name).strong());
+                    let leading = p.members.iter().any(|m| m.leader && m.name == c.my_name);
                     for m in &p.members {
                         ui.horizontal(|ui| {
                             let dead = self.party_dead.contains(&m.account_id);
@@ -447,6 +448,9 @@ impl Social {
                             let tomb = if dead { " (dead)" } else { "" };
                             ui.label(RichText::new(format!("{crown}{} (Lv {}){tomb}", m.name, m.level)).color(crate::classic::ink(color)));
                             ui.label(RichText::new(&m.map).size(11.0).color(crate::classic::ink(Color32::GRAY)));
+                            if leading && m.name != c.my_name && ui.small_button("Expel").clicked() {
+                                out.push(Command::Party(PartyRequest::Expel { account_id: m.account_id, name: m.name.clone() }));
+                            }
                         });
                         if let Some(&(hp, max)) = p.hp.get(&m.account_id) {
                             ui.add(egui::ProgressBar::new(hp as f32 / max.max(1) as f32).desired_height(6.0).fill(Color32::from_rgb(70, 190, 90)));
@@ -475,7 +479,6 @@ impl Social {
                 ui.label(format!("Guild: {g}"));
             }
             ui.label(RichText::new("Chat: /p message for party, /g message for guild").size(11.0).color(crate::classic::ink(Color32::GRAY)));
-            let _ = c;
         });
         self.show_party = open;
     }

@@ -340,6 +340,8 @@ pub enum PartyRequest {
     Invite { name: String },
     Answer { party: u32, accept: bool },
     Leave,
+    /// CZ_REQ_EXPEL_GROUP_MEMBER: the leader removes a member.
+    Expel { account_id: u32, name: String },
     /// Party chat; `speaker` is our name ("Name : text").
     Chat { speaker: String, text: String },
     GuildChat { speaker: String, text: String },
@@ -369,6 +371,11 @@ impl Encode for PartyRequest {
                 d.put_u8(*accept as u8);
             }
             PartyRequest::Leave => d.put_u16_le(0x0100),
+            PartyRequest::Expel { account_id, name } => {
+                d.put_u16_le(0x0103);
+                d.put_u32_le(*account_id);
+                put_fixed_str(d, name, 24);
+            }
             PartyRequest::Chat { speaker, text } => put_var(d, 0x0108, &euc(&format!("{speaker} : {text}"))),
             PartyRequest::GuildChat { speaker, text } => put_var(d, 0x017e, &euc(&format!("{speaker} : {text}"))),
             PartyRequest::ClanChat { speaker, text } => put_var(d, 0x098d, &euc(&format!("{speaker} : {text}"))),

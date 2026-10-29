@@ -194,6 +194,8 @@ pub struct Renderer {
     particles: particle::Particles,
     /// STR effects playing this frame; the client advances and removes them.
     pub effects: Vec<Fx>,
+    /// Draw skill effects (STR and code-drawn); the original's /effect turns them off.
+    pub show_effects: bool,
     effect_pipeline: wgpu::RenderPipeline,
     started: std::time::Instant,
     /// The grid is drawn instead while no map is loaded.
@@ -557,6 +559,7 @@ impl Renderer {
             procs: vec![],
             particles,
             effects: vec![],
+            show_effects: true,
             effect_pipeline,
             started: std::time::Instant::now(),
             lighting: Lighting::default(),
@@ -1176,7 +1179,7 @@ impl Renderer {
                 }
             }
             // Code-drawn skill effects (additive, world space).
-            if !self.procs.is_empty() {
+            if self.show_effects && !self.procs.is_empty() {
                 let mut vertices = vec![];
                 let mut draws = vec![];
                 for p in &self.procs {
@@ -1223,7 +1226,7 @@ impl Renderer {
                 }
             }
             // Skill effects over everything else in the world.
-            if !self.effects.is_empty() {
+            if self.show_effects && !self.effects.is_empty() {
                 let mut vertices = vec![];
                 let mut draws = vec![];
                 for e in &self.effects {

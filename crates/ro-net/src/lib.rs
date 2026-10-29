@@ -781,6 +781,10 @@ pub enum Command {
     ShowEquip(bool),
     /// Our script progress bar filled (CZ_PROGRESS); the script continues.
     ProgressDone,
+    /// /who: how many players are online (CZ_REQ_USER_COUNT).
+    Who,
+    /// /memo: save this spot as a Warp Portal destination (CZ_REMEMBER_WARPPOINT).
+    Memo,
     /// Yes to Feeling's "save this map as your place" (CZ_AGREE_STARPLACE).
     StarPlace(u8),
     Adopt(AdoptRequest),
@@ -956,6 +960,8 @@ impl MapSession {
                     Some(Command::ViewEquip(aid)) => self.send(CzViewEquip(aid)).await?,
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::ProgressDone) => self.send(Bare(0x02f1)).await?,
+                    Some(Command::Who) => self.send(Bare(0x00c1)).await?,
+                    Some(Command::Memo) => self.send(Bare(0x011d)).await?,
                     Some(Command::StarPlace(which)) => self.send(ro_proto::packets::StarPlace(which)).await?,
                     Some(Command::Adopt(r)) => self.send(r).await?,
                     Some(Command::MacroReport(r)) => self.send(r).await?,

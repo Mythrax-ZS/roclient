@@ -23,11 +23,15 @@ pub struct Settings {
     /// Texture upscaling for ground, models, item icons and interface art. Character and
     /// effect sprites are never upscaled (see ro_render::upscale).
     pub upscale: ro_render::UpscaleSettings,
+    /// The original's /bgm, /sound and /effect switches (volumes are kept while off).
+    pub bgm_off: bool,
+    pub sfx_off: bool,
+    pub effects_off: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default() }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false }
     }
 }
 
