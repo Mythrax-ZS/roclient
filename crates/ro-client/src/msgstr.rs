@@ -6,9 +6,23 @@ use std::sync::OnceLock;
 static TABLE: OnceLock<Vec<String>> = OnceLock::new();
 
 pub fn load(vfs: &ro_vfs::Vfs) {
-    let Some(d) = vfs.read(r"data\msgstringtable.txt").ok().flatten() else { return };
-    let (text, _, _) = encoding_rs::EUC_KR.decode(&d);
-    let lines: Vec<String> = text.lines().map(|l| l.strip_suffix('#').unwrap_or(l).to_string()).collect();
+    // Every layer's copy, merged line by line: a translation pack's wording wins, and the
+    // base data fills ids the pack is missing or leaves blank (its table can be shorter).
+    let mut lines: Vec<String> = vec![];
+    for d in vfs.read_all(r"data\msgstringtable.txt").unwrap_or_default() {
+        let (text, _, _) = encoding_rs::EUC_KR.decode(&d);
+        for (i, l) in text.lines().enumerate() {
+            let l = l.strip_suffix('#').unwrap_or(l);
+            match lines.get_mut(i) {
+                Some(have) if have.trim().is_empty() => *have = l.to_string(),
+                Some(_) => {}
+                None => lines.push(l.to_string()),
+            }
+        }
+    }
+    if lines.is_empty() {
+        return;
+    }
     tracing::info!(lines = lines.len(), "message strings");
     let _ = TABLE.set(lines);
 }

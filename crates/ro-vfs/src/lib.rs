@@ -24,28 +24,52 @@ pub struct Vfs {
 }
 
 impl Vfs {
+    /// The highest-priority copy of a file.
     pub fn read(&self, path: &str) -> anyhow::Result<Option<Vec<u8>>> {
+        let mut found = None;
+        self.layers(path, &mut |d| {
+            found = Some(d);
+            false
+        })?;
+        Ok(found)
+    }
+
+    /// Every layer's copy of a file, highest priority first: for tables that are merged
+    /// (a translation pack's text over the base data's newer entries).
+    pub fn read_all(&self, path: &str) -> anyhow::Result<Vec<Vec<u8>>> {
+        let mut all = vec![];
+        self.layers(path, &mut |d| {
+            all.push(d);
+            true
+        })?;
+        Ok(all)
+    }
+
+    /// Feeds each layer's copy to `each` in priority order until it returns false.
+    fn layers(&self, path: &str, each: &mut dyn FnMut(Vec<u8>) -> bool) -> anyhow::Result<()> {
         let rel = path.replace('\\', "/");
         for root in &self.overlays {
             let en = rel.get(..7).filter(|p| p.eq_ignore_ascii_case("System/")).map(|_| root.join(format!("SystemEN/{}", &rel[7..])));
-            for p in en.into_iter().chain(std::iter::once(root.join(&rel))) {
-                if p.is_file() {
-                    return Ok(Some(std::fs::read(p)?));
+            if let Some(p) = en.into_iter().chain(std::iter::once(root.join(&rel))).find(|p| p.is_file()) {
+                if !each(std::fs::read(p)?) {
+                    return Ok(());
                 }
             }
         }
         if let Some(root) = &self.loose {
-            let p = root.join(path.replace('\\', "/"));
-            if p.is_file() {
-                return Ok(Some(std::fs::read(p)?));
+            let p = root.join(&rel);
+            if p.is_file() && !each(std::fs::read(p)?) {
+                return Ok(());
             }
         }
         for g in &self.grfs {
             if let Some(d) = g.read(path)? {
-                return Ok(Some(d));
+                if !each(d) {
+                    return Ok(());
+                }
             }
         }
-        Ok(None)
+        Ok(())
     }
 }
 
