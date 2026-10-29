@@ -2611,7 +2611,8 @@ impl App {
             UserCount(n) => self.hud.push_chat(ro_net::ChatKind::System, format!("There are {n} Players Currently Connected.")),
             PvpRank { id, rank, total } => {
                 if id == self.account_id {
-                    self.pvp_rank = Some((rank, total));
+                    // PvP switched off sends 0 of 0: hide the rank.
+                    self.pvp_rank = (total > 0).then_some((rank, total));
                 }
             }
             PvpInfo { won, lost, points } => {
