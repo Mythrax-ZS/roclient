@@ -8,6 +8,7 @@ mod book;
 mod captcha;
 mod memorial;
 mod roulette;
+mod sale;
 mod sense;
 mod pettalk;
 mod fx;
@@ -976,6 +977,7 @@ struct App {
     books: book::Books,
     memorial: memorial::Memorial,
     roulette: roulette::Roulette,
+    sales: sale::Sales,
     captcha: captcha::Captcha,
     /// The player we asked to trade, until they answer.
     trade_partner: Option<String>,
@@ -2627,6 +2629,17 @@ impl App {
                 };
                 self.hud.push_chat(ro_net::ChatKind::System, text.into());
             }
+            Sale(note) => {
+                let found = matches!(note, ro_net::SaleNote::Found(Some(_)) | ro_net::SaleNote::Selling { .. });
+                let db = self.item_db.as_ref();
+                if let Some(line) = self.sales.apply(note, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(id, true))) {
+                    self.hud.push_chat(ro_net::ChatKind::Broadcast, line);
+                }
+                if found {
+                    let ids: Vec<u32> = self.sales.on_sale.keys().copied().collect();
+                    self.load_icons_for(&ids);
+                }
+            }
             Roulette(note) => {
                 let db = self.item_db.as_ref();
                 self.roulette.apply(note, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(id, true)));
@@ -4088,6 +4101,10 @@ impl App {
                     _ => None,
                 },
             };
+            if text.trim() == "/limitedsale" {
+                let _ = tx.send(ro_net::Command::Sale(self.account_id, ro_net::SaleRequest::Open));
+                return;
+            }
             if text.trim() == "/roulette" {
                 let _ = tx.send(ro_net::Command::Roulette(ro_net::RouletteRequest::Open));
                 let _ = tx.send(ro_net::Command::Roulette(ro_net::RouletteRequest::Info));
@@ -4963,6 +4980,29 @@ impl App {
                         self.toggle_cash_shop();
                         None
                     }
+                    Some(("cashtab", n)) => {
+                        self.stores.cash_tab = n.parse().unwrap_or(0);
+                        None
+                    }
+                    // salefind:name / saleadd:item:amount:hours / saledel:item drive the GM sale tool.
+                    Some(("salefind", name)) => {
+                        self.send(ro_net::Command::Sale(self.account_id, ro_net::SaleRequest::Search(name.to_string())));
+                        None
+                    }
+                    Some(("saleadd", spec)) => {
+                        let v: Vec<u32> = spec.split(':').filter_map(|s| s.parse().ok()).collect();
+                        if let [item, amount, hours] = v[..] {
+                            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as u32;
+                            self.send(ro_net::Command::Sale(self.account_id, ro_net::SaleRequest::Add { item, amount, start: now, hours: hours as u16 }));
+                        }
+                        None
+                    }
+                    Some(("saledel", item)) => {
+                        if let Ok(item) = item.parse() {
+                            self.send(ro_net::Command::Sale(self.account_id, ro_net::SaleRequest::Remove(item)));
+                        }
+                        None
+                    }
                     Some(("cashbuy", id)) => {
                         let id: u32 = id.parse().unwrap_or(0);
                         if let Some(tab) = self.stores.cash_tabs.iter().find(|(_, items)| items.iter().any(|(i, _)| *i == id)).map(|(t, _)| *t) {
@@ -5733,6 +5773,7 @@ impl App {
                 if let Some(req) = self.stores.show_buying(ui.ctx(), &inv, self.item_db.as_ref(), &self.icons, zeny) {
                     self.queued_commands.push(ro_net::Command::BuyingStore(req));
                 }
+                self.stores.sale_badges = self.stores.cash_tabs.get(&8).into_iter().flatten().filter_map(|(id, _)| Some((*id, self.sales.badge(*id)?))).collect();
                 let shown = if self.settings.classic_ui { self.stores.show_cash_classic(ui.ctx(), self.item_db.as_ref(), &self.icons) } else { self.stores.show_cash_modern(ui.ctx(), self.item_db.as_ref(), &self.icons) };
                 if let Some(req) = shown {
                     self.queued_commands.push(ro_net::Command::CashShop(req));
@@ -5883,7 +5924,14 @@ impl App {
                     let _ = tx.send(ro_net::Command::Captcha(ro_net::CaptchaRequest::Answer(a)));
                 }
                 let db = self.item_db.as_ref();
-                if let Some(act) = self.roulette.show(ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(id, true))) {
+                if let Some(req) = self.sales.show_tool(ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(id, true))) {
+                    if let Some((tx, _)) = self.net.as_ref() {
+                        let _ = tx.send(ro_net::Command::Sale(self.account_id, req));
+                    }
+                }
+                let db = self.item_db.as_ref();
+                if let Some(act) = self.roulette.show(
+ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(id, true))) {
                     let r = match act {
                         roulette::Action::Spin => ro_net::RouletteRequest::Spin,
                         roulette::Action::Claim => ro_net::RouletteRequest::Claim,
@@ -6478,6 +6526,7 @@ fn main() -> anyhow::Result<()> {
         books: Default::default(),
         memorial: Default::default(),
         roulette: Default::default(),
+        sales: Default::default(),
         captcha: Default::default(),
         trade_partner: None,
         player_menu: None,

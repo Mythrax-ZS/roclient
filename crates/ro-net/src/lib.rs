@@ -18,7 +18,7 @@ pub use ro_proto::guild::{RelationRequest, GuildInfo, GuildMember, GuildRequest,
 use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
 pub use ro_proto::quests::{Objective, Quest};
-pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, MerchantRequest, VendItem, WantedItem};
+pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, MerchantRequest, SaleNote, SaleRequest, VendItem, WantedItem};
 pub use ro_proto::search::{Found, SearchRequest};
 pub use ro_proto::market::{BarterItem, MarketItem, MarketRequest};
 pub use ro_proto::bg::{apply_error as bg_apply_error, BgEvent, BgRequest, CastleRequest};
@@ -327,6 +327,8 @@ pub enum Event {
     StarSkill { name: String, id: u32, star: u8, result: u8 },
     /// ZC_STARPLACE: Feeling asks to save this map as the place of the sun/moon/stars.
     StarPlaceAsk(u8),
+    /// Bargain sales: items on sale, their stock, and the GM's sale tool.
+    Sale(SaleNote),
     /// ZC_MEMORIALDUNGEON_*: instance creation queue, status and notices.
     Instance(InstanceNote),
     /// ZC_NOTIFY_EXP2 (`@showexp`): experience gained; kind 1 base, 2 job; negative = lost.
@@ -754,6 +756,8 @@ pub enum Command {
     ProgressDone,
     /// Yes to Feeling's "save this map as your place" (CZ_AGREE_STARPLACE).
     StarPlace(u8),
+    /// The bargain sale tool (our account id with each request).
+    Sale(u32, SaleRequest),
     /// Destroy our memorial dungeon (CZ_MEMORIALDUNGEON_COMMAND 3).
     MemorialDestroy,
     Roulette(RouletteRequest),
@@ -908,6 +912,7 @@ impl MapSession {
                     Some(Command::Bank(r)) => self.send(r).await?,
                     Some(Command::BuyingStore(r)) => self.send(r).await?,
                     Some(Command::CashShop(r)) => self.send(r).await?,
+                    Some(Command::Sale(aid, req)) => self.send(ro_proto::merchant::SalePacket { aid, req }).await?,
                     Some(Command::Progress(r)) => self.send(r).await?,
                     Some(Command::Companion(r)) => self.send(r).await?,
                     Some(Command::Mail(r)) => self.send(r).await?,
@@ -1280,6 +1285,7 @@ impl MapSession {
                         0x0af0 => parse_attendance(&data).map(Event::Attendance),
                         0x0b6e => parse_cash_open(&data).map(|(cash, kafra)| Event::CashShop { cash, kafra }),
                         0x08ca => parse_cash_tab(&data).map(|(tab, items)| Event::CashTab { tab, items }),
+                        0x09b2 | 0x09b3 | 0x09c4 | 0x09b5 | 0x09bd | 0x09ad | 0x09af | 0x09b1 => ro_proto::merchant::parse_sale(opcode, &data).map(Event::Sale),
                         0x0849 => parse_cash_result(&data).map(|(result, cash, kafra)| Event::CashResult { result, cash, kafra }),
                         0x0b37 => parse_view_equip(&data).map(|(name, job, items)| Event::ViewEquip { name, job, items }),
                         0x02d9 if data.len() >= 10 && data[2..6] == [0, 0, 0, 0] => Some(Event::ShowEquip(data[6] != 0)),

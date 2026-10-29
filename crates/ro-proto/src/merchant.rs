@@ -329,6 +329,91 @@ pub fn parse_cash_result(data: &[u8]) -> Option<(u16, u32, u32)> {
     Some((b.get_u16_le(), b.get_u32_le(), b.get_u32_le()))
 }
 
+/// The GM's bargain sale tool (/limitedsale): puts Sale-tab cash items on sale for a while,
+/// with a stock. Every request carries our account id.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SaleRequest {
+    Open,
+    Close,
+    /// Look an item up by name.
+    Search(String),
+    /// `start` is a Unix time.
+    Add { item: u32, amount: u32, start: u32, hours: u16 },
+    Remove(u32),
+}
+
+pub struct SalePacket {
+    pub aid: u32,
+    pub req: SaleRequest,
+}
+
+impl Encode for SalePacket {
+    fn encode(&self, d: &mut BytesMut) {
+        match &self.req {
+            SaleRequest::Open | SaleRequest::Close => {
+                d.put_u16_le(if self.req == SaleRequest::Open { 0x09b4 } else { 0x09bc });
+                d.put_u32_le(self.aid);
+            }
+            SaleRequest::Search(name) => {
+                let name = &name.as_bytes()[..name.len().min(49)];
+                d.put_u16_le(0x09ac);
+                d.put_u16_le(9 + name.len() as u16);
+                d.put_u32_le(self.aid);
+                d.put_slice(name);
+                d.put_u8(0);
+            }
+            SaleRequest::Add { item, amount, start, hours } => {
+                d.put_u16_le(0x09ae);
+                d.put_u32_le(self.aid);
+                d.put_u32_le(*item);
+                d.put_u32_le(*amount);
+                d.put_u32_le(*start);
+                d.put_u16_le(*hours);
+            }
+            SaleRequest::Remove(item) => {
+                d.put_u16_le(0x09b0);
+                d.put_u32_le(self.aid);
+                d.put_u32_le(*item);
+            }
+        }
+    }
+}
+
+/// What the server says about bargain sales.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SaleNote {
+    /// ZC_NOTIFY_BARGAIN_SALE_SELLING: an item went on sale for `secs` more seconds.
+    Selling { item: u32, secs: u32 },
+    /// ZC_NOTIFY_BARGAIN_SALE_CLOSE.
+    Closed(u32),
+    /// ZC_ACK_COUNT_BARGAIN_SALE_ITEM: stock left.
+    Stock { item: u32, amount: u32 },
+    /// ZC_OPEN_BARGAIN_SALE_TOOL / ZC_CLOSE_BARGAIN_SALE_TOOL.
+    Tool(bool),
+    /// ZC_ACK_CASH_BARGAIN_SALE_ITEM_INFO: the searched item (None: not in the Sale tab).
+    Found(Option<(u32, u32)>),
+    /// ZC_ACK_APPLY_BARGAIN_SALE_ITEM: 0 ok, 1 failed (not a Sale-tab item, bad time), 2 already on sale.
+    Added(u16),
+    /// ZC_ACK_REMOVE_BARGAIN_SALE_ITEM.
+    Removed(bool),
+}
+
+pub fn parse_sale(opcode: u16, data: &[u8]) -> Option<SaleNote> {
+    let l = |i: usize| data.get(i..i + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let w = |i: usize| data.get(i..i + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+    Some(match opcode {
+        0x09b2 => SaleNote::Selling { item: l(2)?, secs: l(6)? },
+        0x09b3 => SaleNote::Closed(l(2)?),
+        0x09c4 => SaleNote::Stock { item: l(2)?, amount: l(6)? },
+        0x09b5 => SaleNote::Tool(true),
+        0x09bd => SaleNote::Tool(false),
+        0x09ad => SaleNote::Found((w(2)? == 0).then_some((l(4)?, l(8)?))),
+        0x09af => SaleNote::Added(w(2)?),
+        0x09b1 => SaleNote::Removed(w(2)? == 0),
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

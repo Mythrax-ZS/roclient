@@ -35,7 +35,7 @@ pub struct ServerTable;
 /// notices, both `<char id>.L <reason>.40B` at this PACKETVER. Also corrections, which win
 /// over the generated table: ZC_ACK_OPEN_ROULETTE (0x0a1a) is registered as 23 bytes, but the
 /// server sends `sizeof(packet_roulette_open_ack)`, 25 with the 4-byte bonus item id.
-const EXTRA: &[(u16, i32)] = &[(0x0a83, 46), (0x0a82, 46), (0x0ac2, -1), (0x08e2, 27), (0x0a1a, 25)];
+const EXTRA: &[(u16, i32)] = &[(0x0a83, 46), (0x0a82, 46), (0x0ac2, -1), (0x08e2, 27), (0x0a1a, 25), (0x09b5, 2), (0x09bd, 2)];
 
 fn server_map() -> &'static HashMap<u16, PacketLen> {
     static MAP: OnceLock<HashMap<u16, PacketLen>> = OnceLock::new();

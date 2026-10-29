@@ -22,7 +22,7 @@ pub struct Stores {
     pub cash: Option<(u32, u32)>,
     /// Cash shop tabs as the server listed them (sent once per login).
     pub cash_tabs: BTreeMap<u16, Vec<(u32, u32)>>,
-    cash_tab: u16,
+    pub cash_tab: u16,
     /// Cash shop basket: (item id, tab) -> amount.
     basket: BTreeMap<(u32, u16), u32>,
     use_kafra: u32,
@@ -30,6 +30,8 @@ pub struct Stores {
     cash_search: String,
     /// The cash shop window's images by file name.
     cash_art: HashMap<String, egui::TextureHandle>,
+    /// Bargain sale lines for Sale-tab items on sale (time and stock left), set each frame.
+    pub sale_badges: HashMap<u32, String>,
 }
 
 const CASH_TABS: [&str; 9] = ["New", "Hot", "Limited", "Rental", "Permanent", "Scrolls", "Consumables", "Other", "Sale"];
@@ -330,6 +332,9 @@ impl Stores {
                     });
                 }
                 p.text(egui::pos2(x + 158.0, y + 54.0) + o, egui::Align2::RIGHT_CENTER, price.to_string(), font(12.5), Color32::WHITE);
+                if let Some(badge) = self.sale_badges.get(id).filter(|_| self.cash_tab == 8) {
+                    p.text(egui::pos2(x + 86.0, y + 78.0) + o, egui::Align2::CENTER_CENTER, badge, font(11.0), Color32::from_rgb(200, 40, 40));
+                }
                 let room = self.basket.len() < CART_ROWS || self.basket.contains_key(&(*id, self.cash_tab));
                 if button(ui, "btn_add_normal", "btn_add_press", "btn_add_disable", x + 46.0, y + 94.0, "Add to cart", room) {
                     *self.basket.entry((*id, self.cash_tab)).or_insert(0) += 1;
@@ -466,6 +471,9 @@ impl Stores {
                             ui.vertical(|ui| {
                                 ui.label(name(db, *id));
                                 ui.label(gold(format!("{price} points")));
+                                if let Some(badge) = self.sale_badges.get(id).filter(|_| self.cash_tab == 8) {
+                                    ui.label(RichText::new(badge).color(Color32::from_rgb(255, 110, 110)));
+                                }
                             });
                             if ui.small_button("Add").clicked() {
                                 *self.basket.entry((*id, self.cash_tab)).or_insert(0) += 1;
