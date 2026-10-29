@@ -4434,6 +4434,14 @@ impl App {
                         }
                         None
                     }
+                    // cam:yaw_pitch in degrees (test hook for camera angles).
+                    Some(("cam", yp)) => {
+                        if let (Some((y, p)), Some(r)) = (yp.split_once('_').and_then(|(y, p)| Some((y.parse::<f32>().ok()?, p.parse::<f32>().ok()?))), self.renderer.as_mut()) {
+                            r.camera.yaw = y.to_radians();
+                            r.camera.pitch = p.to_radians().clamp(25f32.to_radians(), 75f32.to_radians());
+                        }
+                        None
+                    }
                     Some(("comptab", n)) => {
                         self.companions.select_tab(n.parse().unwrap_or(0));
                         None

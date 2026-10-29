@@ -233,10 +233,19 @@ fn ssr(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
     return vec4(0.0);
 }
 
-// Reserved hook for caustics on the refracted floor (F_CAUSTICS): projected animated
-// pattern scaled by depth; returns 0 until implemented.
+// Caustics on the refracted floor (F_CAUSTICS): two scrolling, rotated layers of the
+// cellular pattern (bright cell borders), multiplied so only where both ridges cross
+// stays bright, giving the shifting light net of sun focused through waves. Fades in
+// over the first unit of depth and out with deep water.
 fn caustics(floor_pos: vec3<f32>, depth: f32) -> f32 {
-    return 0.0;
+    let t = g.params.x;
+    let q = floor_pos.xz;
+    let r = mat2x2<f32>(0.6, 0.8, -0.8, 0.6);
+    let a = textureSampleLevel(detail, wrap, q / 19.0 + vec2(0.031, 0.022) * t, 0.0).a;
+    let b = textureSampleLevel(detail, wrap, r * q / 24.3 - vec2(0.019, -0.027) * t, 0.0).a;
+    let net = pow(a * b, 1.4) * 4.0;
+    let sun_up = smoothstep(0.05, 0.4, -normalize(g.light_dir.xyz).y);
+    return net * smoothstep(0.2, 1.5, depth) * exp(-depth * 0.05) * sun_up;
 }
 
 @fragment
@@ -250,10 +259,21 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Derivatives up front (uniform control flow) for the gradient samples below.
     let tiling = w.normal.y;
+    // Three ripple layers, each rotated and at unrelated scales so their tiling never
+    // lines up (no visible repeat), plus a slow macro field that varies the surface.
+    let rot_b = mat2x2<f32>(0.799, 0.602, -0.602, 0.799); // 37°
+    let rot_c = mat2x2<f32>(0.276, -0.961, 0.961, 0.276); // -74°
     let uv_a = p.xz / tiling + vec2(0.021, 0.013) * t * w.normal.z;
-    let uv_b = p.xz / (tiling * 0.47) + vec2(-0.017, 0.024) * t * w.normal.z;
+    let uv_b = rot_b * p.xz / (tiling * 0.437) + vec2(-0.017, 0.024) * t * w.normal.z;
+    let uv_c = rot_c * p.xz / (tiling * 2.91) + vec2(0.006, -0.009) * t * w.normal.z;
+    let uv_m = p.xz / (tiling * 13.7) + vec2(0.0013, 0.0021) * t;
     let da = mat2x2<f32>(dpdx(uv_a), dpdy(uv_a));
     let db = mat2x2<f32>(dpdx(uv_b), dpdy(uv_b));
+    let dcc = mat2x2<f32>(dpdx(uv_c), dpdy(uv_c));
+    let dm = mat2x2<f32>(dpdx(uv_m), dpdy(uv_m));
+    // 0..1 large patches: calm/choppy areas, tint shifts, where the sun glitters.
+    let macro_raw = textureSampleGrad(detail, wrap, uv_m, dm[0], dm[1]).b;
+    let macro_v = smoothstep(0.2, 0.8, macro_raw);
     let suv = shore_uv(p.xz);
     let ds = mat2x2<f32>(dpdx(suv), dpdy(suv));
     let foam_scale = w.foam.z;
@@ -268,9 +288,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var n = normalize(in.normal);
     if on(F_NORMAL_MAP) {
         let a = filtered(detail, wrap, uv_a, da[0], da[1]).rg * 2.0 - 1.0;
-        let b = filtered(detail, wrap, uv_b, db[0], db[1]).rg * 2.0 - 1.0;
+        // Layer b is rotated: bring its slopes back into world space.
+        let b = transpose(rot_b) * (filtered(detail, wrap, uv_b, db[0], db[1]).rg * 2.0 - 1.0);
+        let c = transpose(rot_c) * (textureSampleGrad(detail, wrap, uv_c, dcc[0], dcc[1]).rg * 2.0 - 1.0);
         let fade = 1.0 / (1.0 + eye_dist / 900.0);
-        let ripple = (a + b * 0.6) * w.normal.x * fade;
+        // Choppy and glassy patches drift across the surface.
+        let chop = mix(0.35, 1.35, macro_v);
+        let ripple = (a * 0.8 + b * 0.55 + c * 0.7) * w.normal.x * fade * chop;
         n = normalize(vec3(n.x + ripple.x, n.y, n.z + ripple.y));
     }
 
@@ -285,7 +309,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         thickness = max(scene_dist(screen_uv) - eye_dist, 0.0);
         // Bend the view by the normal tilt, more where the water is deeper; reject
         // samples that land on things in front of the water.
-        let bend = n.xz * w.optics.x * clamp(thickness / 12.0, 0.0, 1.0);
+        let bend = n.xz * w.optics.x * clamp(thickness / 12.0, 0.3, 1.0);
         let cand = clamp(screen_uv + bend, vec2(0.001), vec2(0.999));
         let cand_thick = scene_dist(cand) - eye_dist;
         if cand_thick > 0.0 {
@@ -303,7 +327,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // In-scattered colour of the water body (lit by sky + sun), optionally tinted by RO's
     // own animated texture.
-    var body = w.scatter.rgb * (ambient + sun * max(sun_dir.y, 0.0) * 0.6);
+    // The water's own colour shifts across the surface: greener in some patches, deeper
+    // blue in others, so a bay is never one flat tint.
+    let tint = mix(vec3(1.25, 0.85, 0.80), vec3(0.75, 1.15, 1.05), macro_v);
+    var body = w.scatter.rgb * tint * (ambient + sun * max(sun_dir.y, 0.0) * 0.6);
     if on(F_CLASSIC) {
         let bent = classic_uv + n.xz * 0.02;
         let classic = srgb_to_linear(filtered(frame_tex, wrap, bent, dc[0], dc[1]).rgb) * (g.ambient.rgb + g.diffuse.rgb * 0.6);
@@ -313,7 +340,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Beer-Lambert: what survives the trip through `depth` world units of water.
     var transmit = vec3(1.0);
     if on(F_ABSORPTION) {
-        transmit = exp(-w.absorb.rgb * depth);
+        // Clarity drifts across the surface: murkier and clearer patches.
+        transmit = exp(-w.absorb.rgb * depth * mix(0.55, 1.9, 1.0 - macro_v));
     } else {
         transmit = vec3(exp(-depth * 0.02));
     }
@@ -326,7 +354,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         if on(F_CAUSTICS) {
             floor_light += below * caustics(p - v * thickness, depth);
         }
-        color = floor_light * transmit + body * (1.0 - transmit);
+        // A little suspended haze even in the shallows, thicker in murky patches.
+        let haze = mix(0.05, 0.22, 1.0 - macro_v) * smoothstep(0.0, 3.0, depth);
+        color = mix(floor_light * transmit + body * (1.0 - transmit), body, haze);
     } else {
         // No scene copy: blend over the ground, more opaque where deeper.
         color = body;
@@ -356,7 +386,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Sun glitter.
     if on(F_SPECULAR) {
         let h = normalize(sun_dir + v);
-        let spec = pow(max(dot(n, h), 0.0), w.optics.w) * w.sun.w * smoothstep(0.0, 0.1, sun_dir.y);
+        // Glitter gathers in the choppy patches and fades out of the glassy ones.
+        let glitter = smoothstep(0.35, 0.9, macro_v);
+        let spec = pow(max(dot(n, h), 0.0), w.optics.w) * w.sun.w * smoothstep(0.0, 0.1, sun_dir.y) * glitter;
         color += sun * spec;
         alpha = max(alpha, clamp(spec, 0.0, 1.0));
     }

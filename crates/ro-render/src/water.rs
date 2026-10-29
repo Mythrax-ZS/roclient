@@ -36,7 +36,7 @@ pub mod flag {
     pub const BICUBIC: u32 = 1 << 7;
     pub const CLASSIC: u32 = 1 << 8;
     pub const SPECULAR: u32 = 1 << 9;
-    /// Reserved: caustics on the refracted ground (see docs/water.md).
+    /// Moving light network on the refracted seabed.
     pub const CAUSTICS: u32 = 1 << 10;
 }
 
@@ -95,6 +95,8 @@ pub struct WaterSettings {
     pub bicubic: bool,
     pub classic_texture: bool,
     pub specular: bool,
+    /// Moving light network on the seabed (needs refraction).
+    pub caustics: bool,
     /// Mesh subdivisions per water tile (1..8) for smoother wave displacement.
     pub tessellation: u32,
     /// Screen-space reflection march steps.
@@ -142,6 +144,7 @@ impl WaterSettings {
             bicubic: true,
             classic_texture: true,
             specular: true,
+            caustics: true,
             tessellation: 4,
             ssr_steps: 24,
             ssr_distance: 160.0,
@@ -173,12 +176,13 @@ impl WaterSettings {
                 foam_enabled: false,
                 bicubic: false,
                 specular: false,
+                caustics: false,
                 classic_texture: true,
                 classic_mix: 1.0,
                 tessellation: 1,
                 ..base
             },
-            WaterQuality::Low => Self { refraction: false, ssr: false, bicubic: false, tessellation: 1, ssr_steps: 0, foam: Foam { crest: 0.0, ..base.foam }, ..base },
+            WaterQuality::Low => Self { refraction: false, caustics: false, ssr: false, bicubic: false, tessellation: 1, ssr_steps: 0, foam: Foam { crest: 0.0, ..base.foam }, ..base },
             WaterQuality::Medium => Self { ssr: false, bicubic: false, tessellation: 2, ..base },
             WaterQuality::High => Self { ssr_steps: 16, tessellation: 3, ..base },
             WaterQuality::Ultra => Self { ssr_steps: 32, ssr_distance: 220.0, tessellation: 6, ..base },
@@ -198,6 +202,7 @@ impl WaterSettings {
             (self.bicubic, flag::BICUBIC),
             (self.classic_texture, flag::CLASSIC),
             (self.specular, flag::SPECULAR),
+            (self.caustics, flag::CAUSTICS),
         ] {
             if on {
                 f |= bit;

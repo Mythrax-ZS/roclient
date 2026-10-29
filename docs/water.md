@@ -68,12 +68,8 @@ instantly. There's one pipeline and no shader permutations.
 | `F_BICUBIC` | Bicubic filtering | 4-tap B-spline (Sigg & Hadwiger) on the detail, shore and classic textures; gradients are passed explicitly so mips still work |
 | `F_CLASSIC` | RO texture | the original animated frame blended into the water body colour |
 | `F_SPECULAR` | Sun glint | Blinn-Phong against the map's sun, gated by sun height |
-| `F_CAUSTICS` | (reserved) | `caustics(floor_pos, depth)` is called on the refracted floor colour; it returns 0 until implemented |
-
-**Adding caustics:** implement `caustics()` as a projected, animated pattern (e.g. two
-scrolling Worley layers from the detail texture's A channel). Scale it by `exp(-σ·depth)` and
-by the sun height, and set `flag::CAUSTICS` in the presets. The refracted floor position and
-depth are already passed in.
+| `F_CAUSTICS` | Caustics | two scrolling, rotated layers of the cellular pattern multiplied into a moving light net on the refracted seabed; fades in over the first unit of depth, out with deep water and a low sun (Medium and up) |
+| (always) | Variation | a slow, large-scale field varies ripple strength (glassy vs choppy patches), the water tint, clarity (murky vs clear patches), haze and where the sun glitters, so a bay never reads as one flat repeat; ripple layers are rotated and at unrelated scales so their tiling never lines up |
 
 ### HLSL / GLSL / SPIR-V
 
