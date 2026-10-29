@@ -884,7 +884,16 @@ impl Renderer {
             }
         }
         // Ease the shadow direction toward this frame's light (about a quarter second).
-        let goal = self.light_cast_dir();
+        let mut goal = self.light_cast_dir();
+        // Keep shadows on the camera's side: one falling away from the viewer starts behind
+        // the body, so its visible part looks detached from the feet. Mirror it toward the
+        // camera (same angle off the view axis, same length).
+        let fwd = glam::Vec2::new(self.camera.target.x - self.camera.eye().x, self.camera.target.z - self.camera.eye().z).normalize_or_zero();
+        let h = glam::Vec2::new(goal.x, goal.z);
+        if h.dot(fwd) > 0.0 {
+            let m = h - fwd * 2.0 * h.dot(fwd);
+            goal = glam::Vec3::new(m.x, goal.y, m.y);
+        }
         self.cast_dir = self.cast_dir.lerp(goal, (dt * 4.0).min(1.0)).try_normalize().unwrap_or(goal);
         // Shadows fade out as the sun sets and back in as it rises (and wraps).
         if let Some(p) = self.day_progress() {

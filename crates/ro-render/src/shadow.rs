@@ -78,7 +78,9 @@ impl Shadow {
                 depth_write_enabled: Some(true),
                 depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: Default::default(),
-                bias: wgpu::DepthBiasState { constant: 2, slope_scale: 2.0, clamp: 0.0 },
+                // No bias: only sprites cast, so the ground can't shadow itself, and any bias
+                // detaches the shadow from the feet.
+                bias: wgpu::DepthBiasState::default(),
             }),
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs_main"), compilation_options: Default::default(), targets: &[] }),

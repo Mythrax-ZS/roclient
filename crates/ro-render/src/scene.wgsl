@@ -104,7 +104,9 @@ fn sprite_shadow(world: vec3<f32>) -> f32 {
     var lit = 0.0;
     for (var y = -2; y <= 2; y++) {
         for (var x = -2; x <= 2; x++) {
-            lit += textureSampleCompareLevel(shadow_map, shadow_samp, uv + vec2(f32(x), f32(y)) * step, ndc.z - 0.0015);
+            // A hair of bias (~0.4 world units over the 4000-unit depth range) so the
+            // shadow meets the feet instead of starting a cell away.
+            lit += textureSampleCompareLevel(shadow_map, shadow_samp, uv + vec2(f32(x), f32(y)) * step, ndc.z - 0.0001);
         }
     }
     lit /= 25.0;
