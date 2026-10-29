@@ -5,7 +5,7 @@
       "item_id": 900001,
       "view": 9001,
       "resource": "samurai_kusanagi",
-      "png": "source/legendary/kusanagi-v2.png",
+      "png": "source/legendary/kusanagi-v3.png",
       "rect": [
         32,
         208,
@@ -23,14 +23,14 @@
       "item_id": 900002,
       "view": 9002,
       "resource": "samurai_muramasa",
-      "png": "source/legendary/muramasa-v2.png",
+      "png": "source/legendary/muramasa-v3.png",
       "rect": [
-        96,
-        200,
+        32,
+        192,
         2144,
-        584
+        576
       ],
-      "downsample": 32,
+      "downsample": 33,
       "source_grip": [
         10,
         5

@@ -59,22 +59,25 @@ were checked against the previous accepted animation; they are unchanged.
 
 ## Kusanagi and Muramasa source revision
 
-The selected legendary weapon sources are `source/legendary/kusanagi-v2.png`
-and `source/legendary/muramasa-v2.png`, with exact built-in image-generation
-instructions in the matching `*-v2.prompt.json` files. They use shorter grips,
-quieter ornament, clearer metal faces and gently curved katana silhouettes.
-Kusanagi has 58 visible pixels of length and a main blade face about 4–5 pixels
-wide; Muramasa has 60 visible pixels of length and a face about 5–6 pixels wide.
-Both use scale 1.0 and the shared corrected attack metadata. The original
-`kusanagi.png`, `muramasa.png` and their prompts remain historical references;
-they are no longer selected runtime inputs.
+The selected legendary weapon sources are `source/legendary/kusanagi-v3.png`
+and `source/legendary/muramasa-v3.png`, with exact built-in image-generation
+instructions in the matching `*-v3.prompt.json` files. They are edits of v2 that
+replace the bowed, scimitar-like blades with almost straight katana blades:
+spine and edge run parallel from the guard, then close in a short angled kissaki.
+Grips, guards, colours and ornament are unchanged from v2. Kusanagi has 58
+visible pixels of length and a main blade face about 4–5 pixels wide; Muramasa
+has 61 visible pixels of length and a face about 4 pixels wide. Muramasa v3 sits
+52 source pixels further left than v2, so its rectangle and a downsample of 33
+keep the grip on the same point of the hilt. Both use scale 1.0 and the shared
+corrected attack metadata. The v2 and unversioned PNGs and prompts remain
+historical references; they are no longer selected runtime inputs.
 
 `legendary_weapons.json` specifies sampling rectangles and grip coordinates.
 `source/legendary/sampling_review.json` records the native-size review. Rebuild
 the weapons, inventory/collection art and floor sprites together:
 
 ```powershell
-py tools/samurai_assets/compile_weapons.py tools/samurai_assets/artwork/build.json tools/samurai_assets/artwork/legendary_weapons.json --output target/legendary-weapons-v2
+py tools/samurai_assets/compile_weapons.py tools/samurai_assets/artwork/build.json tools/samurai_assets/artwork/legendary_weapons.json --output target/legendary-weapons-v3
 ```
 
 The compiler writes a staging overlay and decoded previews under that output

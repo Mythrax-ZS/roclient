@@ -1,0 +1,9 @@
+{
+  "mode": "built-in image_gen",
+  "date": "2026-10-30",
+  "name": "Muramasa flatter katana profile",
+  "reference": "muramasa-v2.png",
+  "prompt": "Use case: precise-object-edit. This is Muramasa, a fantasy game katana sprite. The user says the blade is much too curved. Change ONLY the blade silhouette into an almost STRAIGHT traditional Japanese katana with a SHORT ANGLED kissaki point. Flatten the broad bow completely. From the gold guard to ninety percent of the blade length, the upper spine and lower edge must be almost HORIZONTAL, PARALLEL straight lines with constant width. Allow at most ONE small pixel step of gentle curvature over that entire distance. The last ten percent should be a clean DIAGONAL line from lower edge up to the tip at the spine, like an angular katana nose. NO rounded scimitar belly, NO concave top, NO upturned hook, NO crescent. Keep the total length, short red-black diamond-wrapped hilt, compact gold/burgundy guard, purple-black metal face, small crimson decorative curl near base and thin red lower edge. Preserve the existing pixel-art scale and visual identity, flat side profile, hilt left and tip right. The blade should stay about five to six native pixels thick, about44nativepixels long, totalweapon60nativepixels. Entire weapon must fit with clear transparent margins. Genuine transparent RGBA background; no text, labels, people, scenery or effects. The one meaningful change is removing the current strong U-shaped curvature and making a near-straight katana silhouette.",
+  "output": "muramasa-v3.png",
+  "source_pixels": "Original generated RGBA image copied unchanged; fixed crop and nearest-neighbor sampling by compile_weapons.py."
+}

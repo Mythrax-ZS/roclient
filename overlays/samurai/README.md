@@ -100,21 +100,21 @@ The overlay includes separate equipped SPR/ACT pairs, 32-pixel inventory icons,
 in either hand mechanically; the current client displays the main-hand weapon.
 The existing stock Muramasa (1164) remains a separate item.
 
-The selected weapon art is the `*-v2.png` pair in the source directory below.
-Shorter grips, simpler ornament and stronger blade faces preserve readability
-at normal gameplay zoom. Kusanagi has 58 visible pixels of length and a main
-blade face about 4–5 pixels wide; Muramasa has 60 visible pixels and a face about
-5–6 pixels wide. The older unversioned PNGs and prompts are retained only as
-historical references. Weapon sizes and ACT scales remain independent of the
+The selected weapon art is the `*-v3.png` pair in the source directory below:
+almost straight katana blades with a short angled tip, keeping v2's shorter grips,
+simpler ornament and strong blade faces for readability at normal gameplay zoom.
+Kusanagi has 58 visible pixels of length and a main blade face about 4–5 pixels
+wide; Muramasa has 61 visible pixels and a face about 4 pixels wide. The v2 and
+unversioned PNGs and prompts are retained only as historical references. Weapon sizes and ACT scales remain independent of the
 inventory/collection image sizes.
 
 Rebuild their art from the client root:
 
 ```powershell
-py tools/samurai_assets/compile_weapons.py tools/samurai_assets/artwork/build.json tools/samurai_assets/artwork/legendary_weapons.json --output target/legendary-weapons-v2
+py tools/samurai_assets/compile_weapons.py tools/samurai_assets/artwork/build.json tools/samurai_assets/artwork/legendary_weapons.json --output target/legendary-weapons-v3
 ```
 
-The staging overlay is `target/legendary-weapons-v2/overlay`; each weapon directory
+The staging overlay is `target/legendary-weapons-v3/overlay`; each weapon directory
 also contains decoded contacts and an animated preview. The generated PNGs and
 exact built-in imagegen prompts are in `tools/samurai_assets/artwork/source/legendary`.
 [legendary_provenance.json](legendary_provenance.json) records their source and

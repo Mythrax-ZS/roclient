@@ -1,6 +1,6 @@
 {
   "kusanagi": {
-    "png": "source/legendary/kusanagi-v2.png",
+    "png": "source/legendary/kusanagi-v3.png",
     "rect": [
       32,
       208,
@@ -17,10 +17,10 @@
       793
     ],
     "source_visible_bbox": [
-      68,
+      67,
       244,
-      1915,
-      545
+      1922,
+      546
     ],
     "native_size": [
       60,
@@ -30,25 +30,25 @@
       1,
       1,
       59,
-      10
+      11
     ],
-    "sha256": "75910d1f459bbd2ecacc50623c2574ccba3f8ef26fcf93ed10bf4c7fd9e4999c",
+    "sha256": "21df232b756f7b40d86484aecd5e55f8ce97212ce195c24cf741024011ce622e",
     "main_blade_width_range": [
       4,
       5
     ],
-    "main_blade_width_median": 4,
+    "main_blade_width_median": 5,
     "native_visible_edge_contacts": []
   },
   "muramasa": {
-    "png": "source/legendary/muramasa-v2.png",
+    "png": "source/legendary/muramasa-v3.png",
     "rect": [
-      96,
-      200,
+      32,
+      192,
       2144,
-      584
+      576
     ],
-    "downsample": 32,
+    "downsample": 33,
     "source_grip": [
       10,
       5
@@ -58,27 +58,27 @@
       724
     ],
     "source_visible_bbox": [
-      135,
-      236,
-      2047,
-      539
+      84,
+      232,
+      2107,
+      498
     ],
     "native_size": [
       64,
       12
     ],
     "native_visible_bbox": [
+      2,
       1,
-      1,
-      61,
-      11
+      63,
+      9
     ],
-    "sha256": "bd56ff254785a056011dee7f16a88c5d2ef8ee48b2a5e10a19090006bd9cdec8",
+    "sha256": "f157f30194926009f51c2e6ef9a053768b16ae744191869df2fcbc32b8075a2a",
     "main_blade_width_range": [
-      5,
-      6
+      4,
+      4
     ],
-    "main_blade_width_median": 6.0,
+    "main_blade_width_median": 4,
     "native_visible_edge_contacts": []
   }
 }
