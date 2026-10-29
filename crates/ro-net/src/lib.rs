@@ -529,6 +529,10 @@ pub enum Event {
     MsgId(u16),
     /// A mercenary stat changed: (status id, value).
     MercParam(u16, i32),
+    /// ZC_EL_INIT: our elemental (id, hp, max hp, sp, max sp).
+    Elemental { id: u32, hp: u32, max_hp: u32, sp: u32, max_sp: u32 },
+    /// ZC_EL_PAR_CHANGE: one elemental stat (SP_* type).
+    ElemParam(u16, i32),
     /// ZC_HO_PAR_CHANGE2: one homunculus stat (SP_* type).
     HomunParam(u16, i64),
     /// ZC_HOSKILLINFO_UPDATE: one homunculus skill changed.
@@ -1135,6 +1139,11 @@ impl MapSession {
                         0x0235 | 0x029d => Some(Event::CompanionSkills { merc: opcode == 0x029d, skills: parse_companion_skills(opcode, &data) }),
                         0x0291 if data.len() >= 4 => Some(Event::MsgId(u16::from_le_bytes([data[2], data[3]]))),
                         0x029b => parse_merc(&data).map(Event::Merc),
+                        0x081d if data.len() >= 22 => {
+                            let l = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                            Some(Event::Elemental { id: l(2), hp: l(6), max_hp: l(10), sp: l(14), max_sp: l(18) })
+                        }
+                        0x081e if data.len() >= 8 => Some(Event::ElemParam(u16::from_le_bytes([data[2], data[3]]), i32::from_le_bytes([data[4], data[5], data[6], data[7]]))),
                         0x0ba5 if data.len() >= 12 => Some(Event::HomunParam(u16::from_le_bytes([data[2], data[3]]), i64::from_le_bytes(data[4..12].try_into().unwrap()))),
                         0x0239 if data.len() >= 11 => {
                             let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);

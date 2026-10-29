@@ -20,6 +20,18 @@ enum Tab {
     Pet,
     Homun,
     Merc,
+    Elem,
+}
+
+/// Our summoned elemental (ZC_EL_INIT / ZC_EL_PAR_CHANGE).
+#[derive(Default, Clone)]
+pub struct Elemental {
+    pub id: u32,
+    pub name: String,
+    pub hp: u32,
+    pub max_hp: u32,
+    pub sp: u32,
+    pub max_sp: u32,
 }
 
 #[derive(Default)]
@@ -33,6 +45,7 @@ pub struct Companions {
     pub homun_skills: Vec<CompanionSkill>,
     pub merc: Option<MercInfo>,
     pub merc_skills: Vec<CompanionSkill>,
+    pub elem: Option<Elemental>,
     rename: String,
 }
 
@@ -79,6 +92,12 @@ fn stats(ui: &mut egui::Ui, id: &str, rows: &[(&str, String)]) {
 }
 
 impl Companions {
+    /// Test hook: 0 pet, 1 homunculus, 2 mercenary, 3 elemental.
+    pub fn select_tab(&mut self, n: u8) {
+        self.tab = [Tab::Pet, Tab::Homun, Tab::Merc, Tab::Elem][(n as usize).min(3)];
+        self.open = true;
+    }
+
     /// `target`: our current attack target, for "Attack".
     pub fn show(&mut self, ctx: &egui::Context, target: Option<u32>) -> Option<CompanionAction> {
         if !self.open {
@@ -88,7 +107,7 @@ impl Companions {
         let mut open = true;
         crate::classic::show(ctx, egui::Window::new("Companions").open(&mut open).resizable(false).default_width(360.0).default_pos(egui::pos2(420.0, 160.0)), "Companions", true, |ui| {
             ui.horizontal(|ui| {
-                for (t, label, has) in [(Tab::Pet, "Pet", self.pet.is_some()), (Tab::Homun, "Homunculus", self.homun.is_some()), (Tab::Merc, "Mercenary", self.merc.is_some())] {
+                for (t, label, has) in [(Tab::Pet, "Pet", self.pet.is_some()), (Tab::Homun, "Homunculus", self.homun.is_some()), (Tab::Merc, "Mercenary", self.merc.is_some()), (Tab::Elem, "Elemental", self.elem.is_some())] {
                     let text = if has { RichText::new(label) } else { RichText::new(label).color(crate::classic::ink(Color32::GRAY)) };
                     if ui.selectable_label(self.tab == t, text).clicked() {
                         self.tab = t;
@@ -186,6 +205,16 @@ impl Companions {
                         if let Some(a) = skills(ui, &self.homun_skills, id, h.skill_points > 0) {
                             out = Some(a);
                         }
+                    }
+                },
+                Tab::Elem => match &self.elem {
+                    None => {
+                        ui.label(RichText::new("No elemental. Sorcerers summon one with their Summon skills.").color(crate::classic::ink(Color32::GRAY)));
+                    }
+                    Some(e) => {
+                        ui.label(RichText::new(if e.name.is_empty() { "Elemental" } else { &e.name }).strong().size(15.0));
+                        bar(ui, "HP ", e.hp, e.max_hp, Color32::from_rgb(70, 190, 90));
+                        bar(ui, "SP ", e.sp, e.max_sp, Color32::from_rgb(70, 120, 220));
                     }
                 },
                 Tab::Merc => match &self.merc {

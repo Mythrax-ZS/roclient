@@ -1795,6 +1795,27 @@ impl App {
                 Some(text) => self.hud.push_chat(ro_net::ChatKind::System, text),
                 None => tracing::debug!(id, "server message"),
             },
+            Elemental { id, hp, max_hp, sp, max_sp } => {
+                let name = self.units.get(&id).map(|m| m.name.clone()).unwrap_or_default();
+                self.companions.elem = Some(companions::Elemental { id, name, hp, max_hp, sp, max_sp });
+            }
+            ElemParam(k, v) => {
+                if let Some(e) = self.companions.elem.as_mut() {
+                    let u = v.max(0) as u32;
+                    match k {
+                        5 => e.hp = u,
+                        6 => e.max_hp = u,
+                        7 => e.sp = u,
+                        8 => e.max_sp = u,
+                        _ => {}
+                    }
+                    let id = e.id;
+                    let (hp, max) = (e.hp as i32, e.max_hp as i32);
+                    if let Some(m) = self.units.get_mut(&id) {
+                        m.hp = Some((hp, max));
+                    }
+                }
+            }
             HomunParam(k, v) => {
                 if let Some(h) = self.companions.homun.as_mut() {
                     let u = v.clamp(0, u32::MAX as i64) as u32;
@@ -2002,6 +2023,9 @@ impl App {
             }
             Npc(d) => self.npc_dialog(d),
             Vanish { id, reason } => {
+                if self.companions.elem.as_ref().is_some_and(|e| e.id == id) && reason != 0 {
+                    self.companions.elem = None;
+                }
                 self.warps.remove(&id);
                 if self.attack.is_some_and(|(t, _)| t == id) {
                     self.attack = None;
@@ -4289,6 +4313,10 @@ impl App {
                         None
                     }
                     // bg:Name applies solo to a battleground; bgauto enters it when ready.
+                    Some(("comptab", n)) => {
+                        self.companions.select_tab(n.parse().unwrap_or(0));
+                        None
+                    }
                     Some(("petmenu", n)) => {
                         if let Ok(n) = n.parse() {
                             self.queued_commands.push(ro_net::Command::Companion(ro_net::CompanionRequest::PetMenu(n)));

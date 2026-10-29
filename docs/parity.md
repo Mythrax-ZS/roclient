@@ -56,7 +56,8 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_FEED_PET, ZC_FEED_MER (chat result)
 - [x] ZC_PET_ACT (pettalktable.xml lines in chat, emotions)
 - [x] ZC_SUMMON_HP_INIT / UPDATE, ZC_HO_PAR_CHANGE2, ZC_HOSKILLINFO_UPDATE (summon bar tested with ABR Battle Warrior)
-- [ ] Elementals (ZC_EL_INIT, ZC_EL_PAR_CHANGE)
+- [x] Elementals (ZC_EL_INIT, ZC_EL_PAR_CHANGE): companion window tab + HP bar
+- [ ] Elemental sprite looks hidden behind the pet on the same cell; verify it draws
 
 ## Social
 - [x] Guild emblems in the guild window (download, upload from Emblem*.bmp)
