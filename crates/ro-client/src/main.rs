@@ -2392,6 +2392,14 @@ impl App {
                     }
                 }
             }
+            CastCancel(id) => {
+                self.casts.remove(&id);
+                if let Some(m) = self.mob_mut(id) {
+                    if matches!(m.pose, Some((Pose::Cast, _))) {
+                        m.pose = None;
+                    }
+                }
+            }
             SkillFailed { skill, cause } => {
                 let name = self.skills.iter().find(|s| s.id == skill).map(|s| self.skill_names.display(&s.name)).unwrap_or_else(|| "Skill".into());
                 let why = match cause {

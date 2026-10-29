@@ -37,7 +37,8 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_SPIRITS (spheres circling the unit)
 - [x] ZC_SPIRITS2 / SPIRITS_ATTRIBUTE / SOULENERGY, ZC_MILLENNIUMSHIELD (orbs coloured by kind)
 - [ ] ZC_TARGET_SPIRITS
-- [ ] ZC_COMBODELAY, ZC_BLADESTOP, ZC_DISPEL, ZC_HIGHJUMP, ZC_NOTIFY_SKILL_POSITION
+- [x] ZC_DISPEL (cast cancel), ZC_HIGHJUMP (slide); ZC_NOTIFY_SKILL_POSITION unused by rAthena
+- [ ] ZC_COMBODELAY, ZC_BLADESTOP
 - [ ] ZC_NOTIFY_BIND_ON_EQUIP, ZC_CHANGE_ITEM_OPTION, ZC_UPDATE_CARDSLOT
 - [x] ZC_ACK_TAKEOFF_EQUIP_ALL ("Take off all" button per equipment tab), ZC_MOVE_ITEM_FAILED
 - [ ] ZC_INVENTORY_TAB, ZC_INVENTORY_END

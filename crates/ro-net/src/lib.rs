@@ -283,6 +283,8 @@ pub enum Event {
     Hotkeys { row: u8, keys: Vec<Hotkey> },
     /// Someone started casting.
     Casting(Cast),
+    /// ZC_DISPEL: the unit's cast was interrupted.
+    CastCancel(u32),
     /// Our skill was refused (see `parse_skill_fail` causes).
     SkillFailed { skill: u16, cause: u8 },
     /// A non-damaging skill went off (heal, buff...).
@@ -1188,6 +1190,9 @@ impl MapSession {
                             (0, row, keys) => Some(Event::Hotkeys { row, keys }),
                             _ => None,
                         },
+                        0x01b9 if data.len() >= 6 => Some(Event::CastCancel(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
+                        // ZC_HIGHJUMP: instant slide to a cell (Taekwon jump, knockback snaps).
+                        0x01ff if data.len() >= 10 => Some(Event::Stop { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), x: u16::from_le_bytes([data[6], data[7]]), y: u16::from_le_bytes([data[8], data[9]]) }),
                         0x0b1a => Some(Event::Casting(parse_cast(&data))),
                         0x0110 => {
                             let (skill, cause) = parse_skill_fail(&data);
