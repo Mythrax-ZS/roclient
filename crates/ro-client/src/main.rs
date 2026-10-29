@@ -5,6 +5,7 @@
 
 mod audio;
 mod book;
+mod captcha;
 mod memorial;
 mod roulette;
 mod sense;
@@ -970,6 +971,7 @@ struct App {
     books: book::Books,
     memorial: memorial::Memorial,
     roulette: roulette::Roulette,
+    captcha: captcha::Captcha,
     /// The player we asked to trade, until they answer.
     trade_partner: Option<String>,
     /// Clicked player: (id, name, menu position in UI points).
@@ -2599,6 +2601,24 @@ impl App {
             }
             ProgressCancel => self.script_progress = None,
             ReadBook { id, page } => self.open_book(id, page),
+            CaptchaImage(zipped) => {
+                if self.captcha.set_image(&self.egui_ctx, &zipped) {
+                    self.send(ro_net::Command::Captcha(ro_net::CaptchaRequest::Downloaded));
+                }
+            }
+            CaptchaAsk { tries, timeout_ms } => self.captcha.ask(tries, timeout_ms),
+            CaptchaDone(status) => {
+                let text = self.captcha.done(status);
+                self.hud.push_chat(ro_net::ChatKind::System, text.into());
+            }
+            CaptchaApplied(status) => {
+                let text = match status {
+                    0 => "The player is now being checked by the macro detector.",
+                    1 => "There are no captchas registered.",
+                    _ => "That player is already being checked.",
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, text.into());
+            }
             Roulette(note) => {
                 let db = self.item_db.as_ref();
                 self.roulette.apply(note, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(id, true)));
@@ -4550,6 +4570,15 @@ impl App {
                 let item = |id: u32| self.inventory.items.values().find(|i| i.id == id).map(|i| (i.index, i.location));
                 let action = match step.split_once(':').or(Some((step.as_str(), ""))) {
                     Some(("equip", id)) => id.parse().ok().and_then(item).map(|(index, location)| windows::UiAction::Equip { index, location }),
+                    // macro: apply the macro detector to ourselves (GM); captcha:text answers it.
+                    Some(("macro", _)) => {
+                        self.send(ro_net::Command::Captcha(ro_net::CaptchaRequest::Apply(self.account_id)));
+                        None
+                    }
+                    Some(("captcha", a)) => {
+                        self.send(ro_net::Command::Captcha(ro_net::CaptchaRequest::Answer(a.to_string())));
+                        None
+                    }
                     Some(("use", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::UseItem(index)),
                     Some((f @ ("fav" | "unfav"), id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::Favorite { index, on: f == "fav" }),
                     Some(("invtab", n)) => {
@@ -5747,6 +5776,9 @@ impl App {
                     }
                 }
                 self.books.show(ui.ctx());
+                if let (Some(a), Some((tx, _))) = (self.captcha.show(ui.ctx()), self.net.as_ref()) {
+                    let _ = tx.send(ro_net::Command::Captcha(ro_net::CaptchaRequest::Answer(a)));
+                }
                 let db = self.item_db.as_ref();
                 if let Some(act) = self.roulette.show(ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(id, true))) {
                     let r = match act {
@@ -6340,6 +6372,7 @@ fn main() -> anyhow::Result<()> {
         books: Default::default(),
         memorial: Default::default(),
         roulette: Default::default(),
+        captcha: Default::default(),
         trade_partner: None,
         player_menu: None,
         auto_deal: arg("--deal").map(|d| d == "buy"),

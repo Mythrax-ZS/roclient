@@ -11,7 +11,7 @@ use ro_proto::{id, packets::*, Frame, RoCodec, ServerTable};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-pub use ro_proto::packets::{sp, Act, CharInfo, CharRequest, ChatKind, Look, RouletteRequest, NpcDialog, NpcReply, UnitInfo, UnitPos};
+pub use ro_proto::packets::{sp, Act, CharInfo, CharRequest, ChatKind, Look, RouletteRequest, CaptchaRequest, NpcDialog, NpcReply, UnitInfo, UnitPos};
 pub use ro_proto::items::{SwitchRequest, Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
 pub use ro_proto::guild::{RelationRequest, GuildInfo, GuildMember, GuildRequest, GuildSkill, Position};
@@ -154,6 +154,8 @@ pub struct MapSession {
     started: Instant,
     /// ZC_EXTEND_BODYITEM_SIZE arrives before the accept; kept to pass on.
     inventory_extra: Option<u16>,
+    /// Macro detector captcha being received: (expected size, zlib bytes so far).
+    captcha: Option<(usize, Vec<u8>)>,
 }
 
 pub async fn enter_map(zone: &ZoneServer, auth: &AcceptLogin) -> anyhow::Result<MapSession> {
@@ -167,7 +169,7 @@ pub async fn enter_map(zone: &ZoneServer, auth: &AcceptLogin) -> anyhow::Result<
             Frame::Packet { opcode: id::ZC_ACCEPT_ENTER, data } => {
                 let spawn = parse_accept_enter(&data);
                 conn.send(CzLoadEndAck).await?;
-                return Ok(MapSession { conn, spawn, started, inventory_extra });
+                return Ok(MapSession { conn, spawn, started, inventory_extra, captcha: None });
             }
             Frame::Packet { opcode: id::ZC_REFUSE_ENTER, data } => bail!("map server refused, error {}", data[2]),
             Frame::Packet { opcode: id::SC_NOTIFY_BAN, data } => bail!("disconnected by map server, code {}", data[2]),
@@ -294,6 +296,14 @@ pub enum Event {
     ProgressCancel,
     /// ZC_READ_BOOK: open book `id` (an item id) at `page`.
     ReadBook { id: u32, page: u32 },
+    /// Macro detector: the captcha image (zlib-compressed 220x90 BMP) fully arrived.
+    CaptchaImage(Vec<u8>),
+    /// Macro detector: answer now; `tries` left, `timeout_ms` to answer.
+    CaptchaAsk { tries: u8, timeout_ms: u32 },
+    /// Macro detector closed: 0 timed out, 1 wrong, 2 correct.
+    CaptchaDone(u32),
+    /// Our macro detector request on a player: 0 monitoring, 1 no captchas, 2 already in progress.
+    CaptchaApplied(u32),
     /// Roulette window traffic.
     Roulette(RouletteNote),
     /// ZC_PROGRESS_ACTOR: a `progressbar_npc` over a unit; `secs` left.
@@ -730,6 +740,7 @@ pub enum Command {
     /// Destroy our memorial dungeon (CZ_MEMORIALDUNGEON_COMMAND 3).
     MemorialDestroy,
     Roulette(RouletteRequest),
+    Captcha(CaptchaRequest),
     /// Login screen.
     Login { user: String, pass: String },
     SelectServer(usize),
@@ -891,6 +902,7 @@ impl MapSession {
                     Some(Command::ProgressDone) => self.send(Bare(0x02f1)).await?,
                     Some(Command::MemorialDestroy) => self.send(MemorialCommand(3)).await?,
                     Some(Command::Roulette(r)) => self.send(r).await?,
+                    Some(Command::Captcha(r)) => self.send(r).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
@@ -1361,6 +1373,26 @@ impl MapSession {
                         0x0a20 if data.len() >= 23 => Some(Event::Roulette(RouletteNote::Spun { result: data[2], step: u16::from_le_bytes([data[3], data[4]]), idx: u16::from_le_bytes([data[5], data[6]]), bonus: l(&data, 7), points: [l(&data, 11), l(&data, 15), l(&data, 19)] })),
                         // ZC_RECV_ROULETTE_ITEM: 0 received, 1 failed, 2 too many items, 3 overweight.
                         0x0a22 if data.len() >= 7 => Some(Event::Roulette(RouletteNote::Claimed { result: data[2], bonus: l(&data, 3) })),
+                        // Macro detector (anti-bot captcha): the image comes in chunks after its size.
+                        0x0a58 if data.len() >= 8 => {
+                            self.captcha = Some((u16::from_le_bytes([data[2], data[3]]) as usize, vec![]));
+                            None
+                        }
+                        0x0a59 if data.len() >= 8 => {
+                            let done = match self.captcha.as_mut() {
+                                Some((size, buf)) => {
+                                    buf.extend_from_slice(&data[8..]);
+                                    buf.len() >= *size
+                                }
+                                None => false,
+                            };
+                            if done { self.captcha.take().map(|(_, buf)| Event::CaptchaImage(buf)) } else { None }
+                        }
+                        0x0a5b if data.len() >= 7 => Some(Event::CaptchaAsk { tries: data[2], timeout_ms: l(&data, 3) }),
+                        0x0a5d if data.len() >= 6 => Some(Event::CaptchaDone(l(&data, 2))),
+                        0x0a57 if data.len() >= 6 => Some(Event::CaptchaApplied(l(&data, 2))),
+                        // ZC_GM_CHECKER: a GM's @macrochecker sweep; nothing to show.
+                        0x0c0c => None,
                         0x09d1 if data.len() >= 14 => Some(Event::UnitProgress { id: l(&data, 2), secs: l(&data, 10) }),
                         0x08b3 if data.len() >= 8 => Some(Event::ShowScript { id: l(&data, 4), text: ro_proto::packets::get_fixed_str(&mut &data[8..], data.len() - 8) }),
                         0x01b1 if data.len() >= 7 => Some(Event::ShowDigit { kind: data[2], value: l(&data, 3) as i32 }),

@@ -1010,3 +1010,30 @@ impl Encode for RouletteRequest {
         }
     }
 }
+
+/// Macro detector (anti-bot captcha) requests.
+#[derive(Debug, Clone)]
+pub enum CaptchaRequest {
+    /// CZ_COMPLETE_APPLY_MACRO_DETECTOR_CAPTCHA (0x0a5a): the image arrived.
+    Downloaded,
+    /// CZ_ACK_ANSWER_MACRO_DETECTOR (0x0a5c): our answer (up to 15 characters).
+    Answer(String),
+    /// CZ_REQ_APPLY_MACRO_DETECTOR (0x0a56): a GM puts a player (account id) to the test.
+    Apply(u32),
+}
+
+impl Encode for CaptchaRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            CaptchaRequest::Downloaded => d.put_u16_le(0x0a5a),
+            CaptchaRequest::Answer(a) => {
+                d.put_u16_le(0x0a5c);
+                put_fixed_str(d, a, 16);
+            }
+            CaptchaRequest::Apply(aid) => {
+                d.put_u16_le(0x0a56);
+                d.put_u32_le(*aid);
+            }
+        }
+    }
+}
