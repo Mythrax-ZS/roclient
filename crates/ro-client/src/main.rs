@@ -984,6 +984,7 @@ struct App {
     memorial: memorial::Memorial,
     roulette: roulette::Roulette,
     sales: sale::Sales,
+    reporter: captcha::Reporter,
     captcha: captcha::Captcha,
     /// The player we asked to trade, until they answer.
     trade_partner: Option<String>,
@@ -2888,6 +2889,8 @@ impl App {
             }
             StarPlaceAsk(which) => self.windows.star_ask = Some(which),
             AdoptAsk { father, mother, name } => self.windows.adopt_ask = Some((father, mother, name)),
+            MacroScan(ids) => self.reporter.found(ids),
+            MacroApplied(status) => self.reporter.applied(status),
             GuildStorageLog(result, entries) => match result {
                 1 => self.guild.storage_log = Some(entries),
                 2 => self.hud.push_chat(ro_net::ChatKind::System, "The guild storage log is empty.".into()),
@@ -4181,6 +4184,10 @@ impl App {
                 }
                 return;
             }
+            if text.trim() == "/macroreport" {
+                self.reporter.toggle();
+                return;
+            }
             if text.trim() == "/limitedsale" {
                 let _ = tx.send(ro_net::Command::Sale(self.account_id, ro_net::SaleRequest::Open));
                 return;
@@ -4754,6 +4761,14 @@ impl App {
                     // chat:<text> says it (GM commands mid-script); petevolve:<egg> asks to evolve.
                     Some(("chat", text)) => {
                         self.submit_chat(text.to_string());
+                        None
+                    }
+                    Some(("macroscan", r)) => {
+                        if let (Ok(radius), Some(p)) = (r.parse(), self.player.as_ref()) {
+                            let (x, y) = p.walker.cell;
+                            self.reporter.open = true;
+                            self.send(ro_net::Command::MacroReport(ro_net::MacroReport::Scan { x: x as u16, y: y as u16, radius }));
+                        }
                         None
                     }
                     Some(("petevolve", egg)) => {
@@ -6025,8 +6040,21 @@ impl App {
                 if let (Some(a), Some((tx, _))) = (self.captcha.show(ui.ctx()), self.net.as_ref()) {
                     let _ = tx.send(ro_net::Command::Captcha(ro_net::CaptchaRequest::Answer(a)));
                 }
+                let (units, my_id, my_name) = (&self.units, self.account_id, self.hud.status.name.clone());
+                let me = self.player.as_ref().map(|p| p.walker.cell);
+                let name_of = |id: u32| if id == my_id { my_name.clone() } else { units.get(&id).map_or_else(|| format!("Player #{id}"), |m| m.name.clone()) };
+                if let Some(act) = self.reporter.show(ui.ctx(), name_of) {
+                    let req = match act {
+                        captcha::ReporterAction::Scan(radius) => me.map(|(x, y)| ro_net::MacroReport::Scan { x: x as u16, y: y as u16, radius }),
+                        captcha::ReporterAction::Apply(id) => Some(ro_net::MacroReport::Apply(id)),
+                    };
+                    if let (Some(req), Some((tx, _))) = (req, self.net.as_ref()) {
+                        let _ = tx.send(ro_net::Command::MacroReport(req));
+                    }
+                }
                 let db = self.item_db.as_ref();
-                if let Some(req) = self.sales.show_tool(ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(id, true))) {
+                if let Some(req) = self.sales.show_tool(
+ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(id, true))) {
                     if let Some((tx, _)) = self.net.as_ref() {
                         let _ = tx.send(ro_net::Command::Sale(self.account_id, req));
                     }
@@ -6636,6 +6664,7 @@ fn main() -> anyhow::Result<()> {
         memorial: Default::default(),
         roulette: Default::default(),
         sales: Default::default(),
+        reporter: Default::default(),
         captcha: Default::default(),
         trade_partner: None,
         player_menu: None,

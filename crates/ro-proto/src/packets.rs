@@ -189,6 +189,31 @@ impl Encode for AdoptRequest {
     }
 }
 
+/// A GM's macro reporter: list the players around a cell (CZ_REQ_PLAYER_AID_IN_RANGE), then
+/// put one under the macro detector (CZ_REQ_APPLY_MACRO_DETECTOR).
+#[derive(Debug, Clone, PartialEq)]
+pub enum MacroReport {
+    Scan { x: u16, y: u16, radius: u8 },
+    Apply(u32),
+}
+
+impl Encode for MacroReport {
+    fn encode(&self, d: &mut BytesMut) {
+        match *self {
+            MacroReport::Scan { x, y, radius } => {
+                d.put_u16_le(0x0a6c);
+                d.put_u16_le(x);
+                d.put_u16_le(y);
+                d.put_u8(radius);
+            }
+            MacroReport::Apply(aid) => {
+                d.put_u16_le(0x0a56);
+                d.put_u32_le(aid);
+            }
+        }
+    }
+}
+
 /// CZ_AGREE_STARPLACE: yes to Feeling's "save this map" (0 sun, 1 moon, 2 stars).
 pub struct StarPlace(pub u8);
 

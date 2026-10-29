@@ -11,7 +11,7 @@ use ro_proto::{id, packets::*, Frame, RoCodec, ServerTable};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-pub use ro_proto::packets::{sp, Act, AdoptRequest, CharInfo, CharRequest, ChatKind, Look, RouletteRequest, CaptchaRequest, NpcDialog, NpcReply, UnitInfo, UnitPos};
+pub use ro_proto::packets::{sp, Act, AdoptRequest, MacroReport, CharInfo, CharRequest, ChatKind, Look, RouletteRequest, CaptchaRequest, NpcDialog, NpcReply, UnitInfo, UnitPos};
 pub use ro_proto::items::{SwitchRequest, Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
 pub use ro_proto::guild::{RelationRequest, GuildInfo, GuildMember, GuildRequest, GuildSkill, Position, StorageLogEntry};
@@ -342,6 +342,10 @@ pub enum Event {
     DynamicNpc(u32),
     /// ZC_ACK_GUILDSTORAGE_LOG (guildopenstorage_log): result and entries.
     GuildStorageLog(u16, Vec<StorageLogEntry>),
+    /// ZC_ACK_PLAYER_AID_IN_RANGE: players around the cell the macro reporter scanned.
+    MacroScan(Vec<u32>),
+    /// ZC_ACK_APPLY_MACRO_DETECTOR: 0 now being watched, 1 no data, 2 already being tested.
+    MacroApplied(u32),
     /// ZC_SKILL_SCALE: a monster casting an area skill; the area shows until the cast ends.
     SkillScale { id: u32, skill: u16, level: u16, x: u16, y: u16, cast_ms: u32 },
     /// ZC_MEMORIALDUNGEON_*: instance creation queue, status and notices.
@@ -772,6 +776,7 @@ pub enum Command {
     /// Yes to Feeling's "save this map as your place" (CZ_AGREE_STARPLACE).
     StarPlace(u8),
     Adopt(AdoptRequest),
+    MacroReport(MacroReport),
     /// /viewpointvalue (show) or /setcamera (CZ_VIEW_CAMERAINFO).
     Camera { show: bool, range: f32, rotation: f32, latitude: f32 },
     /// The bargain sale tool (our account id with each request).
@@ -942,6 +947,7 @@ impl MapSession {
                     Some(Command::ProgressDone) => self.send(Bare(0x02f1)).await?,
                     Some(Command::StarPlace(which)) => self.send(ro_proto::packets::StarPlace(which)).await?,
                     Some(Command::Adopt(r)) => self.send(r).await?,
+                    Some(Command::MacroReport(r)) => self.send(r).await?,
                     Some(Command::Camera { show, range, rotation, latitude }) => self.send(ro_proto::packets::CameraInfo { show, range, rotation, latitude }).await?,
                     Some(Command::MemorialDestroy) => self.send(MemorialCommand(3)).await?,
                     Some(Command::Roulette(r)) => self.send(r).await?,
@@ -1464,6 +1470,8 @@ impl MapSession {
                         0x01f6 if data.len() >= 34 => Some(Event::AdoptAsk { father: l(&data, 2), mother: l(&data, 6), name: ro_proto::packets::get_fixed_str(&mut &data[10..34], 24) }),
                         0x0216 if data.len() >= 6 => Some(Event::AdoptFailed(l(&data, 2))),
                         0x0a17 if data.len() >= 6 => Some(Event::DynamicNpc(l(&data, 2))),
+                        0x0a6d => Some(Event::MacroScan(data.get(4..).unwrap_or_default().chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect())),
+                        0x0a57 if data.len() >= 6 => Some(Event::MacroApplied(l(&data, 2))),
                         0x09da => ro_proto::guild::parse_storage_log(&data).map(|(r, e)| Event::GuildStorageLog(r, e)),
                         0x0a41 if data.len() >= 18 => {
                             let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
@@ -1525,6 +1533,8 @@ impl MapSession {
                         0x043d if data.len() >= 8 => Some(Event::SkillCooldown { skill: u16::from_le_bytes([data[2], data[3]]), ms: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
                         0x01ad | 0x018d | 0x025a | 0x0abe | 0x0afb | 0x0177 | 0x0442 | 0x01a6 | 0x0b65 | 0x0221 | 0x07e3 => parse_menu(opcode, &data).map(Event::Menu),
                         0x018f => parse_make_result(&data).map(|(ok, item)| Event::MakeResult { ok, item }),
+                        // ZC_NPC_SHOWEFST_UPDATE: a monster or NPC's option (hiding, cloaking...).
+                        0x028a if data.len() >= 10 => Some(Event::UnitOption { id: l(&data, 2), option: l(&data, 6) }),
                         0x0229 => {
                             let (id, option) = parse_state_change(&data);
                             Some(Event::UnitOption { id, option })

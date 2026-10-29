@@ -72,3 +72,75 @@ impl Captcha {
         send
     }
 }
+
+/// The GM's macro reporter (/macroreport): scan the players around us, then put one under
+/// the macro detector (it sends them a captcha).
+#[derive(Default)]
+pub struct Reporter {
+    pub open: bool,
+    radius: u8,
+    found: Vec<u32>,
+    note: String,
+}
+
+pub enum ReporterAction {
+    Scan(u8),
+    Apply(u32),
+}
+
+impl Reporter {
+    pub fn toggle(&mut self) {
+        self.open = !self.open;
+    }
+
+    pub fn found(&mut self, ids: Vec<u32>) {
+        self.note = if ids.is_empty() { "No players found around you.".into() } else { String::new() };
+        self.found = ids;
+    }
+
+    pub fn applied(&mut self, status: u32) {
+        self.note = match status {
+            0 => "The player is now being watched by the macro detector.",
+            2 => "That player is already being tested.",
+            _ => "No data for that player.",
+        }
+        .into();
+    }
+
+    pub fn show(&mut self, ctx: &egui::Context, name: impl Fn(u32) -> String) -> Option<ReporterAction> {
+        if !self.open {
+            return None;
+        }
+        if self.radius == 0 {
+            self.radius = 14;
+        }
+        let mut out = None;
+        let mut open = true;
+        crate::classic::show(ctx, egui::Window::new("Macro Reporter").open(&mut open).collapsible(false).resizable(false).default_width(280.0), "Macro Reporter", true, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Range (cells)");
+                ui.add(egui::DragValue::new(&mut self.radius).range(1..=30));
+                if ui.button("Scan").clicked() {
+                    out = Some(ReporterAction::Scan(self.radius));
+                }
+            });
+            egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                for &id in &self.found {
+                    ui.horizontal(|ui| {
+                        ui.label(name(id));
+                        if ui.small_button("Report").clicked() {
+                            out = Some(ReporterAction::Apply(id));
+                        }
+                    });
+                }
+            });
+            if !self.note.is_empty() {
+                ui.label(&self.note);
+            }
+        });
+        if !open {
+            self.open = false;
+        }
+        out
+    }
+}
