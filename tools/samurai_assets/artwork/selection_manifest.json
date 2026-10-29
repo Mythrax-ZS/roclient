@@ -28,7 +28,7 @@
   ],
   "exclusion_reason": "Not referenced by build.json; working or superseded artwork remains outside release.",
   "sha256": {
-    "build.json": "1cf0fac4e0d62d79cf28239f1ff484d17425c4bb74fcd9df18aa5c1cc7c09e13",
+    "build.json": "4909f43be3a00a576f2540bf5b19dca4fa259598f821c685ef6112154c5a899e",
     "legendary_weapons.json": "c0b0fcd179c3ae54fac5a287be0cc4808b2b1ca3047e5ff203396d6c35c56b04",
     "master_audit.json": "7b589392b84d7d90bd20c073badad3f1ed3dc458ed5736d17a561face6a36fb4",
     "prompts_root.json": "5534a6cc57e7550837bb0009cce73a6d2b69fd17d4ecbea67b40dd69c0b74581",
@@ -72,7 +72,7 @@
     "source/walk_W.png": "3e5065eb8c966d02266c475054a36c5bb42819361380e79797b223a2633f7735",
     "utility_audit.json": "f05bac28e39e3399d920886cab5cd91a63bf80e99bfe17a21c4c5a5b19280520",
     "walk_audit.json": "609d30ef412c112761e5f953496ec6005abfb04e6ea4e5f1f57df1a10c93b963",
-    "weapon_pose_audit.json": "fc601cc12edac7670cfce55d5380bacbe9be75c744fa72122d0a68db07d062e7",
+    "weapon_pose_audit.json": "b44bfdfeafb2561558a0379b63730474d64ada0f6cd806bf5ecdca61619ea94d",
     "source/legendary/kusanagi-v2.png": "75910d1f459bbd2ecacc50623c2574ccba3f8ef26fcf93ed10bf4c7fd9e4999c",
     "source/legendary/kusanagi-v2.prompt.json": "a52f1bcb32a37b6f81b628fb5a1d233708b20314a3800b4542044306e116dc56",
     "source/legendary/muramasa-v2.png": "bd56ff254785a056011dee7f16a88c5d2ef8ee48b2a5e10a19090006bd9cdec8",
@@ -86,11 +86,11 @@
     "ember_ronin.spr": "c5c3ea78995c90bdf4c820d2c6e252814d87313ab1c086dcf55e2686d5577aad",
     "ember_ronin.act": "534d734911b30e8ab7730d859795864fac8b5617463f2a8d5e36c58957758275",
     "katana.spr": "82bb15bdf204d4d5bfccbe0510a8e2b6212a13e7dcd4d9fd0adc57e0409b0079",
-    "katana.act": "e4b3d0199ec0adfa3f5aedd7629b35a7a142f3db92256c45ea1f6434778468dd",
+    "katana.act": "01bf5143a439b89519e95caef89e5740a24cdf3ef5fa00f2b75de32710f5dab1",
     "kusanagi.spr": "c4dbef3ff29f2850ed416d075401c6e095e9751cc66d6620dfae955d88cc5cf0",
-    "kusanagi.act": "d1b7dede08d4a69afa5455fb454e4bcf6b96187fff6b1cccda11786893e4cd5f",
+    "kusanagi.act": "3a0146ef3ff4c668fa04208bfc9acd7fd829360d24b44ebbdf5d26b79619d703",
     "muramasa.spr": "d742e9e52e3fa345f8fa462cd6ad02576d7d6c574319de74337d08d94cd1d1b8",
-    "muramasa.act": "6f3145f64916d5b50e77eed766b47b02828e448d063e03f6529f61e2f89c4d64"
+    "muramasa.act": "a1ac228fe27cebeb12375a2c7e9b3253f667b3e6e4ba415b1c627cd8e9c109e4"
   },
   "animation_contract": {
     "actions": 104,

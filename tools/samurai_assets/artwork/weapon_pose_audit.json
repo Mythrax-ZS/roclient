@@ -61,7 +61,7 @@
     "body SPR/ACT bytes",
     "frame counts",
     "frame delays",
-    "ready poses"
+    "ready-pose tip directions and grips"
   ],
   "validation": {
     "changed_authored_poses": 78,
@@ -74,6 +74,24 @@
     },
     "gui_execution": "Root reviewed 22 offline captures using the existing release renderer and installed v2 overlay: both weapons ready/side/attack plus Muramasa windup/strike in all eight directions. Renderer matches decoded contacts and corrected hand/edge orientation. No live login."
   },
-  "build_config_sha256": "1cf0fac4e0d62d79cf28239f1ff484d17425c4bb74fcd9df18aa5c1cc7c09e13",
-  "review_artifacts": "target/weapon-pose-audit/{S,SW,W,NW,N}.png; diagnostic outputs are not release inputs."
+  "build_config_sha256": "4909f43be3a00a576f2540bf5b19dca4fa259598f821c685ef6112154c5a899e",
+  "review_artifacts": "target/weapon-pose-audit/{S,SW,W,NW,N}.png; diagnostic outputs are not release inputs.",
+  "ready_pose_edge_side_correction": {
+    "revision": "2026-10-30",
+    "group": 4,
+    "directions": [
+      "SW",
+      "W",
+      "NW"
+    ],
+    "operation": "mirror=true; rotation=(effective_angle+180)%360 (230->50, 210->30, 235->55)",
+    "reason": "The ready stance raised the blade with a plain rotation, which turned the cutting edge and the angled kissaki to face up. The mirrored form keeps the same tip direction and grip with the edge underneath.",
+    "unchanged_directions": "S (310) and N (315) already keep the edge underneath.",
+    "reflected_directions": {
+      "SE": "SW",
+      "E": "W",
+      "NE": "NW"
+    },
+    "review": "Offline captures of the ready pose: Kusanagi in SW, W, NW, NE, E and SE; Muramasa and the starter katana in SW and W."
+  }
 }

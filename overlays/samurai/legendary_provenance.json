@@ -28,7 +28,7 @@
   "validation": {
     "strict_spr_act_validation": "Passed for both variants and floor sprites (compile_weapons.py). Equipped pairs retain 104 actions and 304 frames.",
     "body_files_unchanged": true,
-    "attack_pose_metadata_unchanged": "kusanagi.act and muramasa.act are byte-identical to the v2 revision; weapon_pose_audit.json corrections still apply.",
+    "attack_pose_metadata_unchanged": "Attack poses are unchanged from v2. The ready pose for SW, W and NW (and mirrored SE, E, NE) now keeps the cutting edge underneath; see weapon_pose_audit.json ready_pose_edge_side_correction.",
     "runtime_gui_checks": "8 offline captures at prt_fild08, 2000x1125, distance 300 (no server, no login): ready facing S and W, attack at 180 ms facing S and at 270 ms facing E, for each weapon. Both straight blades stay in the hands and point the same way as v2.",
     "visual_limits": "Main-hand weapon is rendered; separately animated offhand artwork is not supplied.",
     "gameplay_scope": "This revision changes weapon artwork only. Item scripts, stats and pose metadata are unchanged.",
@@ -36,7 +36,8 @@
     "samurai_client_tests_passed": 6,
     "installed_overlay_matches_staging": true,
     "runtime_review_artifacts": [
-      "target/legendary-weapons-v3/captures/contact.png"
+      "target/legendary-weapons-v3/captures/contact.png",
+      "target/ready-fix/contact.png"
     ]
   },
   "source_sha256": {
@@ -44,11 +45,11 @@
     "source/legendary/kusanagi-v3.prompt.json": "52d1c7c94f4183d4cef596de60dbe023a825b6e06e86f8c258fc2dd0ad6cdce5",
     "source/legendary/muramasa-v3.png": "f157f30194926009f51c2e6ef9a053768b16ae744191869df2fcbc32b8075a2a",
     "source/legendary/muramasa-v3.prompt.json": "f45a42ff7043394e010dab26723064abb9e5ba554a543feee7a0e5838eb8b39e",
-    "weapon_pose_audit.json": "fc601cc12edac7670cfce55d5380bacbe9be75c744fa72122d0a68db07d062e7",
+    "weapon_pose_audit.json": "b44bfdfeafb2561558a0379b63730474d64ada0f6cd806bf5ecdca61619ea94d",
     "source/legendary/sampling_review.json": "4241f581450f083608dd3859645e7d8504b50d8048c3dce442817cfe8c49c70d"
   },
   "compiled": {
-    "base_config_sha256": "1cf0fac4e0d62d79cf28239f1ff484d17425c4bb74fcd9df18aa5c1cc7c09e13",
+    "base_config_sha256": "4909f43be3a00a576f2540bf5b19dca4fa259598f821c685ef6112154c5a899e",
     "manifest_sha256": "c0b0fcd179c3ae54fac5a287be0cc4808b2b1ca3047e5ff203396d6c35c56b04",
     "weapons": {
       "kusanagi": {
@@ -56,7 +57,7 @@
         "source_sha256": "21df232b756f7b40d86484aecd5e55f8ce97212ce195c24cf741024011ce622e",
         "weapon_sha256": {
           "spr": "c4dbef3ff29f2850ed416d075401c6e095e9751cc66d6620dfae955d88cc5cf0",
-          "act": "d1b7dede08d4a69afa5455fb454e4bcf6b96187fff6b1cccda11786893e4cd5f"
+          "act": "3a0146ef3ff4c668fa04208bfc9acd7fd829360d24b44ebbdf5d26b79619d703"
         },
         "floor_valid": true,
         "floor_origin": [
@@ -77,7 +78,7 @@
         "source_sha256": "f157f30194926009f51c2e6ef9a053768b16ae744191869df2fcbc32b8075a2a",
         "weapon_sha256": {
           "spr": "d742e9e52e3fa345f8fa462cd6ad02576d7d6c574319de74337d08d94cd1d1b8",
-          "act": "6f3145f64916d5b50e77eed766b47b02828e448d063e03f6529f61e2f89c4d64"
+          "act": "a1ac228fe27cebeb12375a2c7e9b3253f667b3e6e4ba415b1c627cd8e9c109e4"
         },
         "floor_valid": true,
         "floor_origin": [
@@ -99,9 +100,9 @@
       "act": "534d734911b30e8ab7730d859795864fac8b5617463f2a8d5e36c58957758275"
     },
     "overlay_sha256": {
-      "data/sprite/custom/samurai/kusanagi.act": "d1b7dede08d4a69afa5455fb454e4bcf6b96187fff6b1cccda11786893e4cd5f",
+      "data/sprite/custom/samurai/kusanagi.act": "3a0146ef3ff4c668fa04208bfc9acd7fd829360d24b44ebbdf5d26b79619d703",
       "data/sprite/custom/samurai/kusanagi.spr": "c4dbef3ff29f2850ed416d075401c6e095e9751cc66d6620dfae955d88cc5cf0",
-      "data/sprite/custom/samurai/muramasa.act": "6f3145f64916d5b50e77eed766b47b02828e448d063e03f6529f61e2f89c4d64",
+      "data/sprite/custom/samurai/muramasa.act": "a1ac228fe27cebeb12375a2c7e9b3253f667b3e6e4ba415b1c627cd8e9c109e4",
       "data/sprite/custom/samurai/muramasa.spr": "d742e9e52e3fa345f8fa462cd6ad02576d7d6c574319de74337d08d94cd1d1b8",
       "data/sprite/아이템/samurai_kusanagi.act": "bdce179c49a9177d0d58370878b84d936621882a364dae5b555b2fe09a1f91fa",
       "data/sprite/아이템/samurai_kusanagi.spr": "a3986bee9f2b4ce92ff4ff53a351609eba066e552cf21c3a9dbe9b1cd8b05f3d",
