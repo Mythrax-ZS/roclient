@@ -641,6 +641,7 @@ impl Windows {
                             for (label, key) in [
                                 ("Clan", "clan"),
                                 ("Ranking", "rank"),
+                                ("Roulette", "roulette"),
                                 ("Reputation", "repute"),
                                 ("Game Options", "opts"),
                                 ("Companions   Alt+R", "r"),

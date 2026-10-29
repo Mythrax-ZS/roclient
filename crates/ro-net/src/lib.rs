@@ -11,7 +11,7 @@ use ro_proto::{id, packets::*, Frame, RoCodec, ServerTable};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-pub use ro_proto::packets::{sp, Act, CharInfo, CharRequest, ChatKind, Look, NpcDialog, NpcReply, UnitInfo, UnitPos};
+pub use ro_proto::packets::{sp, Act, CharInfo, CharRequest, ChatKind, Look, RouletteRequest, NpcDialog, NpcReply, UnitInfo, UnitPos};
 pub use ro_proto::items::{SwitchRequest, Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
 pub use ro_proto::guild::{RelationRequest, GuildInfo, GuildMember, GuildRequest, GuildSkill, Position};
@@ -294,6 +294,8 @@ pub enum Event {
     ProgressCancel,
     /// ZC_READ_BOOK: open book `id` (an item id) at `page`.
     ReadBook { id: u32, page: u32 },
+    /// Roulette window traffic.
+    Roulette(RouletteNote),
     /// ZC_PROGRESS_ACTOR: a `progressbar_npc` over a unit; `secs` left.
     UnitProgress { id: u32, secs: u32 },
     /// ZC_SHOWSCRIPT: `showscript` text called out over a unit (not in the chat log).
@@ -727,6 +729,7 @@ pub enum Command {
     ProgressDone,
     /// Destroy our memorial dungeon (CZ_MEMORIALDUNGEON_COMMAND 3).
     MemorialDestroy,
+    Roulette(RouletteRequest),
     /// Login screen.
     Login { user: String, pass: String },
     SelectServer(usize),
@@ -887,6 +890,7 @@ impl MapSession {
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::ProgressDone) => self.send(Bare(0x02f1)).await?,
                     Some(Command::MemorialDestroy) => self.send(MemorialCommand(3)).await?,
+                    Some(Command::Roulette(r)) => self.send(r).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
@@ -1349,6 +1353,14 @@ impl MapSession {
                         0x02f0 if data.len() >= 10 => Some(Event::Progress { secs: l(&data, 6) }),
                         0x02f2 => Some(Event::ProgressCancel),
                         0x0294 if data.len() >= 10 => Some(Event::ReadBook { id: l(&data, 2), page: l(&data, 6) }),
+                        // ZC_ACK_OPEN_ROULETTE: result, serial, unclaimed step / index, bonus item, points.
+                        0x0a1a if data.len() >= 25 => Some(Event::Roulette(RouletteNote::Opened { ok: data[2] == 0, step: data[7] as i8, idx: data[8] as i8, bonus: l(&data, 9), points: [l(&data, 13), l(&data, 17), l(&data, 21)] })),
+                        // ZC_ACK_ROULEITTE_INFO: (row, column, item, amount) entries of 12 bytes.
+                        0x0a1c if data.len() >= 8 => Some(Event::Roulette(RouletteNote::Prizes(data[8..].chunks_exact(12).map(|c| (u16::from_le_bytes([c[0], c[1]]), u16::from_le_bytes([c[2], c[3]]), l(c, 4), u16::from_le_bytes([c[8], c[9]]))).collect()))),
+                        // ZC_ACK_GENERATE_ROULETTE: result (0 win, 1 failed, 2 no points, 3 lose), row, column, bonus, points.
+                        0x0a20 if data.len() >= 23 => Some(Event::Roulette(RouletteNote::Spun { result: data[2], step: u16::from_le_bytes([data[3], data[4]]), idx: u16::from_le_bytes([data[5], data[6]]), bonus: l(&data, 7), points: [l(&data, 11), l(&data, 15), l(&data, 19)] })),
+                        // ZC_RECV_ROULETTE_ITEM: 0 received, 1 failed, 2 too many items, 3 overweight.
+                        0x0a22 if data.len() >= 7 => Some(Event::Roulette(RouletteNote::Claimed { result: data[2], bonus: l(&data, 3) })),
                         0x09d1 if data.len() >= 14 => Some(Event::UnitProgress { id: l(&data, 2), secs: l(&data, 10) }),
                         0x08b3 if data.len() >= 8 => Some(Event::ShowScript { id: l(&data, 4), text: ro_proto::packets::get_fixed_str(&mut &data[8..], data.len() - 8) }),
                         0x01b1 if data.len() >= 7 => Some(Event::ShowDigit { kind: data[2], value: l(&data, 3) as i32 }),
@@ -1795,4 +1807,14 @@ fn notice_text(opcode: u16, data: &[u8]) -> Option<String> {
         .into(),
         _ => return None,
     })
+}
+
+/// Roulette server messages. `points` are gold, silver, bronze.
+#[derive(Debug, Clone)]
+pub enum RouletteNote {
+    Opened { ok: bool, step: i8, idx: i8, bonus: u32, points: [u32; 3] },
+    /// (row, column, item, amount).
+    Prizes(Vec<(u16, u16, u32, u16)>),
+    Spun { result: u8, step: u16, idx: u16, bonus: u32, points: [u32; 3] },
+    Claimed { result: u8, bonus: u32 },
 }

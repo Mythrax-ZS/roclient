@@ -984,3 +984,29 @@ impl Encode for MemorialCommand {
         d.put_i32_le(self.0);
     }
 }
+
+/// Roulette requests: open (0x0a19), prize table (0x0a1b), close (0x0a1d), spin (0x0a1f),
+/// claim the prize (0x0a21).
+#[derive(Debug, Clone, Copy)]
+pub enum RouletteRequest {
+    Open,
+    Info,
+    Close,
+    Spin,
+    Claim,
+}
+
+impl Encode for RouletteRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match self {
+            RouletteRequest::Open => d.put_u16_le(0x0a19),
+            RouletteRequest::Info => d.put_u16_le(0x0a1b),
+            RouletteRequest::Close => d.put_u16_le(0x0a1d),
+            RouletteRequest::Spin => d.put_u16_le(0x0a1f),
+            RouletteRequest::Claim => {
+                d.put_u16_le(0x0a21);
+                d.put_u8(0);
+            }
+        }
+    }
+}

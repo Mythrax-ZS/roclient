@@ -6,6 +6,7 @@
 mod audio;
 mod book;
 mod memorial;
+mod roulette;
 mod sense;
 mod pettalk;
 mod fx;
@@ -968,6 +969,7 @@ struct App {
     /// The book reader (readbook scripts, book items).
     books: book::Books,
     memorial: memorial::Memorial,
+    roulette: roulette::Roulette,
     /// The player we asked to trade, until they answer.
     trade_partner: Option<String>,
     /// Clicked player: (id, name, menu position in UI points).
@@ -1046,6 +1048,12 @@ struct App {
 }
 
 impl App {
+    /// Opens the roulette window (the server answers with points and the prize table).
+    fn open_roulette(&mut self) {
+        self.send(ro_net::Command::Roulette(ro_net::RouletteRequest::Open));
+        self.send(ro_net::Command::Roulette(ro_net::RouletteRequest::Info));
+    }
+
     /// Opens book `id` (its item id) at `page`, titled with the item's name.
     fn open_book(&mut self, id: u32, page: u32) {
         let title = self.item_db.as_ref().map_or_else(|| format!("Book {id}"), |db| db.name(id, true));
@@ -2587,6 +2595,12 @@ impl App {
             }
             ProgressCancel => self.script_progress = None,
             ReadBook { id, page } => self.open_book(id, page),
+            Roulette(note) => {
+                let db = self.item_db.as_ref();
+                self.roulette.apply(note, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(id, true)));
+                let ids = self.roulette.items();
+                self.load_icons_for(&ids);
+            }
             UnitProgress { id, secs } => {
                 self.unit_progress.insert(id, (0.0, secs.max(1) as f32 * 1000.0));
             }
@@ -3712,6 +3726,7 @@ impl App {
             }
             "opts" => self.game_opts.open = !self.game_opts.open,
             "rank" => self.send(ro_net::Command::Ranking(self.ranking.kind)),
+            "roulette" => self.open_roulette(),
             "battle" => {
                 self.battle.ensure_loaded(self.vfs.as_ref());
                 self.battle.open = !self.battle.open;
@@ -3974,6 +3989,11 @@ impl App {
                     _ => None,
                 },
             };
+            if text.trim() == "/roulette" {
+                let _ = tx.send(ro_net::Command::Roulette(ro_net::RouletteRequest::Open));
+                let _ = tx.send(ro_net::Command::Roulette(ro_net::RouletteRequest::Info));
+                return;
+            }
             if let Some(k) = ["/blacksmith", "/alchemist", "/taekwon", "/pk"].iter().position(|c| text.trim() == *c) {
                 let _ = tx.send(ro_net::Command::Ranking(k as u16));
                 return;
@@ -5723,6 +5743,17 @@ impl App {
                     }
                 }
                 self.books.show(ui.ctx());
+                let db = self.item_db.as_ref();
+                if let Some(act) = self.roulette.show(ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(id, true))) {
+                    let r = match act {
+                        roulette::Action::Spin => ro_net::RouletteRequest::Spin,
+                        roulette::Action::Claim => ro_net::RouletteRequest::Claim,
+                        roulette::Action::Close => ro_net::RouletteRequest::Close,
+                    };
+                    if let Some((tx, _)) = self.net.as_ref() {
+                        let _ = tx.send(ro_net::Command::Roulette(r));
+                    }
+                }
                 if self.memorial.show(ui.ctx()) {
                     if let Some((tx, _)) = self.net.as_ref() {
                         let _ = tx.send(ro_net::Command::MemorialDestroy);
@@ -6304,6 +6335,7 @@ fn main() -> anyhow::Result<()> {
         social: Default::default(),
         books: Default::default(),
         memorial: Default::default(),
+        roulette: Default::default(),
         trade_partner: None,
         player_menu: None,
         auto_deal: arg("--deal").map(|d| d == "buy"),
