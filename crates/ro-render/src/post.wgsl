@@ -10,12 +10,14 @@ struct Params {
     dof: vec4<f32>,
     // x: exposure, y: contrast, z: saturation, w: warmth (-1 cool .. 1 warm)
     grade: vec4<f32>,
-    // x: vignette strength, y: aspect ratio, z: shadow lift, w: unused
+    // x: vignette strength, y: aspect ratio, z: shadow lift, w: sky height offset
     misc: vec4<f32>,
     // x: focus distance, y: depth blur range, z: fog start, w: fog end
     depth: vec4<f32>,
     // rgb: fog colour, a: fog strength
     fog: vec4<f32>,
+    // rgb: sky zenith, a: sky gradient exponent (0 disables the outdoor sky path)
+    sky: vec4<f32>,
     // xy: sun position (uv), z: ray intensity, w: 1 when the sun is in front
     rays: vec4<f32>,
     // x: AO strength, y: sample radius in pixels at the focus distance
@@ -66,9 +68,21 @@ fn fs_down(in: VsOut) -> @location(0) vec4<f32> {
 }
 
 // Downsample keeping only what is brighter than the threshold (soft knee).
+fn bloom_sample(uv: vec2<f32>) -> vec3<f32> {
+    let c = textureSample(src, samp, uv).rgb;
+    let depth = textureSample(info, samp, uv).x;
+    // A bright cloud is a background, not a light source. Mask each downsample tap
+    // before filtering so the sky cannot flood the scene's bloom and god-ray buffers.
+    return c * select(1.0, 0.0, p.sky.w > 0.0 && depth >= 50000.0);
+}
+
 @fragment
 fn fs_bright(in: VsOut) -> @location(0) vec4<f32> {
-    let c = down4(in.uv);
+    let o = p.texel.xy;
+    let c = (bloom_sample(in.uv + vec2(-o.x, -o.y))
+          + bloom_sample(in.uv + vec2( o.x, -o.y))
+          + bloom_sample(in.uv + vec2(-o.x,  o.y))
+          + bloom_sample(in.uv + vec2( o.x,  o.y))) * 0.25;
     let l = max(c.r, max(c.g, c.b));
     let knee = p.bloom.x * p.bloom.y + 1e-4;
     let soft = clamp(l - p.bloom.x + knee, 0.0, 2.0 * knee);
@@ -249,12 +263,18 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
     let t = max(band * 0.7, away) * p.dof.x;
     let blur_ao = mix(1.0, textureSample(ao_tex, samp, in.uv).r, 1.0 - inf.y);
     var c = mix(sharp, textureSample(blurred, samp, in.uv).rgb * blur_ao, t);
-    // Distance haze toward the far parts of the view, tinted by the map's ambient light.
+    // Distance haze matches the backdrop's vertical gradient outdoors; interiors keep
+    // their map-light fog colour. Both are graded together later in this pass.
     // Nothing drawn there (the void around indoor rooms): leave it dark.
     // (MSAA edges average real depth with the void's 60000, so anything far past the fog
     // range counts as void too.)
     let haze = smoothstep(p.depth.z, p.depth.w, depth) * p.fog.a * select(1.0, 0.0, depth > p.depth.w * 3.0);
-    c = mix(c, p.fog.rgb, haze);
+    var fog_color = p.fog.rgb;
+    if p.sky.w > 0.0 {
+        let sky_height = clamp(1.0 - uv.y + p.misc.w, 0.0, 1.0);
+        fog_color = mix(fog_color, p.sky.rgb, pow(sky_height, p.sky.w));
+    }
+    c = mix(c, fog_color, haze);
     c += textureSample(bloom_tex, samp, in.uv).rgb * p.bloom.z;
     c += textureSample(rays_tex, samp, in.uv).rgb * p.rays.z;
     if uw > 0.0 {

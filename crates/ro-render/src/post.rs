@@ -93,6 +93,8 @@ struct Params {
     depth: [f32; 4],
     /// rgb: fog colour, a: fog strength
     fog: [f32; 4],
+    /// rgb: outdoor sky zenith, a: gradient exponent (0: use the uniform fog colour).
+    sky: [f32; 4],
     /// xy: sun position (uv), z: ray intensity, w: 1 when the sun is in front of the camera
     rays: [f32; 4],
     /// x: AO strength, y: sample radius (pixels at the focus distance)
@@ -105,12 +107,22 @@ struct Params {
     inv_vp: [[f32; 4]; 4],
 }
 
+/// The same vertical colour gradient used by the outdoor sky backdrop.
+#[derive(Clone, Copy, Debug)]
+pub struct SkyFog {
+    pub zenith: [f32; 3],
+    pub gradient: f32,
+    pub height_offset: f32,
+}
+
 /// What the post chain needs from the frame besides the settings.
 pub struct FrameInfo {
     /// Distance from the eye to the player (the focal plane).
     pub focus: f32,
     /// Haze colour (from the map's ambient light).
     pub fog_color: [f32; 3],
+    /// Outdoors, match the sky at this screen height rather than fogging toward a flat colour.
+    pub sky: Option<SkyFog>,
     /// Where the sun sits on screen (uv), if in front of the camera.
     pub sun_uv: Option<[f32; 2]>,
     /// 0..1: the underwater look (absorption, caustics, shafts, drifting particles).
@@ -314,9 +326,10 @@ impl Post {
             // The camera keeps the player at the centre; their body sits a little above it.
             dof: [s.dof_strength, 0.47, s.dof_band, 0.22],
             grade: [s.exposure, s.contrast, s.saturation, s.warmth],
-            misc: [s.vignette, w / h, 1.0, 0.0],
+            misc: [s.vignette, w / h, 1.0, frame.sky.map_or(0.0, |sky| sky.height_offset)],
             depth: [frame.focus, frame.focus * 0.6, frame.focus * 1.15, frame.focus * 2.6],
             fog: [frame.fog_color[0], frame.fog_color[1], frame.fog_color[2], s.fog],
+            sky: frame.sky.map_or([0.0; 4], |sky| [sky.zenith[0], sky.zenith[1], sky.zenith[2], sky.gradient.max(0.01)]),
             rays: match frame.sun_uv {
                 Some(uv) => [uv[0], uv[1], s.god_rays, 1.0],
                 None => [0.5, -0.5, 0.0, 0.0],
@@ -385,5 +398,17 @@ impl Post {
         // Ambient occlusion from the depth info, at half size.
         pass(enc, &self.ao, &t.hdr, &t.ao, full, none);
         pass(enc, &self.composite, &t.hdr, out, full, [&t.dof[0], &t.bloom[0], &t.info, &t.ao, &t.rays]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn shader_validates() {
+        let source = include_str!("post.wgsl");
+        let module = naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+            .validate(&module)
+            .expect("post.wgsl validates");
     }
 }

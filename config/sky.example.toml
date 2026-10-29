@@ -1,0 +1,25 @@
+# Optional per-map art direction. Copy to sky.toml beside local.toml.
+# Unlisted maps use the regional outdoor presets and the installed map metadata.
+# RGB colors are sRGB channels in 0..1. Changes apply on the next map entry.
+
+[maps.prontera]
+zenith = [0.27, 0.53, 0.80]
+horizon = [0.83, 0.90, 0.96]
+cloud = [0.98, 0.97, 0.93]
+cloud_cover = 0.48
+
+# Explicitly classify a custom map as outdoors, then style its sky.
+[maps.custom_coast]
+enabled = true
+zenith = [0.12, 0.57, 0.77]
+horizon = [0.72, 0.91, 0.91]
+cloud = [0.96, 0.98, 1.0]
+cloud_cover = 0.40
+cloud_scale = 1.2
+wind_speed = 0.025
+haze = 0.2
+stars = 0.65
+
+# An explicit disable also works on a normally outdoor map.
+[maps.custom_room]
+enabled = false

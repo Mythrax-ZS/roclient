@@ -492,13 +492,17 @@ pub fn detail_texture() -> Rgba {
 
 /// An equirectangular sky (u: azimuth, v: 0 zenith .. 1 nadir) from the map's lighting, and
 /// its cosine-weighted mean radiance over the upper hemisphere (linear RGB).
-pub fn sky_map(lighting: &crate::Lighting) -> (Rgba, [f32; 3]) {
+pub fn sky_map(lighting: &crate::Lighting, profile: Option<&crate::SkyProfile>) -> (Rgba, [f32; 3]) {
     let (w, h) = SKY_SIZE;
     let sun = -glam::Vec3::from(lighting.direction).normalize_or(glam::Vec3::new(0.5, -0.7, 0.5));
     let amb = glam::Vec3::from(lighting.ambient);
     let dif = glam::Vec3::from(lighting.diffuse);
-    let zenith = glam::Vec3::new(0.16, 0.30, 0.58).lerp(amb * 0.8, 0.25);
-    let horizon = glam::Vec3::new(0.62, 0.72, 0.82).lerp(dif, 0.2);
+    let zenith = profile.map_or_else(|| glam::Vec3::new(0.16, 0.30, 0.58).lerp(amb * 0.8, 0.25), |p| p.zenith.into());
+    let horizon = profile.map_or_else(|| glam::Vec3::new(0.62, 0.72, 0.82).lerp(dif, 0.2), |p| p.horizon.into());
+    let cloud_color = profile.map_or_else(|| glam::Vec3::splat(0.85) * (amb + dif * 0.5).min(glam::Vec3::ONE), |p| p.cloud.into());
+    let cloud_scale = profile.map_or(2.5, |p| p.cloud_scale * 2.5);
+    let cloud_cover = profile.map_or(0.45, |p| p.cloud_cover);
+    let seed = profile.map_or(0.0, |p| p.seed);
     let ground = amb * 0.22 + glam::Vec3::new(0.02, 0.03, 0.03);
     let mut pixels = Vec::with_capacity((w * h * 4) as usize);
     let (mut sum, mut wsum) = (glam::Vec3::ZERO, 0.0f32);
@@ -512,10 +516,10 @@ pub fn sky_map(lighting: &crate::Lighting) -> (Rgba, [f32; 3]) {
             let mut c = if up >= 0.0 { horizon.lerp(zenith, up.powf(0.6)) } else { horizon.lerp(ground, (-up).powf(0.4)) };
             if up > 0.0 {
                 // Soft clouds: smooth noise over the projected sky plane.
-                let (px, pz) = (d.x / (up + 0.15) * 2.5, d.z / (up + 0.15) * 2.5);
+                let (px, pz) = (d.x / (up + 0.15) * cloud_scale + seed * 0.13, d.z / (up + 0.15) * cloud_scale + seed * 0.21);
                 let cloud = value_noise(px, pz) * 0.6 + value_noise(px * 2.3, pz * 2.3) * 0.4;
-                let cover = ((cloud - 0.55) * 3.0).clamp(0.0, 1.0) * up.powf(0.3);
-                c = c.lerp(glam::Vec3::splat(0.85) * (amb + dif * 0.5).min(glam::Vec3::ONE), cover * 0.7);
+                let cover = ((cloud - (1.0 - cloud_cover)) * 3.0).clamp(0.0, 1.0) * up.powf(0.3);
+                c = c.lerp(cloud_color, cover * 0.7);
                 let s = d.dot(sun).max(0.0);
                 c += dif * (s.powf(1200.0) * 30.0 + s.powf(24.0) * 0.35);
                 sum += c * up * theta.sin();
@@ -851,6 +855,27 @@ mod tests {
         assert!(bits(WaterQuality::Low) < bits(WaterQuality::High));
         assert!(!WaterSettings::preset(WaterQuality::Low).uses_screen());
         assert!(WaterSettings::preset(WaterQuality::Ultra).uses_screen());
+    }
+
+    #[test]
+    fn reflection_map_uses_the_outdoor_palette_in_linear_light() {
+        // Remove sunlight/cloud highlights so the test measures the supplied palette.
+        let light = crate::Lighting { ambient: [0.0; 3], diffuse: [0.0; 3], ..Default::default() };
+        let mut red = crate::SkyProfile::outdoor("custom_sky", &light);
+        red.zenith = [0.6, 0.03, 0.01];
+        red.horizon = red.zenith;
+        red.cloud_cover = 0.0;
+        let (image, mean) = sky_map(&light, Some(&red));
+        assert!(mean[0] > mean[2] * 20.0);
+        let decoded = mean_radiance(&image);
+        for channel in 0..3 {
+            assert!((decoded[channel] - mean[channel]).abs() < 0.01, "sky texture and radiance must agree");
+        }
+        let mut blue = red;
+        blue.zenith.reverse();
+        blue.horizon = blue.zenith;
+        let (_, mean) = sky_map(&light, Some(&blue));
+        assert!(mean[2] > mean[0] * 20.0);
     }
 
     #[test]

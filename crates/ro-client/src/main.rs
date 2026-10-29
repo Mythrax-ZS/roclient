@@ -23,6 +23,7 @@ mod mail;
 mod msgstr;
 mod merchant;
 mod preview;
+mod sky;
 mod progress;
 mod quests;
 mod refine;
@@ -414,6 +415,8 @@ const DIRS: [ro_render::Dir; 8] = {
 /// The map currently shown: its geometry (for picking/heights) and walkability.
 struct World {
     name: String,
+    /// Confirmed exterior (including an explicit sky override for a custom map).
+    outdoors: bool,
     ground: ro_render::SceneMesh,
     gat: Option<ro_formats::gat::Gat>,
     /// Indoor maps: the cells of the room we are in, plus its walls (one byte per cell).
@@ -428,7 +431,7 @@ const ROOM_MARGIN: i32 = 5;
 impl World {
     /// Interior maps pack many rooms (linked by warps) into one map.
     fn indoor(&self) -> bool {
-        self.name.contains("_in")
+        !self.outdoors && self.name.contains("_in")
     }
 
     /// Whether a cell is drawn (always, outdoors).
@@ -813,6 +816,7 @@ struct App {
     distance: Option<f32>,
     /// `--yaw degrees`: initial camera rotation (0 looks north).
     yaw: Option<f32>,
+    pitch: Option<f32>,
     /// Offline preview appearance and pose (`--job`, `--sex`, `--action n`, `--dir 0..7`).
     look: Look,
     action: usize,
@@ -1092,12 +1096,16 @@ impl App {
         match load_map(vfs, name, &ro_render::Upscaler::new(self.settings.upscale.clone())) {
             Ok(map) => {
                 r.set_scene(&map.mesh, map.images, map.lighting);
+                let submerged = map.effects.iter().filter(|e| e.0 == 109).count() >= 40;
+                let sky = sky::for_map(vfs, name, &map.lighting, submerged);
+                let outdoors = sky.is_some();
+                tracing::info!(map = name, sky = sky.as_ref().map(|s| s.name), "map sky");
+                r.set_sky_profile(sky);
                 tracing::info!(count = map.lights.len(), first = ?map.lights.first(), "map light sources");
                 r.point_lights = map.lights;
                 if let Some((mesh, images)) = map.water {
                     r.set_water(&mesh, images);
                 }
-                let submerged = map.effects.iter().filter(|e| e.0 == 109).count() >= 40;
                 self.unit_progress.clear();
                 self.shouts.clear();
                 self.digit = None;
@@ -1138,7 +1146,7 @@ impl App {
                     a.enter_map(vfs, name);
                 }
                 r.set_room_mask(None);
-                self.world = Some(World { name: name.to_string(), ground: map.mesh, gat, room: None, submerged });
+                self.world = Some(World { name: name.to_string(), outdoors, ground: map.mesh, gat, room: None, submerged });
                 self.ready_at = Some(std::time::Instant::now());
             }
             Err(e) => tracing::error!("map {name}: {e:#}"),
@@ -6313,6 +6321,9 @@ impl ApplicationHandler for App {
                 if let Some(yaw) = self.yaw {
                     r.camera.yaw = yaw.to_radians();
                 }
+                if let Some(pitch) = self.pitch {
+                    r.camera.pitch = pitch.to_radians().clamp(25f32.to_radians(), 75f32.to_radians());
+                }
                 if let Some(d) = self.distance {
                     r.camera.distance = d;
                 }
@@ -6352,6 +6363,13 @@ impl ApplicationHandler for App {
         if self.net.is_none() {
             let map = self.map.clone();
             self.enter_map(&map);
+            // Offline sky/lighting previews can use moonlight without changing the
+            // server's clock. Online sessions continue to follow the server status.
+            if std::env::args().any(|a| a == "--night") {
+                if let Some(r) = self.renderer.as_mut() {
+                    r.night = true;
+                }
+            }
         }
         if self.net.is_none() {
             let look = self.look.clone();
@@ -6546,6 +6564,7 @@ fn main() -> anyhow::Result<()> {
         still: args.iter().any(|a| a == "--still"),
         distance: arg("--distance").and_then(|d| d.parse().ok()),
         yaw: arg("--yaw").and_then(|d| d.parse().ok()),
+        pitch: arg("--pitch").and_then(|d| d.parse().ok()),
         look: Look { job: arg("--job").unwrap_or_else(|| "초보자".into()), male: arg("--sex").is_none_or(|s| s != "f"), hair: 1, hair_color: 0, gear: ro_net::Look { weapon: arg("--weapon").and_then(|w| w.parse().ok()).unwrap_or(0), ..Default::default() } },
         action: arg("--action").and_then(|a| a.parse().ok()).unwrap_or(0),
         dir: arg("--dir").and_then(|d| d.parse::<usize>().ok()).unwrap_or(0) % 8,

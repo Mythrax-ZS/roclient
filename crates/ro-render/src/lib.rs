@@ -7,6 +7,8 @@ mod particle;
 mod fx;
 mod post;
 mod shadow;
+mod sky;
+mod sky_profile;
 mod sprite;
 mod upscale;
 mod water;
@@ -24,6 +26,7 @@ pub use effect::{ProcFx, Shape, TexId};
 pub use particle::{Emitter, EmitterDef, Glow, Waterfall, Wind};
 pub use fx::{Fx, FxId};
 pub use post::PostSettings;
+pub use sky_profile::SkyProfile;
 pub use sprite::{Actor, Dir, SheetId};
 use winit::window::Window;
 
@@ -128,6 +131,8 @@ pub struct Renderer {
     room: Option<(u32, u32)>,
     grid: wgpu::RenderPipeline,
     scene_pipeline: wgpu::RenderPipeline,
+    sky: sky::Sky,
+    sky_profile: Option<SkyProfile>,
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     lightmap_sampler: wgpu::Sampler,
@@ -494,6 +499,7 @@ impl Renderer {
         let water_screen = water::ScreenCopies::new(&device, &water_screen_layout, config.width, config.height);
         let water_detail = scene::upload_texture(&device, &queue, &water::detail_texture(), true);
         let post = post::Post::new(&device, config.format);
+        let sky = sky::Sky::new(&device, samples);
         Ok(Self {
             surface,
             device,
@@ -507,6 +513,8 @@ impl Renderer {
             room: None,
             grid,
             scene_pipeline,
+            sky,
+            sky_profile: None,
             texture_layout,
             sampler,
             lightmap_sampler,
@@ -570,6 +578,14 @@ impl Renderer {
         ));
         self.lighting = lighting;
         self.water = None;
+        self.sky_profile = None;
+    }
+
+    /// Sets the outdoor backdrop for this map. Call after `set_scene` and before
+    /// `set_water` so the background, haze and generated reflections share a palette.
+    /// None keeps the dark backdrop used by interiors and subterranean maps.
+    pub fn set_sky_profile(&mut self, profile: Option<SkyProfile>) {
+        self.sky_profile = profile;
     }
 
     /// Uploads a sprite sheet. `palette` overrides the SPR's own (hair / body dyes).
@@ -722,7 +738,7 @@ impl Renderer {
         let sky = match &self.water_sky {
             Some((img, mean)) => (img, *mean),
             None => {
-                generated = water::sky_map(&self.lighting);
+                generated = water::sky_map(&self.lighting, self.sky_profile.as_ref());
                 (&generated.0, generated.1)
             }
         };
@@ -1019,6 +1035,10 @@ impl Renderer {
             upscale: [if self.upscale_runtime { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
+        let outdoor_sky = self.scene.is_some() && self.room.is_none() && self.underwater <= 0.0 && self.sky_profile.is_some();
+        if outdoor_sky {
+            self.sky.update(&self.queue, self.sky_profile.as_ref().unwrap(), cam, aspect, self.started.elapsed().as_secs_f32(), self.night_t, self.shadow_dir().to_array());
+        }
 
         // Sprites, back to front by distance from the eye so blended edges composite.
         let eye = cam.eye();
@@ -1052,6 +1072,7 @@ impl Renderer {
             w.wade(walkers, cam.target, cam.eye(), self.started.elapsed().as_secs_f32());
             let lum = |c: [f32; 3]| c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11;
             let sky_scale = (lum(self.lighting.diffuse) + lum(self.lighting.ambient)) / (lum(day_light.diffuse) + lum(day_light.ambient)).max(1e-3);
+            let sky_scale = if outdoor_sky { sky_scale * (1.0 - 0.78 * self.night_t) } else { sky_scale };
             w.update(&self.queue, &self.water_settings, self.lighting.diffuse, sky_scale);
             let s = self.water_screen.color.size();
             if (s.width, s.height) != size {
@@ -1098,6 +1119,9 @@ impl Renderer {
         let water_reads_screen = self.water.is_some() && self.water_settings.uses_screen();
         {
             let mut pass = begin(&mut enc, true);
+            if outdoor_sky {
+                self.sky.draw(&mut pass);
+            }
             pass.set_bind_group(0, &self.globals_bind, &[]);
             match &self.scene {
                 Some(t) => {
@@ -1228,10 +1252,19 @@ impl Renderer {
             let sun = vp * (cam.target - self.shadow_dir() * cam.distance * 4.0).extend(1.0);
             let amb = glam::Vec3::from(self.lighting.ambient);
             // Haze: the map's ambient light lifted toward a pale sky, in linear space.
-            let fog = amb.lerp(glam::Vec3::new(0.85, 0.88, 0.95), 0.6).powf(2.2);
+            let fog = if outdoor_sky {
+                glam::Vec3::from(sky::horizon_color(self.sky_profile.as_ref().unwrap(), self.night_t))
+            } else {
+                amb.lerp(glam::Vec3::new(0.85, 0.88, 0.95), 0.6).powf(2.2)
+            };
             post::FrameInfo {
                 focus: cam.distance,
                 fog_color: fog.to_array(),
+                sky: self.sky_profile.as_ref().filter(|_| outdoor_sky).map(|profile| post::SkyFog {
+                    zenith: sky::zenith_color(profile, self.night_t),
+                    gradient: 0.7 + profile.haze * 0.4,
+                    height_offset: (50f32.to_radians() - cam.pitch) * 0.3 / 0.82,
+                }),
                 sun_uv: (sun.w > 0.0).then(|| [sun.x / sun.w * 0.5 + 0.5, 0.5 - sun.y / sun.w * 0.5]),
                 underwater: self.underwater,
                 time: self.started.elapsed().as_secs_f32(),

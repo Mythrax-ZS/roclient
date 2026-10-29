@@ -202,7 +202,8 @@ fn sky_uv(d: vec3<f32>) -> vec2<f32> {
 // Sky radiance in a direction, dimmed with the night.
 fn sky(d: vec3<f32>) -> vec3<f32> {
     let c = textureSampleLevel(sky_map, wrap, sky_uv(d), 0.0).rgb;
-    return srgb_to_linear(c) * w.sky.w;
+    // The sky texture is sRGB: sampling has already decoded it to linear light.
+    return c * w.sky.w;
 }
 
 // Linear eye distance of the opaque scene at a screen uv.
