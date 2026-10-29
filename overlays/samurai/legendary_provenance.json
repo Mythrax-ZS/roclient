@@ -1,15 +1,11 @@
 {
   "schema_version": 1,
-  "revision": "Kusanagi and Muramasa v3 straight katana blades, 2026-10-30",
-  "generation_mode": "built-in image_gen",
+  "revision": "Kusanagi and Muramasa v4 from the user's illustrations, 2026-10-30",
+  "generation_mode": "Cut out of the user-supplied illustrations (art.zip: Kusanagi.png, Muramasa Transformed.png); no image generation.",
   "gameplay_source": "https://chatgpt.com/share/6ae32624-5d04-83ea-97ca-d6037adb630c",
   "source_scope": "The recovered shared conversation establishes Divinity/Kusanagi and Cursed/Muramasa skill themes. The private Discord message and deeper project backstory were not readable; no additional canon is claimed.",
   "visual_references": "User supplied gold/blue Kusanagi and red/black Muramasa illustrations; matching originals are Kusanagi.png and Muramasa Transformed.png in art.zip.",
   "manifest": "tools/samurai_assets/artwork/legendary_weapons.json",
-  "generation_prompts": [
-    "tools/samurai_assets/artwork/source/legendary/kusanagi-v3.prompt.json",
-    "tools/samurai_assets/artwork/source/legendary/muramasa-v3.prompt.json"
-  ],
   "compiler": "tools/samurai_assets/compile_weapons.py",
   "items": [
     {
@@ -28,36 +24,35 @@
   "validation": {
     "strict_spr_act_validation": "Passed for both variants and floor sprites (compile_weapons.py). Equipped pairs retain 104 actions and 304 frames.",
     "body_files_unchanged": true,
-    "attack_pose_metadata_unchanged": "Attack poses are unchanged from v2. The ready pose for SW, W and NW (and mirrored SE, E, NE) now keeps the cutting edge underneath; see weapon_pose_audit.json ready_pose_edge_side_correction.",
-    "runtime_gui_checks": "8 offline captures at prt_fild08, 2000x1125, distance 300 (no server, no login): ready facing S and W, attack at 180 ms facing S and at 270 ms facing E, for each weapon. Both straight blades stay in the hands and point the same way as v2.",
-    "visual_limits": "Main-hand weapon is rendered; separately animated offhand artwork is not supplied.",
-    "gameplay_scope": "This revision changes weapon artwork only. Item scripts, stats and pose metadata are unchanged.",
+    "pose_metadata": "Attack and ready poses unchanged (weapon_pose_audit.json); the v4 sources keep the convention of tip right, cutting edge below.",
+    "runtime_gui_checks": "8 offline captures at prt_fild08, 2000x1125, distance 300 (no server, no login): ready facing S and W, attack at 180 ms facing S and at 270 ms facing E, for each weapon. Hilts sit in the hands and the cutting edge leads.",
+    "visual_limits": "Main-hand weapon is rendered; separately animated offhand artwork is not supplied. Muramasa's tassel is a few pixels at game scale.",
+    "gameplay_scope": "This revision changes weapon artwork only. Item scripts and stats are unchanged.",
     "compiler_tests_passed": 17,
     "samurai_client_tests_passed": 6,
     "installed_overlay_matches_staging": true,
     "runtime_review_artifacts": [
-      "target/legendary-weapons-v3/captures/contact.png",
-      "target/ready-fix/contact.png"
+      "target/legendary-weapons-v4/captures/contact.png"
     ]
   },
   "source_sha256": {
-    "source/legendary/kusanagi-v3.png": "21df232b756f7b40d86484aecd5e55f8ce97212ce195c24cf741024011ce622e",
-    "source/legendary/kusanagi-v3.prompt.json": "52d1c7c94f4183d4cef596de60dbe023a825b6e06e86f8c258fc2dd0ad6cdce5",
-    "source/legendary/muramasa-v3.png": "f157f30194926009f51c2e6ef9a053768b16ae744191869df2fcbc32b8075a2a",
-    "source/legendary/muramasa-v3.prompt.json": "f45a42ff7043394e010dab26723064abb9e5ba554a543feee7a0e5838eb8b39e",
+    "source/legendary/kusanagi-v4.png": "25165a08de9aa676f5f75bd2793e175d7a0a545ed864530d8cd344a0286230b0",
+    "source/legendary/kusanagi-v4-illustration.png": "0beaf668a26d20dad6fcb5c70b7399e3f59d5f402b1a16b255e00deaf8bc3d58",
+    "source/legendary/muramasa-v4.png": "78745b250f9f5c75fb2fccd5fbbe0e8df57f73b141be106d0322412294a218af",
+    "source/legendary/muramasa-v4-illustration.png": "6479cf5d954e70e4cc22b1f8733950f1719288cf7c24c73d53f476328eda3abd",
     "weapon_pose_audit.json": "b44bfdfeafb2561558a0379b63730474d64ada0f6cd806bf5ecdca61619ea94d",
-    "source/legendary/sampling_review.json": "4241f581450f083608dd3859645e7d8504b50d8048c3dce442817cfe8c49c70d"
+    "source/legendary/sampling_review.json": "f2527786bc6efaf770283ac0f65dd3b3a4fdb89e3ee417eae0aa210278f46d33"
   },
   "compiled": {
     "base_config_sha256": "4909f43be3a00a576f2540bf5b19dca4fa259598f821c685ef6112154c5a899e",
-    "manifest_sha256": "c0b0fcd179c3ae54fac5a287be0cc4808b2b1ca3047e5ff203396d6c35c56b04",
+    "manifest_sha256": "499e24b9fcd1628627dfbf5b3caa515ce6f9903a110cc1fcc1259c513cf0c7a7",
     "weapons": {
       "kusanagi": {
         "resource": "samurai_kusanagi",
-        "source_sha256": "21df232b756f7b40d86484aecd5e55f8ce97212ce195c24cf741024011ce622e",
+        "source_sha256": "25165a08de9aa676f5f75bd2793e175d7a0a545ed864530d8cd344a0286230b0",
         "weapon_sha256": {
-          "spr": "c4dbef3ff29f2850ed416d075401c6e095e9751cc66d6620dfae955d88cc5cf0",
-          "act": "3a0146ef3ff4c668fa04208bfc9acd7fd829360d24b44ebbdf5d26b79619d703"
+          "spr": "ed2e73ff44a02939809cc1bdab17bef8e99a20c20a75738b051c6b8ea80f21db",
+          "act": "a19e0aae4de904cf0fabd6157dfc6a1301febb6ae440403eddd467de89378f64"
         },
         "floor_valid": true,
         "floor_origin": [
@@ -75,10 +70,10 @@
       },
       "muramasa": {
         "resource": "samurai_muramasa",
-        "source_sha256": "f157f30194926009f51c2e6ef9a053768b16ae744191869df2fcbc32b8075a2a",
+        "source_sha256": "78745b250f9f5c75fb2fccd5fbbe0e8df57f73b141be106d0322412294a218af",
         "weapon_sha256": {
-          "spr": "d742e9e52e3fa345f8fa462cd6ad02576d7d6c574319de74337d08d94cd1d1b8",
-          "act": "a1ac228fe27cebeb12375a2c7e9b3253f667b3e6e4ba415b1c627cd8e9c109e4"
+          "spr": "7f090cde8bb802dc021848b49110f7783177d1c2849f21599643fd1d848998bf",
+          "act": "5ea600e3acf3d408ea7991f87a94e2dc215d6c1446147ddf285e72e4998ab094"
         },
         "floor_valid": true,
         "floor_origin": [
@@ -100,26 +95,28 @@
       "act": "534d734911b30e8ab7730d859795864fac8b5617463f2a8d5e36c58957758275"
     },
     "overlay_sha256": {
-      "data/sprite/custom/samurai/kusanagi.act": "3a0146ef3ff4c668fa04208bfc9acd7fd829360d24b44ebbdf5d26b79619d703",
-      "data/sprite/custom/samurai/kusanagi.spr": "c4dbef3ff29f2850ed416d075401c6e095e9751cc66d6620dfae955d88cc5cf0",
-      "data/sprite/custom/samurai/muramasa.act": "a1ac228fe27cebeb12375a2c7e9b3253f667b3e6e4ba415b1c627cd8e9c109e4",
-      "data/sprite/custom/samurai/muramasa.spr": "d742e9e52e3fa345f8fa462cd6ad02576d7d6c574319de74337d08d94cd1d1b8",
+      "data/sprite/custom/samurai/kusanagi.act": "a19e0aae4de904cf0fabd6157dfc6a1301febb6ae440403eddd467de89378f64",
+      "data/sprite/custom/samurai/kusanagi.spr": "ed2e73ff44a02939809cc1bdab17bef8e99a20c20a75738b051c6b8ea80f21db",
+      "data/sprite/custom/samurai/muramasa.act": "5ea600e3acf3d408ea7991f87a94e2dc215d6c1446147ddf285e72e4998ab094",
+      "data/sprite/custom/samurai/muramasa.spr": "7f090cde8bb802dc021848b49110f7783177d1c2849f21599643fd1d848998bf",
       "data/sprite/아이템/samurai_kusanagi.act": "bdce179c49a9177d0d58370878b84d936621882a364dae5b555b2fe09a1f91fa",
-      "data/sprite/아이템/samurai_kusanagi.spr": "a3986bee9f2b4ce92ff4ff53a351609eba066e552cf21c3a9dbe9b1cd8b05f3d",
+      "data/sprite/아이템/samurai_kusanagi.spr": "8c2512de57fd662095aa89f988be81a5943210676a6f57d54e4bb44359027d28",
       "data/sprite/아이템/samurai_muramasa.act": "bdce179c49a9177d0d58370878b84d936621882a364dae5b555b2fe09a1f91fa",
-      "data/sprite/아이템/samurai_muramasa.spr": "a4e83686403808dd049f241f81f53fe0e24d78123d846d80f783cb839c547c3d",
-      "data/texture/유저인터페이스/collection/samurai_kusanagi.bmp": "fe8f67c43f310abd7e675b2fd470ba5eb233b6a24462f6604b7137ee971996b4",
-      "data/texture/유저인터페이스/collection/samurai_muramasa.bmp": "37b5da117970b0ff34d019c593c83da7b22839911c29dc06a2d9ff84c4cd4ba7",
-      "data/texture/유저인터페이스/item/samurai_kusanagi.bmp": "cce9e9c9f2becd05b4d9cb7fa1c3efe8e83fca60060c6d0c697bb3e6fdefa6e6",
-      "data/texture/유저인터페이스/item/samurai_muramasa.bmp": "1d2784092995073dd4ceaac5ba295fa7c96af7cb9fccf9abda2b3f58d7ee09b5"
+      "data/sprite/아이템/samurai_muramasa.spr": "100a82ea22ff296cce414a00b4be9ecaeff85f3e0e3c9f3127a8c3d1b78f2041",
+      "data/texture/유저인터페이스/collection/samurai_kusanagi.bmp": "59b53285eba50e232b625591621aa362ede196ea5042ddaf2643b3e69f39c023",
+      "data/texture/유저인터페이스/collection/samurai_muramasa.bmp": "a77fa40abe3d8ff2a9a0834267427dd12a2b3d4f48edce73b366ee4c2670230e",
+      "data/texture/유저인터페이스/item/samurai_kusanagi.bmp": "75713b40375ec7dea6ebe2e4cb9e49a63246a0cdc02c24125597b4ffcd2a5749",
+      "data/texture/유저인터페이스/item/samurai_muramasa.bmp": "bda8f25df1ded8457f7aeaa4e2ab9718497b95919b9a2c497b21b19d214b166a"
     }
   },
   "selected_sources": [
-    "tools/samurai_assets/artwork/source/legendary/kusanagi-v3.png",
-    "tools/samurai_assets/artwork/source/legendary/muramasa-v3.png"
+    "tools/samurai_assets/artwork/source/legendary/kusanagi-v4.png",
+    "tools/samurai_assets/artwork/source/legendary/kusanagi-v4-illustration.png",
+    "tools/samurai_assets/artwork/source/legendary/muramasa-v4.png",
+    "tools/samurai_assets/artwork/source/legendary/muramasa-v4-illustration.png"
   ],
-  "historical_sources": "Unversioned and v2 kusanagi/muramasa PNGs and prompts are retained as historical reference only; the selected manifest uses v3.",
-  "runtime_changes": "Both blades are now almost straight katana blades with a short angled kissaki, replacing v2's bowed silhouettes; grips, guards, colours and ornament are unchanged. Kusanagi is 58 visible pixels long with about 4-5 pixels of main blade face; Muramasa is 61 pixels long with about 4 pixels of face. Attack edge orientation and hand-axis poses are unchanged. Body art and item gameplay are unchanged.",
+  "historical_sources": "Unversioned, v2 and v3 kusanagi/muramasa PNGs and prompts are retained as historical reference only; the selected manifest uses v4.",
+  "runtime_changes": "Both weapons now come from the user's illustrations: each sword was cut out of its background, laid flat with the cutting edge below, scaled so pommel to tip is 58 game pixels, thickened in height (Kusanagi x1.45, Muramasa x1.35) so the slender painted blades read at game size, and given a warm dark rim. Muramasa keeps its tassel past the pommel. The item description pictures are the cut-out illustrations; icons and floor sprites come from the game-size sprites.",
   "prior_revision_validation": {
     "samurai_client_tests_passed": 6,
     "release_client_build": "passed",
@@ -130,5 +127,10 @@
     "balance_limits": "Initial gameplay balance. Random Bleeding frequency and skill damage percentages not statistically measured.",
     "visual_limits": "Main-hand weapon is rendered; a separately animated offhand blade is not supplied.",
     "scope": "Checks completed before v2 artwork and attack pose changes; retained as historical evidence."
-  }
+  },
+  "illustration_tools": [
+    "tools/samurai_assets/illustration/cutout.py",
+    "tools/samurai_assets/illustration/mura_outline.py",
+    "tools/samurai_assets/illustration/native.py"
+  ]
 }

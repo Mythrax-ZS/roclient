@@ -5,36 +5,38 @@
       "item_id": 900001,
       "view": 9001,
       "resource": "samurai_kusanagi",
-      "png": "source/legendary/kusanagi-v3.png",
+      "png": "source/legendary/kusanagi-v4.png",
       "rect": [
-        32,
-        208,
+        0,
+        0,
         1952,
-        592
+        384
       ],
       "downsample": 32,
       "source_grip": [
-        9,
-        6
-      ]
+        12,
+        4
+      ],
+      "illustration": "source/legendary/kusanagi-v4-illustration.png"
     },
     {
       "name": "muramasa",
       "item_id": 900002,
       "view": 9002,
       "resource": "samurai_muramasa",
-      "png": "source/legendary/muramasa-v3.png",
+      "png": "source/legendary/muramasa-v4.png",
       "rect": [
-        32,
-        192,
-        2144,
+        0,
+        0,
+        2368,
         576
       ],
-      "downsample": 33,
+      "downsample": 32,
       "source_grip": [
-        10,
-        5
-      ]
+        22,
+        10
+      ],
+      "illustration": "source/legendary/muramasa-v4-illustration.png"
     }
   ]
 }

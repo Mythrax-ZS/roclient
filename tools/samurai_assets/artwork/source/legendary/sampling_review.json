@@ -1,84 +1,84 @@
 {
   "kusanagi": {
-    "png": "source/legendary/kusanagi-v3.png",
+    "png": "source/legendary/kusanagi-v4.png",
     "rect": [
-      32,
-      208,
+      0,
+      0,
       1952,
-      592
+      384
     ],
     "downsample": 32,
     "source_grip": [
-      9,
-      6
+      12,
+      4
     ],
     "source_size": [
-      1983,
-      793
+      1952,
+      384
     ],
     "source_visible_bbox": [
-      67,
-      244,
-      1922,
-      546
+      32,
+      32,
+      1920,
+      352
     ],
     "native_size": [
-      60,
+      61,
       12
     ],
     "native_visible_bbox": [
       1,
       1,
-      59,
+      60,
       11
     ],
-    "sha256": "21df232b756f7b40d86484aecd5e55f8ce97212ce195c24cf741024011ce622e",
+    "sha256": "25165a08de9aa676f5f75bd2793e175d7a0a545ed864530d8cd344a0286230b0",
     "main_blade_width_range": [
       4,
-      5
+      6
     ],
     "main_blade_width_median": 5,
     "native_visible_edge_contacts": []
   },
   "muramasa": {
-    "png": "source/legendary/muramasa-v3.png",
+    "png": "source/legendary/muramasa-v4.png",
     "rect": [
-      32,
-      192,
-      2144,
+      0,
+      0,
+      2368,
       576
     ],
-    "downsample": 33,
+    "downsample": 32,
     "source_grip": [
-      10,
-      5
+      22,
+      10
     ],
     "source_size": [
-      2172,
-      724
+      2368,
+      576
     ],
     "source_visible_bbox": [
-      84,
-      232,
-      2107,
-      498
+      32,
+      32,
+      2336,
+      544
     ],
     "native_size": [
-      64,
-      12
+      74,
+      18
     ],
     "native_visible_bbox": [
-      2,
       1,
-      63,
-      9
+      1,
+      73,
+      17
     ],
-    "sha256": "f157f30194926009f51c2e6ef9a053768b16ae744191869df2fcbc32b8075a2a",
+    "sha256": "78745b250f9f5c75fb2fccd5fbbe0e8df57f73b141be106d0322412294a218af",
     "main_blade_width_range": [
       4,
-      4
+      6
     ],
-    "main_blade_width_median": 4,
+    "main_blade_width_median": 5,
     "native_visible_edge_contacts": []
   }
 }

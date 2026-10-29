@@ -3,7 +3,8 @@
 CLI: py compile_weapons.py artwork/build.json artwork/legendary_weapons.json --output target/weapons
 Manifest: {"weapons": [{"name": "kusanagi", "resource": "samurai_kusanagi",
 "png": "source/kusanagi.png", "rect": [0,0,1728,240], "downsample": 24,
-"source_grip": [14,5]}]}. PNG paths are relative to the manifest.
+"source_grip": [14,5]}]}. PNG paths are relative to the manifest. An optional
+"illustration" RGBA PNG becomes the item description (collection) picture as drawn.
 Only generated staging configs contain absolute paths. Runtime installation is separate.
 """
 from __future__ import annotations
@@ -37,6 +38,16 @@ def item_picture(source, size):
     image = image.resize(tuple(max(1, round(v * ratio)) for v in image.size), Image.Resampling.NEAREST)
     canvas = Image.new("RGBA", (size, size))
     canvas.alpha_composite(image, ((size - image.width) // 2, (size - image.height) // 2))
+    return canvas
+
+
+def illustration_picture(path, size):
+    """Fit an authored RGBA illustration into a square without rotating or stretching it."""
+    image = Image.open(path).convert("RGBA")
+    ratio = (size - 4) / max(image.size)
+    resized = image.convert("RGBa").resize(tuple(max(1, round(v * ratio)) for v in image.size), Image.Resampling.LANCZOS).convert("RGBA")
+    canvas = Image.new("RGBA", (size, size))
+    canvas.alpha_composite(resized, ((size - resized.width) // 2, (size - resized.height) // 2))
     return canvas
 
 
@@ -93,7 +104,10 @@ def compile_weapons(base_path, manifest_path, output):
         source = sampled_weapon_png(png, {"rect": entry["rect"]} if "rect" in entry else {})
         small = item_picture(source, 32)
         save_colorkey_bmp(overlay / f"data/texture/유저인터페이스/item/{resource}.bmp", small)
-        save_colorkey_bmp(overlay / f"data/texture/유저인터페이스/collection/{resource}.bmp", item_picture(source, 128))
+        # The item description picture: the authored illustration when there is one.
+        illustration = entry.get("illustration")
+        collection = illustration_picture(manifest_path.parent / illustration, 128) if illustration else item_picture(source, 128)
+        save_colorkey_bmp(overlay / f"data/texture/유저인터페이스/collection/{resource}.bmp", collection)
         floor = overlay / f"data/sprite/아이템/{resource}"
         write_spr(floor.with_suffix(".spr"), [raw_image(small)])
         # A dropped item is centered on its world position: explicit origin (16,16).

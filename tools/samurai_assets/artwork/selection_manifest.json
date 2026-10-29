@@ -9,8 +9,10 @@
     "source/attack/attack_W.png",
     "source/idle_ready.png",
     "source/katana.png",
-    "source/legendary/kusanagi-v3.png",
-    "source/legendary/muramasa-v3.png",
+    "source/legendary/kusanagi-v4-illustration.png",
+    "source/legendary/kusanagi-v4.png",
+    "source/legendary/muramasa-v4-illustration.png",
+    "source/legendary/muramasa-v4.png",
     "source/utility/utility_N.png",
     "source/utility/utility_NW.png",
     "source/utility/utility_S.png",
@@ -29,10 +31,10 @@
   "exclusion_reason": "Not referenced by build.json; working or superseded artwork remains outside release.",
   "sha256": {
     "build.json": "4909f43be3a00a576f2540bf5b19dca4fa259598f821c685ef6112154c5a899e",
-    "legendary_weapons.json": "c0b0fcd179c3ae54fac5a287be0cc4808b2b1ca3047e5ff203396d6c35c56b04",
+    "legendary_weapons.json": "499e24b9fcd1628627dfbf5b3caa515ce6f9903a110cc1fcc1259c513cf0c7a7",
     "master_audit.json": "7b589392b84d7d90bd20c073badad3f1ed3dc458ed5736d17a561face6a36fb4",
     "prompts_root.json": "5534a6cc57e7550837bb0009cce73a6d2b69fd17d4ecbea67b40dd69c0b74581",
-    "README.md": "52aa6899fad78e9e4065dadf6a9afc275072285184e5564813d3d69ae1a47292",
+    "README.md": "01d25d56a2d3448f761d43d779d4a7f1025bcf524a8a21e85272f6c363b1b048",
     "source/attack/attack_audit.json": "5426270d8e7c0939a9ba5330f33362f61e034ddfb4cf5e033c847fd280edb43a",
     "source/attack/attack_N.png": "861b2f97c12447b0a5ab42846e5326d19efb6171df5676d56794f4141a199b94",
     "source/attack/attack_N.prompt.json": "0f740bb94100e65a92832709fd4e8246e9defd632e19580ff507e6e7b411444c",
@@ -52,7 +54,7 @@
     "source/legendary/kusanagi.prompt.json": "3cda81324be313a23720931c34c071cd9b4cb3e12a65f08a154408a89574e540",
     "source/legendary/muramasa.png": "126d386a3ee2029d5ca5f463f7a157acce7d5a1199e55b75dc6aec928f959d9f",
     "source/legendary/muramasa.prompt.json": "f9e7bc6f505f0f4408f1f92fbd45d2cc5a6a6901c04307bc1269dc9541d2d31a",
-    "source/legendary/sampling_review.json": "4241f581450f083608dd3859645e7d8504b50d8048c3dce442817cfe8c49c70d",
+    "source/legendary/sampling_review.json": "f2527786bc6efaf770283ac0f65dd3b3a4fdb89e3ee417eae0aa210278f46d33",
     "source/utility/utility_N.png": "b701d0d65c00bf6116bc13aced93a8321e7982a914463a7e5ee540cd318678a7",
     "source/utility/utility_N.prompt.json": "899902b59b2c3e98dea950b60c1ac031138f5924c9d9789d27f4fb11b903a8f9",
     "source/utility/utility_NW.png": "73bc83bed1d2ecf726d8f269ca249afb7d1cd1b059350ea20289788524eeab49",
@@ -80,17 +82,21 @@
     "source/legendary/kusanagi-v3.png": "21df232b756f7b40d86484aecd5e55f8ce97212ce195c24cf741024011ce622e",
     "source/legendary/kusanagi-v3.prompt.json": "52d1c7c94f4183d4cef596de60dbe023a825b6e06e86f8c258fc2dd0ad6cdce5",
     "source/legendary/muramasa-v3.png": "f157f30194926009f51c2e6ef9a053768b16ae744191869df2fcbc32b8075a2a",
-    "source/legendary/muramasa-v3.prompt.json": "f45a42ff7043394e010dab26723064abb9e5ba554a543feee7a0e5838eb8b39e"
+    "source/legendary/muramasa-v3.prompt.json": "f45a42ff7043394e010dab26723064abb9e5ba554a543feee7a0e5838eb8b39e",
+    "source/legendary/kusanagi-v4.png": "25165a08de9aa676f5f75bd2793e175d7a0a545ed864530d8cd344a0286230b0",
+    "source/legendary/kusanagi-v4-illustration.png": "0beaf668a26d20dad6fcb5c70b7399e3f59d5f402b1a16b255e00deaf8bc3d58",
+    "source/legendary/muramasa-v4.png": "78745b250f9f5c75fb2fccd5fbbe0e8df57f73b141be106d0322412294a218af",
+    "source/legendary/muramasa-v4-illustration.png": "6479cf5d954e70e4cc22b1f8733950f1719288cf7c24c73d53f476328eda3abd"
   },
   "compiled_runtime_sha256": {
     "ember_ronin.spr": "c5c3ea78995c90bdf4c820d2c6e252814d87313ab1c086dcf55e2686d5577aad",
     "ember_ronin.act": "534d734911b30e8ab7730d859795864fac8b5617463f2a8d5e36c58957758275",
     "katana.spr": "82bb15bdf204d4d5bfccbe0510a8e2b6212a13e7dcd4d9fd0adc57e0409b0079",
     "katana.act": "01bf5143a439b89519e95caef89e5740a24cdf3ef5fa00f2b75de32710f5dab1",
-    "kusanagi.spr": "c4dbef3ff29f2850ed416d075401c6e095e9751cc66d6620dfae955d88cc5cf0",
-    "kusanagi.act": "3a0146ef3ff4c668fa04208bfc9acd7fd829360d24b44ebbdf5d26b79619d703",
-    "muramasa.spr": "d742e9e52e3fa345f8fa462cd6ad02576d7d6c574319de74337d08d94cd1d1b8",
-    "muramasa.act": "a1ac228fe27cebeb12375a2c7e9b3253f667b3e6e4ba415b1c627cd8e9c109e4"
+    "kusanagi.spr": "ed2e73ff44a02939809cc1bdab17bef8e99a20c20a75738b051c6b8ea80f21db",
+    "kusanagi.act": "a19e0aae4de904cf0fabd6157dfc6a1301febb6ae440403eddd467de89378f64",
+    "muramasa.spr": "7f090cde8bb802dc021848b49110f7783177d1c2849f21599643fd1d848998bf",
+    "muramasa.act": "5ea600e3acf3d408ea7991f87a94e2dc215d6c1446147ddf285e72e4998ab094"
   },
   "animation_contract": {
     "actions": 104,
@@ -106,7 +112,11 @@
     "source/legendary/kusanagi-v2.png",
     "source/legendary/kusanagi-v2.prompt.json",
     "source/legendary/muramasa-v2.png",
-    "source/legendary/muramasa-v2.prompt.json"
+    "source/legendary/muramasa-v2.prompt.json",
+    "source/legendary/kusanagi-v3.png",
+    "source/legendary/kusanagi-v3.prompt.json",
+    "source/legendary/muramasa-v3.png",
+    "source/legendary/muramasa-v3.prompt.json"
   ],
-  "historical_source_note": "Retained as prior-revision references only (unversioned and v2); not selected by legendary_weapons.json."
+  "historical_source_note": "Retained as prior-revision references only (unversioned, v2 and v3); not selected by legendary_weapons.json."
 }
