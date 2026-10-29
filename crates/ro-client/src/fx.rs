@@ -344,6 +344,24 @@ pub fn map_smoke(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs,
         .collect()
 }
 
+/// Waterfalls (EF_WATERFALL 349 .. EF_WATERFALL_SMALL_T2_90 356): large or small, plain
+/// (`waterfall1x.tga`) or dark (`waterfall3x.tga`), along x or turned 90°.
+pub fn map_waterfalls(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, effects: &[(i32, glam::Vec3)]) -> Vec<ro_render::Waterfall> {
+    let mut out = vec![];
+    for &(id, pos) in effects {
+        if !(349..=356).contains(&id) {
+            continue;
+        }
+        let k = id - 349;
+        let (small, vertical, dark) = (k & 2 != 0, k & 1 != 0, k >= 4);
+        let set = if dark { 3 } else { 1 };
+        let tex: Vec<_> = (1..=3).filter_map(|n| fx.texture_dyn(r, vfs, &format!("effect\\waterfall{set}{n}.tga"))).collect();
+        let Ok(textures) = <[ro_render::TexId; 3]>::try_from(tex) else { continue };
+        out.push(ro_render::Waterfall { pos, width: if small { 18.0 } else { 36.0 }, vertical, textures });
+    }
+    out
+}
+
 /// The map's wind effects: RSW objects with id 2343 (EF_WIND_EFFECT, `positions` in RSW
 /// order) paired with `_<map>_windEffectInfo` entries the same way as emitters.
 pub fn map_winds(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, map: &str, positions: &[glam::Vec3]) -> Vec<ro_render::Wind> {

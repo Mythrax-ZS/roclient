@@ -1099,7 +1099,8 @@ impl App {
                 let wind_spots: Vec<glam::Vec3> = map.effects.iter().filter(|e| e.0 == 2343).map(|e| e.1).collect();
                 let winds = fx::map_winds(&mut self.fx, r, vfs, name, &wind_spots);
                 tracing::info!(objects = wind_spots.len(), winds = winds.len(), "map wind effects");
-                r.set_emitters(emitters, winds);
+                let waterfalls = fx::map_waterfalls(&mut self.fx, r, vfs, &spots);
+                r.set_emitters(emitters, winds, waterfalls);
                 self.map_fx = map.effects.into_iter().enumerate().map(|(i, (id, pos, delay))| fx::MapEmitter::new(id, pos, delay, i)).collect();
                 tracing::info!(emitters = self.map_fx.len(), drawn = self.map_fx.iter().filter(|e| e.visual.is_some()).count(), first = ?self.map_fx.first().map(|e| (e.pos, e.every_ms)), "map effects");
                 let gat = vfs

@@ -78,6 +78,20 @@ pub struct Wind {
     pub seeds: Vec<(f32, f32)>,
 }
 
+/// A waterfall (RSW EF_WATERFALL family, 349-356): four layered sheets, each five 40-unit
+/// segments of `effect\waterfall<set>1..3.tga` scrolling down at its own speed and cycling the
+/// textures, 80/255 opaque, rising 160 units above the emitter (at the pool). Reconstructed after
+/// roBrowserLegacy's WaterfallEffect (the spray puffs at the foot are not drawn yet).
+#[derive(Clone, Debug)]
+pub struct Waterfall {
+    pub pos: Vec3,
+    /// 36 for the large kinds, 18 for the small ones.
+    pub width: f32,
+    /// Turned 90° (the sheet spans z instead of x).
+    pub vertical: bool,
+    pub textures: [TexId; 3],
+}
+
 struct Particle {
     start: Vec3,
     vel: Vec3,
@@ -105,6 +119,7 @@ pub(crate) struct Particles {
     pipelines: HashMap<Key, wgpu::RenderPipeline>,
     live: Vec<Live>,
     winds: Vec<Wind>,
+    waterfalls: Vec<Waterfall>,
     rng: u64,
 }
 
@@ -135,7 +150,7 @@ impl Particles {
     pub fn new(device: &wgpu::Device, globals: &wgpu::BindGroupLayout, texture: &wgpu::BindGroupLayout, samples: u32) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("particles"), source: wgpu::ShaderSource::Wgsl(include_str!("particle.wgsl").into()) });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("particles"), bind_group_layouts: &[Some(globals), Some(texture)], ..Default::default() });
-        Self { shader, layout, samples, pipelines: HashMap::new(), live: vec![], winds: vec![], rng: 0x9e3779b97f4a7c15 }
+        Self { shader, layout, samples, pipelines: HashMap::new(), live: vec![], winds: vec![], waterfalls: vec![], rng: 0x9e3779b97f4a7c15 }
     }
 
     fn pipeline(&self, device: &wgpu::Device, (src, dst, z, linear): Key) -> wgpu::RenderPipeline {
@@ -172,7 +187,12 @@ impl Particles {
 
     /// Replaces the map's emitters (pre-warmed, so a map never starts empty) and builds a
     /// pipeline for each blend they use.
-    pub fn set(&mut self, device: &wgpu::Device, emitters: Vec<Emitter>, winds: Vec<Wind>, now: f32) {
+    pub fn set(&mut self, device: &wgpu::Device, emitters: Vec<Emitter>, winds: Vec<Wind>, waterfalls: Vec<Waterfall>, now: f32) {
+        if !waterfalls.is_empty() && !self.pipelines.contains_key(&(5, 6, true, false)) {
+            let p = self.pipeline(device, (5, 6, true, false));
+            self.pipelines.insert((5, 6, true, false), p);
+        }
+        self.waterfalls = waterfalls;
         for w in &winds {
             let key = (w.src, w.dst, true, false);
             if !self.pipelines.contains_key(&key) {
@@ -328,6 +348,43 @@ impl Particles {
                 }
             }
         }
+        // Waterfalls: process ticks every 24 ms; layer l scrolls a segment per 80 - 13l ticks.
+        let process = (now * 1000.0 / 24.0) as i64;
+        for w in &self.waterfalls {
+            if w.pos.distance(focus) > range {
+                continue;
+            }
+            const SEG: f32 = 40.0;
+            let color = [1.0, 1.0, 1.0, 80.0 / 255.0];
+            let (across, depth_axis) = if w.vertical { (Vec3::Z, Vec3::X) } else { (Vec3::X, Vec3::Z) };
+            // The emitter sits at the pool: the sheets rise 160 units to the lip, their texture
+            // scrolling down (roBrowser builds them in RO's y-down space).
+            let base = w.pos;
+            for layer in 0..4i64 {
+                let speed = 80 - layer * 13;
+                let scroll = (process % speed) as f32 * SEG / speed as f32;
+                let crop = scroll / SEG;
+                let phase = ((process % (3 * speed)) / speed) as usize;
+                let half = (w.width + layer as f32) / 2.0;
+                let depth = depth_axis * (layer as f32 - 1.0);
+                for seg in 0..5usize {
+                    let seg_top = scroll - seg as f32 * SEG;
+                    let seg_bottom = seg_top - SEG;
+                    let (mut vis_top, mut vis_bottom, mut v_top, mut v_bottom) = (seg_top, seg_bottom, 0.0, 1.0);
+                    if seg == 0 {
+                        vis_top = seg_top + (seg_bottom - seg_top) * crop;
+                        v_top = crop;
+                    } else if seg == 4 {
+                        vis_bottom = seg_top + (seg_bottom - seg_top) * crop;
+                        v_bottom = crop;
+                    }
+                    let tex = w.textures[(seg + phase) % 3];
+                    let v = |side: f32, y: f32, vv: f32| Vertex { pos: (base + across * side * half - Vec3::Y * y + depth).into(), uv: [if side < 0.0 { 0.0 } else { 1.0 }, vv], color };
+                    let (bl, br, tl, tr) = (v(-1.0, vis_bottom, v_bottom), v(1.0, vis_bottom, v_bottom), v(-1.0, vis_top, v_top), v(1.0, vis_top, v_top));
+                    groups.entry(((5, 6, true, false), tex.0)).or_default().extend([bl, br, tl, tl, br, tr]);
+                }
+            }
+        }
         groups.into_iter().map(|((k, t), v)| (k, TexId(t), v)).collect()
     }
 
@@ -336,7 +393,7 @@ impl Particles {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.live.is_empty() && self.winds.is_empty()
+        self.live.is_empty() && self.winds.is_empty() && self.waterfalls.is_empty()
     }
 }
 
