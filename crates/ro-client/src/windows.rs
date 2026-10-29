@@ -19,6 +19,8 @@ pub enum UiAction {
     SkillText { skill: u16, level: u16, cell: (u16, u16), text: String },
     /// Yes to saving this map as a Star Gladiator place.
     StarPlace(u8),
+    /// Answer an adoption request.
+    Adopt(ro_net::AdoptRequest),
     UseItem(u16),
     Equip { index: u16, location: u32 },
     Unequip(u16),
@@ -75,6 +77,8 @@ pub struct Windows {
     pub skill_text: Option<(u16, u16, (u16, u16), String)>,
     /// Feeling asks to save this map as the place of the sun (0), moon (1) or stars (2).
     pub star_ask: Option<u8>,
+    /// A couple asks us to be their child: (father, mother, asker's name).
+    pub adopt_ask: Option<(u32, u32, String)>,
     /// Amounts typed in the Change Material / Analysis window, by inventory index.
     pub materials: std::collections::HashMap<u16, u16>,
     pub equipment: bool,
@@ -1241,6 +1245,26 @@ impl Windows {
                 Some(true) => action = Some(UiAction::SkillText { skill, level, cell, text }),
                 Some(false) => {}
                 None => self.skill_text = Some((skill, level, cell, text)),
+            }
+        }
+
+        if let Some((father, mother, name)) = self.adopt_ask.clone() {
+            let mut answer = None;
+            crate::classic::show(ctx, egui::Window::new("Adoption").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO), "Adoption", true, |ui| {
+                ui.label(format!("{name} and their partner want to adopt you. Become their child?"));
+                ui.label(RichText::new("You will become a Baby class and cannot be adopted again.").color(crate::classic::ink(Color32::GRAY)));
+                ui.horizontal(|ui| {
+                    if ui.button("Accept").clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button("Decline").clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+            if let Some(accept) = answer {
+                self.adopt_ask = None;
+                action = Some(UiAction::Adopt(ro_net::AdoptRequest::Answer { father, mother, accept }));
             }
         }
 

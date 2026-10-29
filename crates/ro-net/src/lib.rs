@@ -11,10 +11,10 @@ use ro_proto::{id, packets::*, Frame, RoCodec, ServerTable};
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-pub use ro_proto::packets::{sp, Act, CharInfo, CharRequest, ChatKind, Look, RouletteRequest, CaptchaRequest, NpcDialog, NpcReply, UnitInfo, UnitPos};
+pub use ro_proto::packets::{sp, Act, AdoptRequest, CharInfo, CharRequest, ChatKind, Look, RouletteRequest, CaptchaRequest, NpcDialog, NpcReply, UnitInfo, UnitPos};
 pub use ro_proto::items::{SwitchRequest, Cast, FloorItem, Hotkey, ItemData, ItemRequest, Skill, StatRequest, Stats};
 use ro_proto::items::*;
-pub use ro_proto::guild::{RelationRequest, GuildInfo, GuildMember, GuildRequest, GuildSkill, Position};
+pub use ro_proto::guild::{RelationRequest, GuildInfo, GuildMember, GuildRequest, GuildSkill, Position, StorageLogEntry};
 use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
 pub use ro_proto::quests::{Objective, Quest};
@@ -334,6 +334,14 @@ pub enum Event {
     /// ZC_PET_EVOLUTION_RESULT: 6 success; 1 no pet out, 2 not a pet egg, 4 missing
     /// materials, 5 equipped with an accessory, else failed.
     PetEvolved(u32),
+    /// ZC_REQ_BABY: a couple (father, mother) asks us to be their child; `name` is the asker.
+    AdoptAsk { father: u32, mother: u32, name: String },
+    /// ZC_ADOPT_REPLY: why adopting failed (0 they have a child, 1 level 70 needed, 2 married).
+    AdoptFailed(u32),
+    /// ZC_DYNAMICNPC_CREATE_RESULT: a personal NPC copy (3: we already have one).
+    DynamicNpc(u32),
+    /// ZC_ACK_GUILDSTORAGE_LOG (guildopenstorage_log): result and entries.
+    GuildStorageLog(u16, Vec<StorageLogEntry>),
     /// ZC_SKILL_SCALE: a monster casting an area skill; the area shows until the cast ends.
     SkillScale { id: u32, skill: u16, level: u16, x: u16, y: u16, cast_ms: u32 },
     /// ZC_MEMORIALDUNGEON_*: instance creation queue, status and notices.
@@ -763,6 +771,7 @@ pub enum Command {
     ProgressDone,
     /// Yes to Feeling's "save this map as your place" (CZ_AGREE_STARPLACE).
     StarPlace(u8),
+    Adopt(AdoptRequest),
     /// /viewpointvalue (show) or /setcamera (CZ_VIEW_CAMERAINFO).
     Camera { show: bool, range: f32, rotation: f32, latitude: f32 },
     /// The bargain sale tool (our account id with each request).
@@ -932,6 +941,7 @@ impl MapSession {
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::ProgressDone) => self.send(Bare(0x02f1)).await?,
                     Some(Command::StarPlace(which)) => self.send(ro_proto::packets::StarPlace(which)).await?,
+                    Some(Command::Adopt(r)) => self.send(r).await?,
                     Some(Command::Camera { show, range, rotation, latitude }) => self.send(ro_proto::packets::CameraInfo { show, range, rotation, latitude }).await?,
                     Some(Command::MemorialDestroy) => self.send(MemorialCommand(3)).await?,
                     Some(Command::Roulette(r)) => self.send(r).await?,
@@ -1451,6 +1461,10 @@ impl MapSession {
                         // ZC_FASTMOVE: Snap / Fallen Angel / All in the Sky put a unit on a cell at once.
                         0x08d2 if data.len() >= 10 => Some(Event::Stop { id: l(&data, 2), x: u16::from_le_bytes([data[6], data[7]]), y: u16::from_le_bytes([data[8], data[9]]) }),
                         0x09fc if data.len() >= 6 => Some(Event::PetEvolved(l(&data, 2))),
+                        0x01f6 if data.len() >= 34 => Some(Event::AdoptAsk { father: l(&data, 2), mother: l(&data, 6), name: ro_proto::packets::get_fixed_str(&mut &data[10..34], 24) }),
+                        0x0216 if data.len() >= 6 => Some(Event::AdoptFailed(l(&data, 2))),
+                        0x0a17 if data.len() >= 6 => Some(Event::DynamicNpc(l(&data, 2))),
+                        0x09da => ro_proto::guild::parse_storage_log(&data).map(|(r, e)| Event::GuildStorageLog(r, e)),
                         0x0a41 if data.len() >= 18 => {
                             let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
                             Some(Event::SkillScale { id: l(&data, 2), skill: w(6), level: w(8), x: w(10), y: w(12), cast_ms: l(&data, 14) })

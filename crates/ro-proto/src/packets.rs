@@ -164,6 +164,31 @@ impl Encode for CameraInfo {
     }
 }
 
+/// Adoption: a married couple asks a player to become their child (CZ_REQ_JOIN_BABY), who
+/// answers (CZ_JOIN_BABY) naming both parents.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AdoptRequest {
+    Ask(u32),
+    Answer { father: u32, mother: u32, accept: bool },
+}
+
+impl Encode for AdoptRequest {
+    fn encode(&self, d: &mut BytesMut) {
+        match *self {
+            AdoptRequest::Ask(target) => {
+                d.put_u16_le(0x01f9);
+                d.put_u32_le(target);
+            }
+            AdoptRequest::Answer { father, mother, accept } => {
+                d.put_u16_le(0x01f7);
+                d.put_u32_le(father);
+                d.put_u32_le(mother);
+                d.put_u32_le(accept as u32);
+            }
+        }
+    }
+}
+
 /// CZ_AGREE_STARPLACE: yes to Feeling's "save this map" (0 sun, 1 moon, 2 stars).
 pub struct StarPlace(pub u8);
 

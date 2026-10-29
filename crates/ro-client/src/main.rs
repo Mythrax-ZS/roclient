@@ -2887,6 +2887,29 @@ impl App {
                 }
             }
             StarPlaceAsk(which) => self.windows.star_ask = Some(which),
+            AdoptAsk { father, mother, name } => self.windows.adopt_ask = Some((father, mother, name)),
+            GuildStorageLog(result, entries) => match result {
+                1 => self.guild.storage_log = Some(entries),
+                2 => self.hud.push_chat(ro_net::ChatKind::System, "The guild storage log is empty.".into()),
+                _ => self.hud.push_chat(ro_net::ChatKind::System, "The guild storage log could not be read.".into()),
+            },
+            AdoptFailed(why) => {
+                let text = match why {
+                    0 => "That couple already has a child.",
+                    1 => "Both parents must be at least base level 70 to adopt.",
+                    _ => "A married character cannot be adopted.",
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, text.into());
+            }
+            DynamicNpc(result) => {
+                let text = match result {
+                    0 => return,
+                    3 => "You already have this NPC.",
+                    4 => "This NPC is no longer available.",
+                    _ => "The NPC could not be created.",
+                };
+                self.hud.push_chat(ro_net::ChatKind::System, text.into());
+            }
             // The area a monster's big spell will cover, on the ground for the cast (at least a
             // moment, so an instant cast still flashes it).
             SkillScale { skill, level, x, y, cast_ms, .. } => {
@@ -3459,6 +3482,7 @@ impl App {
             Menu(reply) => self.send(Command::Menu(reply)),
             ShowEquip(on) => self.send(Command::ShowEquip(on)),
             StarPlace(which) => self.send(Command::StarPlace(which)),
+            Adopt(r) => self.send(Command::Adopt(r)),
             SkillText { skill, level, cell, text } => {
                 self.send(Command::Stat(ro_net::StatRequest::UseSkillAtWithText { skill, level, x: cell.0, y: cell.1, text }));
             }
@@ -5883,6 +5907,8 @@ impl App {
                     self.queued_commands.push(ro_net::Command::Relation(ro_net::RelationRequest::Answer { inviter, accept }));
                 }
                 self.reputation.show(ui.ctx());
+                let db = self.item_db.as_ref();
+                self.guild.show_storage_log(ui.ctx(), |id| db.map_or_else(|| format!("Item #{id}"), |d| d.name(id, true)));
                 {
                     let me = self.hud.status.name.clone();
                     let leader = self.social.party.as_ref().is_some_and(|p| p.members.iter().any(|m| m.leader && m.name == me));
@@ -6060,6 +6086,10 @@ ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(i
                             }
                             if ui.button("Add friend").clicked() {
                                 player_cmd = Some((ro_net::Command::Friend(ro_net::FriendRequest::Add { name: name.clone() }), None));
+                                keep = false;
+                            }
+                            if ui.button("Adopt").on_hover_text("A married couple can adopt a player as their child").clicked() {
+                                player_cmd = Some((ro_net::Command::Adopt(ro_net::AdoptRequest::Ask(id)), None));
                                 keep = false;
                             }
                             if self.guild.id != 0 && ui.button("Invite to guild").clicked() {

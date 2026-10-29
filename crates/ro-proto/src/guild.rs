@@ -211,6 +211,41 @@ pub fn parse_member_gone(opcode: u16, data: &[u8]) -> (u32, String) {
     }
 }
 
+/// One guild storage log line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StorageLogEntry {
+    pub item: u32,
+    pub amount: u32,
+    /// Put in (true) or taken out.
+    pub put: bool,
+    pub refine: u32,
+    pub name: String,
+    pub time: String,
+}
+
+/// ZC_ACK_GUILDSTORAGE_LOG (0x09da): result (1 entries follow, 2 empty, 3 failed) and the
+/// entries, 93 bytes each.
+pub fn parse_storage_log(data: &[u8]) -> Option<(u16, Vec<StorageLogEntry>)> {
+    let mut b = data.get(4..)?;
+    if b.len() < 4 {
+        return None;
+    }
+    let (result, count) = (b.get_u16_le(), b.get_u16_le());
+    let entries = b
+        .chunks_exact(93)
+        .take(count as usize)
+        .map(|mut e| {
+            let _id = e.get_u32_le();
+            let (item, amount, put, refine) = (e.get_u32_le(), e.get_u32_le(), e.get_u8() == 1, e.get_u32_le());
+            e.advance(8 + 1 + 2 + 16);
+            let name = get_fixed_str(&mut e, 24);
+            let time = get_fixed_str(&mut e, 24);
+            StorageLogEntry { item, amount, put, refine, name, time }
+        })
+        .collect();
+    Some((result, entries))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

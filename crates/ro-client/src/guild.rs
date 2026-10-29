@@ -21,6 +21,8 @@ enum Tab {
 #[derive(Default)]
 pub struct Guild {
     pub open: bool,
+    /// The guild storage log while it shows (guildopenstorage_log).
+    pub storage_log: Option<Vec<ro_net::StorageLogEntry>>,
     /// Our guild (0: none), whether we lead it, and its name.
     pub id: u32,
     pub master: bool,
@@ -66,6 +68,33 @@ pub struct Ctx<'a> {
 }
 
 impl Guild {
+    /// The guild storage log: who put in or took out what, newest first.
+    pub fn show_storage_log(&mut self, ctx: &egui::Context, name: impl Fn(u32) -> String) {
+        let Some(entries) = &self.storage_log else { return };
+        let mut open = true;
+        crate::classic::show(ctx, egui::Window::new("Guild Storage Log").open(&mut open).collapsible(false).default_width(520.0), "Guild Storage Log", true, |ui| {
+            if entries.is_empty() {
+                ui.label(RichText::new("The log is empty.").color(crate::classic::ink(Color32::GRAY)));
+            }
+            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                egui::Grid::new("gs_log").striped(true).num_columns(4).show(ui, |ui| {
+                    for e in entries {
+                        ui.label(RichText::new(&e.time).color(crate::classic::ink(Color32::from_gray(170))));
+                        ui.label(&e.name);
+                        let (verb, color) = if e.put { ("put in", Color32::from_rgb(120, 200, 120)) } else { ("took out", Color32::from_rgb(230, 150, 90)) };
+                        ui.label(RichText::new(verb).color(crate::classic::ink(color)));
+                        let item = if e.refine > 0 { format!("+{} {}", e.refine, name(e.item)) } else { name(e.item) };
+                        ui.label(format!("{item} x{}", e.amount));
+                        ui.end_row();
+                    }
+                });
+            });
+        });
+        if !open {
+            self.storage_log = None;
+        }
+    }
+
     pub fn toggle(&mut self) {
         self.open = !self.open;
         self.needs_refresh |= self.open;
