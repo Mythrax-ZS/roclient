@@ -386,6 +386,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         }
     }
     let depth = thickness * w.absorb.w;
+    // True vertical water depth at this pixel (scene depth when available), for the waterline.
+    var wet = vertical;
+    if on(F_REFRACTION) {
+        wet = max(scene_dist(screen_uv) - eye_dist, 0.0) * max(v.y, 0.05);
+    }
 
     // Lighting terms.
     let sun_dir = -normalize(g.light_dir.xyz);
@@ -476,7 +481,17 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         }
         let lapping = 0.5 + 0.5 * sin(t * 1.7 * w.foam.y + shore.g * SHORE_RANGE * 0.35);
         var foam = smoothstep(1.0 - near_shore, 1.15 - near_shore * 0.5, pattern * (0.75 + 0.25 * lapping));
-        foam = max(foam, smoothstep(0.75, 1.0, near_shore) * 0.85);
+        if on(F_REFRACTION) {
+            // A solid line only where the water truly meets the ground. The baked shore
+            // distance is per tile corner, so on a lone tile over barely-submerged sand it
+            // reads "shore" everywhere and filled the whole square white.
+            // It is thin and broken by the pattern, so a flat, barely-flooded tile does not
+            // light up as one pale square either.
+            let line = smoothstep(0.0, 0.06, wet) * (1.0 - smoothstep(0.12, 0.45, wet));
+            foam = max(foam, line * smoothstep(0.25, 0.6, pattern) * 0.85);
+        } else {
+            foam = max(foam, smoothstep(0.75, 1.0, near_shore) * 0.85);
+        }
         // Crests: only the tallest peaks, as thin streaks (the pattern's brightest lines),
         // thinned further by a slow large-scale mask so open water stays mostly clear.
         let mask = filtered(detail, wrap, p.xz / (foam_scale * 9.0) + vec2(0.004, 0.003) * t, df1[0] / 9.0, df1[1] / 9.0).b;
@@ -494,6 +509,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // Spray: the brightest flecks of churned water flash above white (bloom catches them).
         color += lit * pow(stir_pattern, 3.0) * clamp(stir.z - 0.3, 0.0, 1.0) * 1.8;
         alpha = max(alpha, foam);
+    }
+    // Feather the waterline: water a few hundredths of a unit deep is just wet ground, so
+    // the surface fades out there instead of ending in a hard tile edge.
+    let edge = smoothstep(0.0, 1.2, wet);
+    if on(F_REFRACTION) {
+        color = mix(textureSampleLevel(scene_color, clamp_samp, screen_uv, 0.0).rgb, color, edge);
+    } else if on(F_NORMAL_MAP) {
+        // (Classic keeps the original hard-edged tiles.)
+        alpha *= edge;
     }
     return vec4(color, alpha);
 }
