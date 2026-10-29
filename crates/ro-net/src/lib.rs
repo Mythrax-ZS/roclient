@@ -152,11 +152,14 @@ pub struct MapSession {
     conn: Conn,
     pub spawn: AcceptEnter,
     started: Instant,
+    /// ZC_EXTEND_BODYITEM_SIZE arrives before the accept; kept to pass on.
+    inventory_extra: Option<u16>,
 }
 
 pub async fn enter_map(zone: &ZoneServer, auth: &AcceptLogin) -> anyhow::Result<MapSession> {
     let mut conn = connect(zone.addr).await?;
     let started = Instant::now();
+    let mut inventory_extra = None;
     conn.send(CzEnter { account_id: auth.account_id, char_id: zone.char_id, login_id1: auth.login_id1, client_tick: 0, sex: auth.sex })
         .await?;
     loop {
@@ -164,10 +167,11 @@ pub async fn enter_map(zone: &ZoneServer, auth: &AcceptLogin) -> anyhow::Result<
             Frame::Packet { opcode: id::ZC_ACCEPT_ENTER, data } => {
                 let spawn = parse_accept_enter(&data);
                 conn.send(CzLoadEndAck).await?;
-                return Ok(MapSession { conn, spawn, started });
+                return Ok(MapSession { conn, spawn, started, inventory_extra });
             }
             Frame::Packet { opcode: id::ZC_REFUSE_ENTER, data } => bail!("map server refused, error {}", data[2]),
             Frame::Packet { opcode: id::SC_NOTIFY_BAN, data } => bail!("disconnected by map server, code {}", data[2]),
+            Frame::Packet { opcode: 0x0b18, data } if data.len() >= 4 => inventory_extra = Some(u16::from_le_bytes([data[2], data[3]])),
             f => ignored("map-enter", &f),
         }
     }
@@ -309,6 +313,10 @@ pub enum Event {
     CartItems(Vec<ItemData>),
     /// ZC_CARTOFF: the cart was removed.
     CartOff,
+    /// ZC_EXTEND_BODYITEM_SIZE: slots added to the base inventory.
+    InventoryExtra(u16),
+    /// ZC_ACK_OPEN_MSGBOX_EXTEND_BODYITEM_SIZE: 0 asks to confirm using `item`, else failed.
+    ExpandAsk { result: u8, item: u32 },
     /// ZC_ITEM_PICKUP_PARTY: a party member picked up an item.
     PartyPickup { aid: u32, item: u32, refine: u8 },
     CartCount { items: u16, max_items: u16, weight: u32, max_weight: u32 },
@@ -711,6 +719,9 @@ pub fn spawn_session(cfg: SessionConfig) -> (tokio::sync::mpsc::UnboundedSender<
                         if ev_tx.send(event).is_err() {
                             return Ok(());
                         }
+                        if let Some(n) = map.inventory_extra {
+                            let _ = ev_tx.send(Event::InventoryExtra(n));
+                        }
                         match map.run(&character.name, &mut cmd_rx, &ev_tx).await? {
                             // Warped to a map on another map server: re-enter there.
                             MapExit::Move(next) => zone = ZoneServer { char_id, ..next },
@@ -932,7 +943,7 @@ impl MapSession {
                             _ => Some(Event::Notice("The item could not be identified.".into())),
                         },
                         0x013c if data.len() >= 4 => Some(Event::ArrowEquipped(u16::from_le_bytes([data[2], data[3]]))),
-                        0x013b | 0x0189 | 0x011e | 0x012c | 0x02bb | 0x0223 | 0x01fe | 0x0bae | 0x02c5 | 0x0205 | 0x01ea | 0x0aa7 => notice_text(opcode, &data).map(Event::Notice),
+                        0x013b | 0x0189 | 0x011e | 0x012c | 0x02bb | 0x0223 | 0x01fe | 0x0b17 | 0x0bae | 0x02c5 | 0x0205 | 0x01ea | 0x0aa7 => notice_text(opcode, &data).map(Event::Notice),
                         0x0152 if data.len() >= 12 => Some(Event::GuildEmblem { guild: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), version: u32::from_le_bytes([data[8], data[9], data[10], data[11]]), data: data[12..].to_vec() }),
                         0x010c if data.len() >= 6 => Some(Event::Mvp(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x010a if data.len() >= 6 => Some(Event::MvpItem(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
@@ -1021,6 +1032,8 @@ impl MapSession {
                         0x0b08 if data.get(4) == Some(&0) => Some(Event::InventoryStart),
                         0x0b08 if data.get(4) == Some(&1) => Some(Event::CartStart),
                         0x012b => Some(Event::CartOff),
+                        0x0b18 => Some(Event::InventoryExtra(u16::from_le_bytes([data[2], data[3]]))),
+                        0x0b15 if data.len() >= 7 => Some(Event::ExpandAsk { result: data[2], item: u32::from_le_bytes([data[3], data[4], data[5], data[6]]) }),
                         0x0b67 if data.len() >= 33 => Some(Event::PartyPickup { aid: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), item: u32::from_le_bytes([data[6], data[7], data[8], data[9]]), refine: data[31] }),
                         0x0b09 | 0x0b39 if data.get(4) == Some(&1) => {
                             Some(Event::CartItems(if opcode == 0x0b09 { parse_itemlist_normal(&data) } else { parse_itemlist_equip(&data) }))
@@ -1486,6 +1499,15 @@ fn notice_text(opcode: u16, data: &[u8]) -> Option<String> {
         .into(),
         // ZC_EQUIPITEM_DAMAGED
         0x02bb => "One of your equipped items was damaged.".into(),
+        // ZC_ACK_EXTEND_BODYITEM_SIZE
+        0x0b17 => match *data.get(2)? {
+            0 => "Your inventory has been expanded.",
+            2 => "You can't expand your inventory right now.",
+            3 => "You don't have an inventory expansion item.",
+            4 => "Your inventory can't be expanded any further.",
+            _ => "The inventory expansion failed.",
+        }
+        .into(),
         // ZC_ACK_TAKEOFF_EQUIP_ALL
         0x0bae => if *data.get(2)? == 0 { return None } else { "You can't take your equipment off right now.".into() },
         // ZC_PARTY_JOIN_REQ_ACK: name, result

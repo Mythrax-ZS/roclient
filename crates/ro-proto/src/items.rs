@@ -182,6 +182,9 @@ pub enum ItemRequest {
     Unequip { index: u16 },
     /// CZ_REQ_TAKEOFF_EQUIP_ALL: take off everything worn in these slots.
     UnequipAll { location: u32 },
+    /// Inventory expansion: ask (0x0b14), confirm (0x0b16) or cancel (0x0b19).
+    ExpandAsk,
+    ExpandConfirm(bool),
     PickUp { floor_id: u32 },
     Drop { index: u16, amount: u16 },
     /// CZ_REQ_ITEMCOMPOSITION_LIST: which equipment can take this card?
@@ -200,6 +203,8 @@ impl Encode for ItemRequest {
                 d.put_u32_le(location);
             }
             ItemRequest::Unequip { index } => put_db_packet(d, "UnequipItem", &[&index.to_le_bytes()]),
+            ItemRequest::ExpandAsk => d.put_u16_le(0x0b14),
+            ItemRequest::ExpandConfirm(yes) => d.put_u16_le(if yes { 0x0b16 } else { 0x0b19 }),
             ItemRequest::UnequipAll { location } => {
                 d.put_u16_le(0x0bf5);
                 d.put_u32_le(location);

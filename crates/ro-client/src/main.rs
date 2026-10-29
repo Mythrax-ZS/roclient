@@ -1412,6 +1412,16 @@ impl App {
                     self.quests.marks.insert(npc, (mark, color));
                 }
             }
+            InventoryExtra(n) => self.windows.inv_extra = n,
+            ExpandAsk { result, item } => match result {
+                0 => self.windows.expand_ask = Some(item),
+                _ => self.hud.push_chat(ro_net::ChatKind::System, match result {
+                    2 => "You can't expand your inventory right now.",
+                    3 => "You need an inventory expansion item.",
+                    4 => "Your inventory can't be expanded any further.",
+                    _ => "The inventory can't be expanded.",
+                }.into()),
+            },
             CartOff => {
                 self.merchant.cart.clear();
                 self.merchant.cart_count = Default::default();
@@ -2907,6 +2917,11 @@ impl App {
             InsertCard { card, equip } => self.send(Command::Item(ItemRequest::InsertCard { card, equip })),
             Menu(reply) => self.send(Command::Menu(reply)),
             ShowEquip(on) => self.send(Command::ShowEquip(on)),
+            ExpandInventory => self.send(Command::Item(ItemRequest::ExpandAsk)),
+            ExpandConfirm(yes) => {
+                self.windows.expand_ask = None;
+                self.send(Command::Item(ItemRequest::ExpandConfirm(yes)));
+            }
             OpenBank => {
                 if self.merchant.bank.is_none() {
                     self.toggle_bank();
@@ -4406,6 +4421,8 @@ impl App {
                         }
                         None
                     }
+                    Some(("expand", "")) => Some(windows::UiAction::ExpandInventory),
+                    Some(("expand", "yes")) => Some(windows::UiAction::ExpandConfirm(true)),
                     Some(("offall", mask)) => u32::from_str_radix(mask, 16).ok().map(windows::UiAction::UnequipAll),
                     Some(("browse", aid)) => {
                         aid.parse().ok().map(|aid| self.queued_commands.push(ro_net::Command::Merchant(ro_net::MerchantRequest::Browse(aid))));

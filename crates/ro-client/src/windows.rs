@@ -10,6 +10,10 @@ use ro_net::{Hotkey, Skill, Stats};
 /// What the player asked for through a window.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UiAction {
+    /// Ask to expand the inventory (opens the server's confirmation).
+    ExpandInventory,
+    /// Answer the expansion confirmation.
+    ExpandConfirm(bool),
     UseItem(u16),
     Equip { index: u16, location: u32 },
     Unequip(u16),
@@ -56,6 +60,10 @@ pub struct Windows {
     /// A menu-bar button standing for an Alt+key shortcut, handled by the app.
     pub menu_key: Option<&'static str>,
     pub inventory: bool,
+    /// Slots added to the base 100 by inventory expansion.
+    pub inv_extra: u16,
+    /// The server asks to confirm using this item to expand the inventory.
+    pub expand_ask: Option<u32>,
     pub equipment: bool,
     /// Which equipment tab is showing (see EQUIP_TABS).
     pub equip_tab: u8,
@@ -654,6 +662,7 @@ impl Windows {
             let mut scroll = self.inv_scroll;
             let mut picked = None;
             let mut bank = false;
+            let mut expand = false;
             let shown: Vec<&&InvItem> = v
                 .items
                 .iter()
@@ -738,6 +747,10 @@ impl Windows {
                     ui.label(RichText::new(format!("{} z", v.zeny)).size(11.5));
                     ui.add_space(6.0);
                     bank = skin.button(ui, "Bank").on_hover_text("Alt+B").clicked();
+                    ui.label(RichText::new(format!("{} / {}", v.items.len(), 100 + self.inv_extra)).size(11.5)).on_hover_text("Inventory slots");
+                    if skin.button(ui, "+").on_hover_text("Expand the inventory").clicked() {
+                        expand = true;
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(RichText::new(format!("{} / {}", v.weight.0 / 10, v.weight.1 / 10)).size(11.5)).on_hover_text("Weight");
                     });
@@ -750,6 +763,9 @@ impl Windows {
             }
             if bank {
                 action = Some(UiAction::OpenBank);
+            }
+            if expand {
+                action = Some(UiAction::ExpandInventory);
             }
             self.inventory = open;
         } else if self.inventory {
@@ -790,6 +806,10 @@ impl Windows {
                     ui.label(format!("{} z", v.zeny));
                     if ui.small_button("Bank").on_hover_text("Alt+B").clicked() {
                         action = Some(UiAction::OpenBank);
+                    }
+                    ui.label(format!("{} / {}", v.items.len(), 100 + self.inv_extra)).on_hover_text("Inventory slots");
+                    if ui.small_button("+").on_hover_text("Expand the inventory").clicked() {
+                        action = Some(UiAction::ExpandInventory);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(format!("Weight {} / {}", v.weight.0 / 10, v.weight.1 / 10));
@@ -1119,6 +1139,26 @@ impl Windows {
             self.stats = open;
             if !held {
                 self.stat_hold = 0.0;
+            }
+        }
+
+        if let Some(item) = self.expand_ask {
+            let name = v.db.map_or_else(|| format!("Item #{item}"), |d| d.name(item, true));
+            let mut answer = None;
+            crate::classic::show(ctx, egui::Window::new("Expand Inventory").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO), "Expand Inventory", true, |ui| {
+                ui.label(format!("Use 1 {name} to add 10 inventory slots?"));
+                ui.horizontal(|ui| {
+                    if ui.button("OK").clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+            if let Some(yes) = answer {
+                self.expand_ask = None;
+                action = Some(UiAction::ExpandConfirm(yes));
             }
         }
 

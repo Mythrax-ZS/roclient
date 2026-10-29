@@ -40,7 +40,7 @@ Ticked items are handled and tested in game against the local server.
 - [ ] ZC_NOTIFY_BIND_ON_EQUIP, ZC_CHANGE_ITEM_OPTION, ZC_UPDATE_CARDSLOT
 - [x] ZC_ACK_TAKEOFF_EQUIP_ALL ("Take off all" button per equipment tab), ZC_MOVE_ITEM_FAILED
 - [ ] ZC_INVENTORY_TAB, ZC_INVENTORY_END
-- [ ] ZC_EXTEND_BODYITEM_SIZE (+ ACK / MSGBOX)
+- [x] ZC_EXTEND_BODYITEM_SIZE (+ ACK / MSGBOX): slot count, + button, confirmation
 
 ## World
 - [~] ZC_MVP, ZC_MVP_GETTING_ITEM, ZC_MVP_GETTING_SPECIAL_EXP, ZC_THROW_MVPITEM (built; not seen in game yet)
