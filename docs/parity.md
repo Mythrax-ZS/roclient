@@ -36,10 +36,11 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_CARTOFF
 - [x] ZC_SPIRITS (spheres circling the unit)
 - [x] ZC_SPIRITS2 / SPIRITS_ATTRIBUTE / SOULENERGY, ZC_MILLENNIUMSHIELD (orbs coloured by kind)
-- [ ] ZC_TARGET_SPIRITS
+- [x] ZC_TARGET_SPIRITS (Enchanting Shadow orbs, dark violet)
 - [x] ZC_DISPEL (cast cancel), ZC_HIGHJUMP (slide); ZC_NOTIFY_SKILL_POSITION unused by rAthena
 - [ ] ZC_COMBODELAY, ZC_BLADESTOP
-- [ ] ZC_NOTIFY_BIND_ON_EQUIP, ZC_CHANGE_ITEM_OPTION, ZC_UPDATE_CARDSLOT
+- [x] ZC_NOTIFY_BIND_ON_EQUIP (chat notice)
+- [ ] ZC_CHANGE_ITEM_OPTION, ZC_UPDATE_CARDSLOT
 - [x] ZC_ACK_TAKEOFF_EQUIP_ALL ("Take off all" button per equipment tab), ZC_MOVE_ITEM_FAILED
 - [x] ZC_INVENTORY_TAB (own fourth "fav" tab; the server flag is PlaceETCTab); ZC_INVENTORY_END is a no-op marker
 - [x] ZC_EXTEND_BODYITEM_SIZE (+ ACK / MSGBOX): slot count, + button, confirmation
@@ -47,9 +48,10 @@ Ticked items are handled and tested in game against the local server.
 ## World
 - [~] ZC_MVP, ZC_MVP_GETTING_ITEM, ZC_MVP_GETTING_SPECIAL_EXP, ZC_THROW_MVPITEM (built; not seen in game yet)
 - [x] ZC_NOTIFY_POSITION_TO_GROUPM / GUILDM (party members off-screen on the minimap)
-- [ ] ZC_NOTIFY_MEMBERINFO_TO_GROUPM
+- [x] ZC_NOTIFY_MEMBERINFO_TO_GROUPM
 - [x] ZC_NOTIFY_MAPINFO, ZC_BOSS_INFO (Convex Mirror: chat + minimap mark)
-- [ ] ZC_NOTIFY_MAPPROPERTY2, ZC_UPDATE_MAPINFO, ZC_MONSTER_INFO
+- [x] ZC_UPDATE_MAPINFO (setcell/setwall change client pathing), ZC_MONSTER_INFO (Sense window)
+- [ ] ZC_NOTIFY_MAPPROPERTY2 (only sent for battlegrounds)
 - [x] ZC_CHANGE_DIRECTION
 - [ ] ZC_SKILL_SCALE, ZC_NOTIFY_ACTORINIT, ZC_COUPLENAME
 - [x] Taming (ZC_START_CAPTURE / TRYCAPTURE_MONSTER)

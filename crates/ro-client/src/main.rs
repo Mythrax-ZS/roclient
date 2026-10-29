@@ -4,6 +4,7 @@
 //!   ro-client              open the renderer window
 
 mod audio;
+mod sense;
 mod pettalk;
 mod fx;
 mod gamepad;
@@ -529,6 +530,8 @@ struct Mob {
     look: Option<Look>,
     /// Players: (party, guild, guild rank) from ZC_ACK_REQNAMEALL, shown under the name.
     titles: Option<(String, String, String)>,
+    /// Unit class (job / monster id).
+    class: i16,
     /// Guild id (0: none), for the emblem beside the name.
     guild: u32,
     /// Drawn position (cells), eased toward the walker's.
@@ -565,6 +568,7 @@ impl Mob {
             hp: None,
             look: None,
             titles: None,
+            class: 0,
             guild: 0,
             smooth: None,
             attack_group: 10,
@@ -950,6 +954,7 @@ struct App {
     warps: std::collections::HashMap<u32, (u16, u16)>,
     class_names: std::collections::HashMap<i16, String>,
     pet_talk: pettalk::PetTalk,
+    sense: sense::Sense,
     look_tables: ro_game::looks::LookTables,
     /// Loaded actor templates by sprite key (None: not available, don't retry).
     sprites: std::collections::HashMap<String, Option<ro_render::Actor>>,
@@ -1189,6 +1194,7 @@ impl App {
         // NPC names may carry a "#unique-suffix" that the client never shows.
         mob.name = info.name.split('#').next().unwrap_or_default().trim().to_string();
         mob.kind = info.object_type;
+        mob.class = info.job;
         mob.actor.alpha = option_alpha(info.option, false);
         mob.human = is_player_class(info.job);
         mob.look = look;
@@ -2721,6 +2727,23 @@ impl App {
                     if !m.walker.is_walking() {
                         m.walker.dir = (dir % 8) as usize;
                     }
+                }
+            }
+            MonsterInfo { class, level, size, hp, def, race, mdef, element, mods } => {
+                let name = self.units.values().find(|m| m.class == class as i16).map(|m| m.name.clone()).or_else(|| self.class_names.get(&(class as i16)).cloned()).unwrap_or_else(|| format!("Monster #{class}"));
+                self.sense.info = Some(sense::MonsterInfo { name, level, size, hp, def, race, mdef, element, mods });
+            }
+            CellType { x, y, kind, map } => {
+                if let Some(w) = self.world.as_mut().filter(|w| map.trim_end_matches(".gat") == w.name) {
+                    if let Some(g) = w.gat.as_mut() {
+                        g.set_cell(x as i32, y as i32, kind as u32);
+                    }
+                }
+            }
+            PartyMemberInfo { account_id, job, level } => {
+                if let Some(m) = self.social.party.iter_mut().flat_map(|p| p.members.iter_mut()).find(|m| m.account_id == account_id) {
+                    m.job = job;
+                    m.level = level;
                 }
             }
             Spirits { id, count, kind } => {
@@ -4325,6 +4348,12 @@ impl App {
                         None
                     }
                     // bg:Name applies solo to a battleground; bgauto enters it when ready.
+                    Some(("walk", xy)) => {
+                        if let Some((x, y)) = xy.split_once('_').and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?))) {
+                            self.request_walk((x, y));
+                        }
+                        None
+                    }
                     Some(("comptab", n)) => {
                         self.companions.select_tab(n.parse().unwrap_or(0));
                         None
@@ -5229,6 +5258,7 @@ impl App {
                     self.windows.menu_collapsed = self.settings.menu_collapsed;
                 }
                 let target = self.attack.map(|a| a.0).or_else(|| { let me = self.player.as_ref()?.walker.cell; self.units.iter().filter(|(_, m)| m.kind == 5).filter(|(_, m)| (m.walker.cell.0 - me.0).abs().max((m.walker.cell.1 - me.1).abs()) <= 14).min_by_key(|(_, m)| (m.walker.cell.0 - me.0).pow(2) + (m.walker.cell.1 - me.1).pow(2)).map(|(id, _)| *id) });
+                self.sense.show(ui.ctx());
                 if let Some(a) = self.companions.show(ui.ctx(), target) {
                     self.companion_action = Some(a);
                 }
@@ -5944,6 +5974,7 @@ fn main() -> anyhow::Result<()> {
         warps: Default::default(),
         class_names: Default::default(),
         pet_talk: Default::default(),
+        sense: Default::default(),
         look_tables: Default::default(),
         sprites: Default::default(),
         ready_at: None,

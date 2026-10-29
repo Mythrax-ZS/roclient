@@ -32,6 +32,13 @@ impl Gat {
         Ok(Self { width, height, cells, heights })
     }
 
+    /// Changes a cell's type (the server's setcell / setwall).
+    pub fn set_cell(&mut self, x: i32, y: i32, kind: u32) {
+        if x >= 0 && y >= 0 && (x as u32) < self.width && (y as u32) < self.height {
+            self.cells[(y as u32 * self.width + x as u32) as usize] = kind;
+        }
+    }
+
     pub fn walkable(&self, x: i32, y: i32) -> bool {
         if x < 0 || y < 0 || x as u32 >= self.width || y as u32 >= self.height {
             return false;

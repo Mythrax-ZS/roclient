@@ -416,6 +416,12 @@ pub enum Event {
     /// Orbs circling a unit. `kind`: 0 spirit spheres, 1 soul energy, 2 Millennium Shields,
     /// 10 + element for Kagerou/Oboro charms (1 water, 2 earth, 3 fire, 4 wind).
     Spirits { id: u32, count: u16, kind: u8 },
+    /// ZC_MONSTER_INFO (Sense).
+    MonsterInfo { class: u16, level: u16, size: u16, hp: u32, def: i16, race: u16, mdef: i16, element: u16, mods: [u8; 9] },
+    /// ZC_UPDATE_MAPINFO: a cell's GAT type changed (setcell / setwall / skills).
+    CellType { x: u16, y: u16, kind: u16, map: String },
+    /// ZC_NOTIFY_MEMBERINFO_TO_GROUPM: a party member's job and level.
+    PartyMemberInfo { account_id: u32, job: i16, level: i16 },
     /// ZC_ADD_SKILL / ZC_SKILLINFO_UPDATE2: a skill added or changed (script `skill`, item bonuses).
     SkillAdded(Skill),
     /// ZC_SKILLINFO_DELETE.
@@ -980,7 +986,7 @@ impl MapSession {
                             _ => Some(Event::Notice("The item could not be identified.".into())),
                         },
                         0x013c if data.len() >= 4 => Some(Event::ArrowEquipped(u16::from_le_bytes([data[2], data[3]]))),
-                        0x013b | 0x0189 | 0x0a28 | 0x011e | 0x012c | 0x02bb | 0x0223 | 0x01fe | 0x0b17 | 0x0bae | 0x02c5 | 0x0205 | 0x01ea | 0x0aa7 => notice_text(opcode, &data).map(Event::Notice),
+                        0x013b | 0x0189 | 0x02d3 | 0x0a28 | 0x011e | 0x012c | 0x02bb | 0x0223 | 0x01fe | 0x0b17 | 0x0bae | 0x02c5 | 0x0205 | 0x01ea | 0x0aa7 => notice_text(opcode, &data).map(Event::Notice),
                         0x0152 if data.len() >= 12 => Some(Event::GuildEmblem { guild: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), version: u32::from_le_bytes([data[8], data[9], data[10], data[11]]), data: data[12..].to_vec() }),
                         0x010c if data.len() >= 6 => Some(Event::Mvp(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x010a if data.len() >= 6 => Some(Event::MvpItem(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
@@ -1236,6 +1242,21 @@ impl MapSession {
                         0x01a3 | 0x022f if data.len() >= 5 => Some(Event::Fed { homun: opcode == 0x022f, ok: data[2] != 0, item: u16::from_le_bytes([data[3], data[4]]) }),
                         // The wire flag is inverted: 0 means "in the favourites tab".
                         0x0908 if data.len() >= 5 => Some(Event::ItemFavorite { index: u16::from_le_bytes([data[2], data[3]]), favorite: data[4] == 0 }),
+                        0x018c if data.len() >= 29 => {
+                            let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
+                            let mut mods = [0u8; 9];
+                            mods.copy_from_slice(&data[20..29]);
+                            Some(Event::MonsterInfo { class: w(2), level: w(4), size: w(6), hp: u32::from_le_bytes([data[8], data[9], data[10], data[11]]), def: w(12) as i16, race: w(14), mdef: w(16) as i16, element: w(18), mods })
+                        }
+                        0x0192 if data.len() >= 10 => {
+                            let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
+                            let raw = data.get(8..).unwrap_or_default();
+                            let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+                            Some(Event::CellType { x: w(2), y: w(4), kind: w(6), map: String::from_utf8_lossy(&raw[..end]).into_owned() })
+                        }
+                        0x0abd if data.len() >= 10 => Some(Event::PartyMemberInfo { account_id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), job: i16::from_le_bytes([data[6], data[7]]), level: i16::from_le_bytes([data[8], data[9]]) }),
+                        // ZC_TARGET_SPIRITS: Enchanting Shadow spheres on a target.
+                        0x0b68 if data.len() >= 12 => Some(Event::Spirits { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), count: u16::from_le_bytes([data[10], data[11]]), kind: 3 }),
                         0x01b9 if data.len() >= 6 => Some(Event::CastCancel(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         // ZC_HIGHJUMP: instant slide to a cell (Taekwon jump, knockback snaps).
                         0x01ff if data.len() >= 10 => Some(Event::Stop { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), x: u16::from_le_bytes([data[6], data[7]]), y: u16::from_le_bytes([data[8], data[9]]) }),
@@ -1540,6 +1561,8 @@ fn notice_text(opcode: u16, data: &[u8]) -> Option<String> {
             _ => return None,
         }
         .into(),
+        // ZC_NOTIFY_BIND_ON_EQUIP
+        0x02d3 => "The item has been bound to your character.".into(),
         // ZC_ACK_OPENSTORE2
         0x0a28 => match data.get(2)? {
             1 => "Failed to open stalls.",
