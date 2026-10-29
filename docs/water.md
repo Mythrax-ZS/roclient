@@ -69,6 +69,7 @@ instantly. There's one pipeline and no shader permutations.
 | `F_CLASSIC` | RO texture | the original animated frame blended into the water body colour |
 | `F_SPECULAR` | Sun glint | Blinn-Phong against the map's sun, gated by sun height |
 | `F_CAUSTICS` | Caustics | two scrolling, rotated layers of the cellular pattern multiplied into a moving light net on the refracted seabed; fades in over the first unit of depth, out with deep water and a low sun (Medium and up) |
+| `F_INTERACT` | Wading | actors standing in water get a wobbling foam collar and shed ripple rings (a trail of them while walking, the wake; a slow pulse while standing), up to 48 rings and 16 waders. Sprites sink to the waterline (capped at knee height, since RO seabeds are often far below the surface), tinted and faded below it with a wet line where they break the surface. Rings are centred where the eye ray through the waterline meets the surface, so they sit at the sprite on screen (Low and up) |
 | (always) | Variation | a slow, large-scale field varies ripple strength (glassy vs choppy patches), the water tint, clarity (murky vs clear patches), haze and where the sun glitters, so a bay never reads as one flat repeat; ripple layers are rotated and at unrelated scales so their tiling never lines up |
 
 ### HLSL / GLSL / SPIR-V

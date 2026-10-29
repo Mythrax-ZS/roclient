@@ -38,7 +38,17 @@ pub mod flag {
     pub const SPECULAR: u32 = 1 << 9;
     /// Moving light network on the refracted seabed.
     pub const CAUSTICS: u32 = 1 << 10;
+    /// Actors standing in the water: contact foam, ripple rings and wakes.
+    pub const INTERACT: u32 = 1 << 11;
 }
+
+/// Ripple rings and wading actors the uniform carries (water.wgsl `MAX_RIPPLES` / `MAX_WADERS`).
+pub const MAX_RIPPLES: usize = 48;
+pub const MAX_WADERS: usize = 16;
+/// Seconds a ripple ring lives (water.wgsl `RIPPLE_LIFE`).
+const RIPPLE_LIFE: f32 = 2.2;
+/// Deepest the waterline climbs up a wading sprite (sprite.wgsl `WADE_DEPTH`).
+const WADE_DEPTH: f32 = 2.6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WaterQuality {
@@ -97,6 +107,8 @@ pub struct WaterSettings {
     pub specular: bool,
     /// Moving light network on the seabed (needs refraction).
     pub caustics: bool,
+    /// Actors disturb the water (rings, wakes, contact foam) and sink into it.
+    pub interaction: bool,
     /// Mesh subdivisions per water tile (1..8) for smoother wave displacement.
     pub tessellation: u32,
     /// Screen-space reflection march steps.
@@ -145,6 +157,7 @@ impl WaterSettings {
             classic_texture: true,
             specular: true,
             caustics: true,
+            interaction: true,
             tessellation: 4,
             ssr_steps: 24,
             ssr_distance: 160.0,
@@ -177,6 +190,7 @@ impl WaterSettings {
                 bicubic: false,
                 specular: false,
                 caustics: false,
+                interaction: false,
                 classic_texture: true,
                 classic_mix: 1.0,
                 tessellation: 1,
@@ -203,6 +217,7 @@ impl WaterSettings {
             (self.classic_texture, flag::CLASSIC),
             (self.specular, flag::SPECULAR),
             (self.caustics, flag::CAUSTICS),
+            (self.interaction, flag::INTERACT),
         ] {
             if on {
                 f |= bit;
@@ -268,6 +283,10 @@ pub(crate) struct Uniform {
     sky: [f32; 4],
     /// sun rgb, sun intensity
     sun: [f32; 4],
+    /// x, z, birth time (s), strength
+    ripples: [[f32; 4]; MAX_RIPPLES],
+    /// x, z, depth at the feet, 1 when walking
+    waders: [[f32; 4]; MAX_WADERS],
 }
 
 /// A water surface ready to upload: tiles below the water level and the baked shore map.
@@ -666,6 +685,8 @@ pub(crate) struct Water {
     pub frames: Vec<wgpu::BindGroup>,
     pub anim_speed: f32,
     mean_sky: [f32; 3],
+    ripples: Vec<[f32; 4]>,
+    waders: Vec<[f32; 4]>,
 }
 
 impl Water {
@@ -719,7 +740,7 @@ impl Water {
             })
             .collect();
         let anim_speed = (mesh.water.anim_speed.max(1)) as f32;
-        Some(Self { mesh, vertices, count: verts.len() as u32, tessellation, uniform, frames, anim_speed, mean_sky: sky.1 })
+        Some(Self { mesh, vertices, count: verts.len() as u32, tessellation, uniform, frames, anim_speed, mean_sky: sky.1, ripples: vec![], waders: vec![] })
     }
 
     /// Rebuilds the mesh when the tessellation setting changes.
@@ -734,13 +755,50 @@ impl Water {
         self.tessellation = n;
     }
 
+    /// The water surface height (y-up).
+    pub fn level(&self) -> f32 {
+        -self.mesh.water.level
+    }
+
+    /// Tracks actors standing in the water (feet, walking) at `now` on the shader clock:
+    /// the nearest to `focus` become waders (contact foam), and each sheds ripple rings, a
+    /// trail of them while walking (the wake) and a slow pulse while standing.
+    ///
+    /// Seabeds often lie far below the surface, and sprites only sink to `WADE_DEPTH`, so
+    /// each actor's disturbance is centred where the line from the eye through its visible
+    /// waterline meets the surface: on screen the rings sit at the sprite, not above it.
+    pub fn wade(&mut self, actors: impl Iterator<Item = (glam::Vec3, bool)>, focus: glam::Vec3, eye: glam::Vec3, now: f32) {
+        let level = self.level();
+        self.ripples.retain(|r| now - r[2] < RIPPLE_LIFE);
+        let mut wet: Vec<(glam::Vec3, bool)> = actors.filter(|(p, _)| level - p.y > 0.3).collect();
+        wet.sort_by(|a, b| a.0.distance_squared(focus).total_cmp(&b.0.distance_squared(focus)));
+        wet.truncate(MAX_WADERS);
+        let on_surface = |p: glam::Vec3| {
+            let line = p + glam::Vec3::Y * (level - p.y).min(WADE_DEPTH);
+            let ray = eye - line;
+            if ray.y > 0.1 { line + ray * ((level - line.y) / ray.y) } else { p }
+        };
+        let wet: Vec<(glam::Vec3, bool, f32)> = wet.into_iter().map(|(p, walking)| (on_surface(p), walking, level - p.y)).collect();
+        self.waders = wet.iter().map(|(p, walking, depth)| [p.x, p.z, *depth, if *walking { 1.0 } else { 0.0 }]).collect();
+        for (p, walking, _) in wet {
+            let near = |radius: f32, age: f32| self.ripples.iter().any(|r| now - r[2] < age && glam::Vec2::new(r[0] - p.x, r[1] - p.z).length() < radius);
+            if if walking { near(3.5, RIPPLE_LIFE) } else { near(1.0, 1.4) } {
+                continue;
+            }
+            if self.ripples.len() >= MAX_RIPPLES {
+                self.ripples.remove(0);
+            }
+            self.ripples.push([p.x, p.z, now, if walking { 1.0 } else { 0.45 }]);
+        }
+    }
+
     /// Writes this frame's uniform. `sky_scale` dims reflections with the night.
     pub fn update(&self, queue: &wgpu::Queue, s: &WaterSettings, sun: [f32; 3], sky_scale: f32) {
         let w = &self.mesh.water;
         let u = Uniform {
             level: [-w.level, w.wave_height, w.wave_speed, w.wave_pitch],
             map: [self.anim_speed, self.mesh.size.0 as f32 * self.mesh.zoom, self.mesh.size.1 as f32 * self.mesh.zoom, self.mesh.zoom],
-            flags: [s.flags() & !debug_mask(), s.ssr_steps.min(64), 0, 0],
+            flags: [s.flags() & !debug_mask(), s.ssr_steps.min(64), self.ripples.len() as u32, self.waders.len() as u32],
             absorb: [s.absorption_coeff[0], s.absorption_coeff[1], s.absorption_coeff[2], s.depth_scale],
             scatter: [s.scatter_color[0], s.scatter_color[1], s.scatter_color[2], s.classic_mix],
             foam_color: [s.foam.color[0], s.foam.color[1], s.foam.color[2], s.foam.intensity],
@@ -750,6 +808,16 @@ impl Water {
             waves: [s.wave_amplitude, s.wave_length.max(4.0), s.wave_steepness.clamp(0.0, 1.0), s.wave_speed],
             sky: [self.mean_sky[0], self.mean_sky[1], self.mean_sky[2], sky_scale],
             sun: [sun[0], sun[1], sun[2], s.sun_intensity],
+            ripples: {
+                let mut out = [[0.0; 4]; MAX_RIPPLES];
+                out[..self.ripples.len()].copy_from_slice(&self.ripples);
+                out
+            },
+            waders: {
+                let mut out = [[0.0; 4]; MAX_WADERS];
+                out[..self.waders.len()].copy_from_slice(&self.waders);
+                out
+            },
         };
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&u));
     }
@@ -772,8 +840,8 @@ mod tests {
 
     #[test]
     fn uniform_matches_shader_size() {
-        // 11 vec4<f32> + 1 vec4<u32>, as declared in water.wgsl `Water`.
-        assert_eq!(std::mem::size_of::<Uniform>(), 12 * 16);
+        // 11 vec4<f32> + 1 vec4<u32> + the ripple and wader arrays, as in water.wgsl `Water`.
+        assert_eq!(std::mem::size_of::<Uniform>(), (12 + MAX_RIPPLES + MAX_WADERS) * 16);
     }
 
     #[test]

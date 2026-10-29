@@ -50,6 +50,11 @@ struct Globals {
     lights: [[f32; 4]; MAX_LIGHTS * 2],
     /// Room mask: x 1 when active, y/z mask size in cells.
     room: [f32; 4],
+    /// Wading: x water level (y-up), y 1 when sprites sink into the water, z world units
+    /// per sprite pixel.
+    water: [f32; 4],
+    /// Wading: the water's scatter colour (linear rgb).
+    water_tint: [f32; 4],
 }
 
 /// One frame of tessellated egui output.
@@ -977,6 +982,14 @@ impl Renderer {
                 Some((w, h)) => [1.0, w as f32, h as f32, CELL],
                 None => [0.0; 4],
             },
+            water: match &self.water {
+                Some(w) if self.water_settings.interaction => [w.level(), 1.0, CELL / sprite::PIXELS_PER_CELL, 0.0],
+                _ => [0.0; 4],
+            },
+            water_tint: {
+                let c = self.water_settings.scatter_color;
+                [c[0], c[1], c[2], 0.0]
+            },
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 
@@ -1008,6 +1021,8 @@ impl Renderer {
         // Water: this frame's settings, mesh density and screen-copy size.
         if let Some(w) = self.water.as_mut() {
             w.retessellate(&self.device, self.water_settings.tessellation);
+            let walkers = self.actors.iter().filter(|a| a.alpha > 0.1).map(|a| (a.pos, a.action == 1));
+            w.wade(walkers, cam.target, cam.eye(), self.started.elapsed().as_secs_f32());
             let lum = |c: [f32; 3]| c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11;
             let sky_scale = (lum(self.lighting.diffuse) + lum(self.lighting.ambient)) / (lum(day_light.diffuse) + lum(day_light.ambient)).max(1e-3);
             w.update(&self.queue, &self.water_settings, self.lighting.diffuse, sky_scale);

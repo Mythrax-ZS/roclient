@@ -24,10 +24,16 @@ struct Globals {
     lights: array<vec4<f32>, 64>,
     // x: 1 when indoors (room mask active), y/z: mask size in cells, w: world units per cell
     room: vec4<f32>,
+    // x: water level (y-up), y: 1 when sprites sink into water, z: world units per sprite pixel
+    water: vec4<f32>,
+    // rgb: the water's scatter colour
+    water_tint: vec4<f32>,
 };
 
 /// World units (about two cells) a sprite's depth is pulled toward the camera.
 const DEPTH_PULL: f32 = 10.0;
+/// Deepest the waterline climbs up a wading sprite (world units, about knee height).
+const WADE_DEPTH: f32 = 2.6;
 
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var shadow_map: texture_depth_2d;
@@ -50,6 +56,8 @@ struct VsOut {
     @location(2) @interpolate(flat) anchor: vec3<f32>,
     // Screen direction toward the sun (for the rim light).
     @location(3) @interpolate(flat) sun_dir: vec2<f32>,
+    // World units above the feet (for the waterline).
+    @location(4) height: f32,
 };
 
 @vertex
@@ -76,6 +84,7 @@ fn vs_main(v: VsIn) -> VsOut {
     o.color = v.color;
     o.anchor = v.anchor;
     o.sun_dir = normalize(s.xy / s.w - a.xy / a.w + vec2(1e-5, 0.0)) * vec2(1.0, -1.0);
+    o.height = -v.offset.y * g.water.z;
     return o;
 }
 
@@ -147,7 +156,24 @@ fn fs_main(in: VsOut) -> FsOut {
         rgb = rgb * mix(vec3(1.0), shade, k) + rgb * point_light(in.anchor + vec3(0.0, 8.0, 0.0)) * k;
         rgb += srgb_to_linear(g.diffuse.rgb) * edge * g.sprite_light.y * up;
     }
-    return FsOut(vec4(rgb * t.a, t.a), vec4(distance(in.anchor, g.eye.xyz), 1.0, 0.0, 0.0));
+    // Wading: below the waterline the sprite is seen through the water, tinted and faded
+    // with depth, with a bright wet line where it breaks the surface. RO seabeds are often
+    // far below the surface (actors walk them as if dry), so the line is capped at shin
+    // height: actors wade rather than vanish.
+    var alpha = t.a;
+    let depth = g.water.x - in.anchor.y;
+    if g.water.y > 0.5 && depth > 0.3 {
+        let wobble = 0.2 * sin(in.pos.x * 0.09 + g.params.x * 3.1) + 0.12 * sin(in.pos.x * 0.21 - g.params.x * 4.3);
+        let line = min(depth, WADE_DEPTH) + wobble;
+        let under = 1.0 - smoothstep(line - 0.2, line + 0.2, in.height);
+        let sunk = saturate((line - in.height) / 6.0);
+        let water = g.water_tint.rgb * (g.ambient.rgb + g.diffuse.rgb) * 4.0;
+        rgb = mix(rgb, mix(rgb * vec3(0.55, 0.8, 0.85), water, 0.3 + 0.5 * sunk), under);
+        alpha *= 1.0 - under * (0.3 + 0.45 * sunk);
+        let wet = exp(-pow((in.height - line) / 0.35, 2.0));
+        rgb += vec3(0.6, 0.7, 0.75) * (g.ambient.rgb + g.diffuse.rgb) * wet * 0.5;
+    }
+    return FsOut(vec4(rgb * alpha, alpha), vec4(distance(in.anchor, g.eye.xyz), 1.0, 0.0, 0.0));
 }
 
 /// Indoors, only the room the player is in is drawn (other rooms share the map).

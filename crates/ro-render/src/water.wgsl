@@ -50,6 +50,10 @@ struct Water {
     sky: vec4<f32>,
     // sun rgb, sun intensity
     sun: vec4<f32>,
+    // x, z, birth time (s), strength; count in flags.z
+    ripples: array<vec4<f32>, 48>,
+    // x, z, depth at the feet, 1 when walking; count in flags.w
+    waders: array<vec4<f32>, 16>,
 };
 
 const F_WAVES: u32 = 1u;
@@ -63,6 +67,9 @@ const F_BICUBIC: u32 = 128u;
 const F_CLASSIC: u32 = 256u;
 const F_SPECULAR: u32 = 512u;
 const F_CAUSTICS: u32 = 1024u;
+const F_INTERACT: u32 = 2048u;
+// Keep in sync with water.rs.
+const RIPPLE_LIFE: f32 = 2.2;
 
 // Keep in sync with water.rs.
 const DEPTH_RANGE: f32 = 64.0;
@@ -248,6 +255,52 @@ fn caustics(floor_pos: vec3<f32>, depth: f32) -> f32 {
     return net * smoothstep(0.2, 1.5, depth) * exp(-depth * 0.05) * sun_up;
 }
 
+// Actors in the water (F_INTERACT). Returns xy: surface slope to add to the normal, z: foam.
+// Each ripple is a ring travelling outward from where it was shed, a little wave packet
+// that widens and dies over RIPPLE_LIFE; fresh rings carry foam. Every wader also has a
+// wobbling foam collar where the water meets the legs, stronger while walking.
+fn disturb(p: vec2<f32>, t: f32) -> vec3<f32> {
+    var slope = vec2(0.0);
+    var foam = 0.0;
+    for (var i = 0u; i < min(w.flags.z, 48u); i++) {
+        let r = w.ripples[i];
+        let age = t - r.z;
+        if age < 0.0 || age > RIPPLE_LIFE {
+            continue;
+        }
+        let d = p - r.xy;
+        let dist = length(d);
+        let width = 0.6 + age * 0.7;
+        let x = (dist - (0.8 + age * 5.5)) / width;
+        if abs(x) > 3.0 {
+            continue;
+        }
+        let life = 1.0 - age / RIPPLE_LIFE;
+        let env = r.w * life * life;
+        let bell = exp(-x * x);
+        // d/dr of sin(2.4x)·exp(-x²): the ring's slope, pointing away from its centre.
+        let dh = (2.4 * cos(2.4 * x) - 2.0 * x * sin(2.4 * x)) * bell / width;
+        slope += d / max(dist, 1e-3) * dh * env * 0.45;
+        foam += env * exp(-x * x * 2.0) * (1.0 - smoothstep(0.0, 0.9, age)) * 0.6;
+    }
+    for (var i = 0u; i < min(w.flags.w, 16u); i++) {
+        let a = w.waders[i];
+        let d = p - a.xy;
+        let dist = length(d);
+        if dist > 6.0 {
+            continue;
+        }
+        let ang = atan2(d.y, d.x);
+        let edge = 2.7 + 0.25 * sin(ang * 5.0 + t * 2.3) + 0.14 * sin(ang * 3.0 - t * 3.1);
+        let x = (dist - edge) / (0.5 + 0.3 * a.w);
+        let shallow = smoothstep(0.3, 1.5, a.z);
+        foam += exp(-x * x) * (0.55 + 0.35 * a.w) * shallow;
+        // The water piles up slightly against the legs.
+        slope += d / max(dist, 1e-3) * -2.0 * x * exp(-x * x) * 0.12 * shallow;
+    }
+    return vec3(slope, foam);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let t = g.params.x;
@@ -296,6 +349,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let chop = mix(0.35, 1.35, macro_v);
         let ripple = (a * 0.8 + b * 0.55 + c * 0.7) * w.normal.x * fade * chop;
         n = normalize(vec3(n.x + ripple.x, n.y, n.z + ripple.y));
+    }
+    // Rings, wakes and foam collars around actors standing in the water.
+    var stir = vec3(0.0);
+    let stir_pattern = textureSampleGrad(detail, wrap, uv_f1 * 1.7, df1[0] * 1.7, df1[1] * 1.7).a;
+    if on(F_INTERACT) {
+        stir = disturb(p.xz, t);
+        n = normalize(vec3(n.x + stir.x, n.y, n.z + stir.y));
     }
 
     // Depth: the baked vertical depth everywhere, and the view-ray thickness from the
@@ -415,6 +475,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let crest = smoothstep(0.6, 0.9, in.crest) * smoothstep(0.6, 0.85, mask);
         foam = max(foam, crest * w.foam.w * smoothstep(0.6, 0.95, pattern));
         foam *= w.foam_color.a;
+        let lit = w.foam_color.rgb * (g.ambient.rgb + g.diffuse.rgb * max(sun_dir.y, 0.2));
+        color = mix(color, lit, foam);
+        alpha = max(alpha, foam);
+    }
+    if stir.z > 0.0 {
+        let foam = clamp(stir.z * (0.45 + 0.75 * stir_pattern), 0.0, 1.0) * w.foam_color.a;
         let lit = w.foam_color.rgb * (g.ambient.rgb + g.diffuse.rgb * max(sun_dir.y, 0.2));
         color = mix(color, lit, foam);
         alpha = max(alpha, foam);
