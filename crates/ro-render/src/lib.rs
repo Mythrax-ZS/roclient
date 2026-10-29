@@ -625,7 +625,9 @@ impl Renderer {
         let reach = (pull.length() / total).clamp(0.0, 1.0);
         let away = pull.try_normalize().unwrap_or(glam::Vec2::ZERO) * 0.8 * reach;
         let lamp = glam::Vec3::new(away.x, -0.6 - 0.4 * (1.0 - reach), away.y).normalize();
-        sun.lerp(lamp, (total * 3.0).min(1.0)).normalize()
+        // Lamps bend the sun's shadow only partway (about 20° at most), so walking past
+        // them sways it gently instead of spinning it.
+        sun.lerp(lamp, (total * 1.5).min(0.3)).normalize()
     }
 
     /// Indoor maps: draw only cells set in `mask` (`w` x `h`, one byte per GAT cell, row 0
@@ -883,18 +885,18 @@ impl Renderer {
                 };
             }
         }
-        // Ease the shadow direction toward this frame's light (about a quarter second).
+        // Ease the shadow direction toward this frame's light (about a second).
         let mut goal = self.light_cast_dir();
-        // Keep shadows on the camera's side: one falling away from the viewer starts behind
+        // Keep shadows on the viewer's side: one falling away from the viewer starts behind
         // the body, so its visible part looks detached from the feet. Mirror it toward the
-        // camera (same angle off the view axis, same length).
-        let fwd = glam::Vec2::new(self.camera.target.x - self.camera.eye().x, self.camera.target.z - self.camera.eye().z).normalize_or_zero();
+        // default (north-up) view; using the live camera would turn shadows with it.
+        let fwd = glam::Vec2::new(0.0, 1.0);
         let h = glam::Vec2::new(goal.x, goal.z);
         if h.dot(fwd) > 0.0 {
             let m = h - fwd * 2.0 * h.dot(fwd);
             goal = glam::Vec3::new(m.x, goal.y, m.y);
         }
-        self.cast_dir = self.cast_dir.lerp(goal, (dt * 4.0).min(1.0)).try_normalize().unwrap_or(goal);
+        self.cast_dir = self.cast_dir.lerp(goal, (dt * 1.5).min(1.0)).try_normalize().unwrap_or(goal);
         // Shadows fade out as the sun sets and back in as it rises (and wraps).
         if let Some(p) = self.day_progress() {
             let edge = |x: f32| (x / 0.06).clamp(0.0, 1.0);
