@@ -16,7 +16,7 @@ use wgpu::util::DeviceExt;
 pub use camera::{Camera, CELL};
 pub use ro_formats::image::Rgba;
 pub use scene::{SceneBuilder, SceneMesh};
-pub use water::WaterMesh;
+pub use water::{flag as water_flag, Foam, WaterMesh, WaterQuality, WaterSettings};
 pub use effect::{ProcFx, Shape, TexId};
 pub use fx::{Fx, FxId};
 pub use post::PostSettings;
@@ -122,6 +122,15 @@ pub struct Renderer {
     lightmap_sampler: wgpu::Sampler,
     water_pipeline: wgpu::RenderPipeline,
     water_layout: wgpu::BindGroupLayout,
+    water_screen_layout: wgpu::BindGroupLayout,
+    /// Opaque-scene copies for refraction / depth / reflections, sized with the window.
+    water_screen: water::ScreenCopies,
+    /// Shared ripple normal / height / foam texture.
+    water_detail: wgpu::TextureView,
+    clamp_sampler: wgpu::Sampler,
+    water_settings: water::WaterSettings,
+    /// A caller-supplied sky (equirectangular) and its mean radiance; None generates one.
+    water_sky: Option<(Rgba, [f32; 3])>,
     repeat_sampler: wgpu::Sampler,
     water: Option<water::Water>,
     sprite_pipeline: wgpu::RenderPipeline,
@@ -326,36 +335,13 @@ impl Renderer {
             ..Default::default()
         });
 
-        let water_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("water"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
+        let (water_layout, water_screen_layout) = water::layouts(&device);
+        let clamp_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("water clamp"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
         });
         let repeat_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("repeat"),
@@ -431,7 +417,7 @@ impl Renderer {
         let water_pipeline = pipeline(
             "water",
             include_str!("water.wgsl"),
-            &[Some(&globals_layout), Some(&water_layout)],
+            &[Some(&globals_layout), Some(&water_layout), Some(&water_screen_layout)],
             &[Some(water::Vertex::layout())],
             Some(wgpu::BlendState::ALPHA_BLENDING),
         );
@@ -487,6 +473,8 @@ impl Renderer {
 
         let ui_renderer = egui_wgpu::Renderer::new(&device, config.format.remove_srgb_suffix(), Default::default());
         let targets = Self::make_targets(&device, &config, samples);
+        let water_screen = water::ScreenCopies::new(&device, &water_screen_layout, config.width, config.height);
+        let water_detail = scene::upload_texture(&device, &queue, &water::detail_texture(), true);
         let post = post::Post::new(&device, config.format);
         Ok(Self {
             surface,
@@ -507,6 +495,12 @@ impl Renderer {
             scene: None,
             water_pipeline,
             water_layout,
+            water_screen_layout,
+            water_screen,
+            water_detail,
+            clamp_sampler,
+            water_settings: water::WaterSettings::default(),
+            water_sky: None,
             repeat_sampler,
             water: None,
             sprite_pipeline,
@@ -691,8 +685,46 @@ impl Renderer {
     }
 
     /// Adds the map's water. `images[i]` is `mesh.textures[i]`.
+    /// Call after `set_scene` (the generated sky follows the map's lighting).
     pub fn set_water(&mut self, mesh: &WaterMesh, images: Vec<Option<Rgba>>) {
-        self.water = water::Water::upload(&self.device, &self.queue, &self.water_layout, &self.repeat_sampler, mesh, images);
+        let generated;
+        let sky = match &self.water_sky {
+            Some((img, mean)) => (img, *mean),
+            None => {
+                generated = water::sky_map(&self.lighting);
+                (&generated.0, generated.1)
+            }
+        };
+        self.water = water::Water::upload(
+            &self.device,
+            &self.queue,
+            &self.water_layout,
+            &self.repeat_sampler,
+            &self.clamp_sampler,
+            &self.water_detail,
+            mesh,
+            images,
+            sky,
+            &self.water_settings,
+        );
+    }
+
+    /// Water look and feature toggles; applies from the next frame.
+    pub fn set_water_settings(&mut self, s: WaterSettings) {
+        self.water_settings = s;
+    }
+
+    pub fn water_settings(&self) -> WaterSettings {
+        self.water_settings
+    }
+
+    /// Supplies an equirectangular sky (sRGB, top half above the horizon) for water
+    /// reflections from the next `set_water`; None returns to the generated sky.
+    pub fn set_sky_map(&mut self, sky: Option<Rgba>) {
+        self.water_sky = sky.map(|img| {
+            let mean = water::mean_radiance(&img);
+            (img, mean)
+        });
     }
 
     fn make_targets(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, samples: u32) -> Targets {
@@ -973,20 +1005,35 @@ impl Renderer {
             self.shadow.record(&self.queue, &mut enc, light_vp, right, CELL / sprite::PIXELS_PER_CELL, sprite_buffer.as_ref(), casters);
         }
 
+        // Water: this frame's settings, mesh density and screen-copy size.
+        if let Some(w) = self.water.as_mut() {
+            w.retessellate(&self.device, self.water_settings.tessellation);
+            let lum = |c: [f32; 3]| c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11;
+            let sky_scale = (lum(self.lighting.diffuse) + lum(self.lighting.ambient)) / (lum(day_light.diffuse) + lum(day_light.ambient)).max(1e-3);
+            w.update(&self.queue, &self.water_settings, self.lighting.diffuse, sky_scale);
+            let s = self.water_screen.color.size();
+            if (s.width, s.height) != size {
+                self.water_screen = water::ScreenCopies::new(&self.device, &self.water_screen_layout, size.0, size.1);
+            }
+        }
+
         // The world goes to the HDR target; post-processing then writes `view`.
         let (color, resolve) = match &targets.msaa {
             Some(m) => (m, Some(&targets.post.hdr)),
             None => (&targets.post.hdr, None),
         };
-        {
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("main"),
+        // The world pass. With water reading the scene it is split in two: the opaque world,
+        // a copy of its colour and depth, then the water and everything drawn over it.
+        let begin = |enc: &mut wgpu::CommandEncoder, first: bool| {
+            let load = |c: wgpu::Color| if first { wgpu::LoadOp::Clear(c) } else { wgpu::LoadOp::Load };
+            enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some(if first { "main" } else { "main (over water)" }),
                 color_attachments: &[
                     Some(wgpu::RenderPassColorAttachment {
                         view: color,
                         depth_slice: None,
                         resolve_target: resolve,
-                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(CLEAR), store: wgpu::StoreOp::Store },
+                        ops: wgpu::Operations { load: load(CLEAR), store: wgpu::StoreOp::Store },
                     }),
                     // Depth info: x linear distance from the eye (far where nothing drew),
                     // y 1 on sprites.
@@ -994,16 +1041,21 @@ impl Renderer {
                         view: targets.msaa_info.as_ref().unwrap_or(&targets.post.info),
                         depth_slice: None,
                         resolve_target: targets.msaa_info.as_ref().map(|_| &targets.post.info),
-                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 60000.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
+                        ops: wgpu::Operations { load: load(wgpu::Color { r: 60000.0, g: 0.0, b: 0.0, a: 0.0 }), store: wgpu::StoreOp::Store },
                     }),
                 ],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &targets.depth,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
+                    depth_ops: Some(wgpu::Operations { load: if first { wgpu::LoadOp::Clear(1.0) } else { wgpu::LoadOp::Load }, store: wgpu::StoreOp::Store }),
                     stencil_ops: None,
                 }),
                 ..Default::default()
-            });
+            })
+            .forget_lifetime()
+        };
+        let water_reads_screen = self.water.is_some() && self.water_settings.uses_screen();
+        {
+            let mut pass = begin(&mut enc, true);
             pass.set_bind_group(0, &self.globals_bind, &[]);
             match &self.scene {
                 Some(t) => {
@@ -1022,9 +1074,16 @@ impl Renderer {
                 }
             }
             // Transparent passes after all opaque geometry.
+            if water_reads_screen {
+                drop(pass);
+                self.water_screen.capture(&mut enc, &targets.post.hdr_tex, &targets.post.info_tex);
+                pass = begin(&mut enc, false);
+                pass.set_bind_group(0, &self.globals_bind, &[]);
+            }
             if let Some(w) = &self.water {
                 pass.set_pipeline(&self.water_pipeline);
                 pass.set_bind_group(1, &w.frames[w.frame(globals.params[0])], &[]);
+                pass.set_bind_group(2, &self.water_screen.bind, &[]);
                 pass.set_vertex_buffer(0, w.vertices.slice(..));
                 pass.draw(0..w.count, 0..1);
             }

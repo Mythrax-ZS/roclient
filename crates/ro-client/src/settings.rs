@@ -40,6 +40,8 @@ pub struct Visual {
     pub shadows: f32,
     pub sun_elevation: f32,
     pub sun_cycle: f32,
+    /// Water quality preset: 0 Classic, 1 Low, 2 Medium, 3 High, 4 Ultra.
+    pub water: u8,
     pub warmth: f32,
     pub saturation: f32,
     pub contrast: f32,
@@ -63,6 +65,7 @@ impl Default for Visual {
             shadows: p.shadow_strength,
             sun_elevation: p.sun_elevation,
             sun_cycle: p.sun_cycle_minutes,
+            water: 3,
             warmth: p.warmth,
             saturation: p.saturation,
             contrast: p.contrast,
@@ -78,6 +81,12 @@ impl Default for Visual {
 }
 
 impl Visual {
+    /// The water preset in use; the classic look keeps classic water.
+    pub fn water_settings(&self) -> ro_render::WaterSettings {
+        let q = if self.hd2d { ro_render::WaterQuality::ALL[(self.water as usize).min(4)] } else { ro_render::WaterQuality::Classic };
+        ro_render::WaterSettings::preset(q)
+    }
+
     pub fn post(&self) -> ro_render::PostSettings {
         ro_render::PostSettings {
             enabled: self.hd2d,
@@ -169,6 +178,15 @@ impl Settings {
                 ui.end_row();
                 ui.add_enabled_ui(v.hd2d, |ui| ui.label("Sun cycle")).response.on_hover_text("Minutes for the sun to cross the sky; 0 keeps it still");
                 ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.sun_cycle, 0.0..=180.0).suffix(" min"));
+                ui.end_row();
+                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Water"));
+                ui.add_enabled_ui(v.hd2d, |ui| {
+                    egui::ComboBox::from_id_salt("water quality").selected_text(ro_render::WaterQuality::ALL[(v.water as usize).min(4)].name()).show_ui(ui, |ui| {
+                        for (i, q) in ro_render::WaterQuality::ALL.iter().enumerate() {
+                            ui.selectable_value(&mut v.water, i as u8, q.name());
+                        }
+                    });
+                });
                 ui.end_row();
                 ui.add_enabled_ui(v.hd2d, |ui| ui.label("Vignette"));
                 ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.vignette, 0.0..=1.0));

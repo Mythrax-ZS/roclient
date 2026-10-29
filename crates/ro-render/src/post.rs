@@ -115,6 +115,9 @@ pub struct PostTargets {
     pub hdr: wgpu::TextureView,
     /// Resolved depth info (see INFO_FORMAT).
     pub info: wgpu::TextureView,
+    /// The textures behind `hdr` and `info`, copied for the water each frame.
+    pub hdr_tex: wgpu::Texture,
+    pub info_tex: wgpu::Texture,
     half_bloom: wgpu::TextureView,
     half_dof: wgpu::TextureView,
     ao: wgpu::TextureView,
@@ -122,6 +125,22 @@ pub struct PostTargets {
     dof: [wgpu::TextureView; 2],
     rays: wgpu::TextureView,
     size: (u32, u32),
+}
+
+/// A render target that can also be copied from (the water reads the opaque scene).
+fn copyable(device: &wgpu::Device, label: &str, w: u32, h: u32, format: wgpu::TextureFormat) -> (wgpu::Texture, wgpu::TextureView) {
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = tex.create_view(&Default::default());
+    (tex, view)
 }
 
 fn target(device: &wgpu::Device, label: &str, w: u32, h: u32, format: wgpu::TextureFormat) -> wgpu::TextureView {
@@ -143,9 +162,13 @@ impl PostTargets {
     pub fn new(device: &wgpu::Device, w: u32, h: u32) -> Self {
         let (hw, hh, qw, qh) = (w / 2, h / 2, w / 4, h / 4);
         let hdr = |label, w, h| target(device, label, w, h, HDR_FORMAT);
+        let (hdr_tex, hdr_view) = copyable(device, "hdr scene", w, h, HDR_FORMAT);
+        let (info_tex, info_view) = copyable(device, "depth info", w, h, INFO_FORMAT);
         Self {
-            hdr: hdr("hdr scene", w, h),
-            info: target(device, "depth info", w, h, INFO_FORMAT),
+            hdr: hdr_view,
+            info: info_view,
+            hdr_tex,
+            info_tex,
             half_bloom: hdr("bloom half", hw, hh),
             half_dof: hdr("dof half", hw, hh),
             ao: hdr("ambient occlusion", hw, hh),

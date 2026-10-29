@@ -2596,6 +2596,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "glam",
+ "naga",
  "ro-formats",
  "tracing",
  "wgpu",
