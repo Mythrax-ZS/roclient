@@ -4,6 +4,7 @@
 //!   ro-client              open the renderer window
 
 mod audio;
+mod book;
 mod sense;
 mod pettalk;
 mod fx;
@@ -963,6 +964,8 @@ struct App {
     /// Test drags: pointer events played one frame at a time.
     fake_frames: std::collections::VecDeque<Vec<egui::Event>>,
     social: social::Social,
+    /// The book reader (readbook scripts, book items).
+    books: book::Books,
     /// The player we asked to trade, until they answer.
     trade_partner: Option<String>,
     /// Clicked player: (id, name, menu position in UI points).
@@ -1041,6 +1044,16 @@ struct App {
 }
 
 impl App {
+    /// Opens book `id` (its item id) at `page`, titled with the item's name.
+    fn open_book(&mut self, id: u32, page: u32) {
+        let title = self.item_db.as_ref().map_or_else(|| format!("Book {id}"), |db| db.name(id, true));
+        if let Some(vfs) = self.vfs.as_ref() {
+            if !self.books.open(vfs, id, page, title) {
+                self.hud.push_chat(ro_net::ChatKind::System, "This book cannot be read.".into());
+            }
+        }
+    }
+
     /// Loads a map into the renderer and remembers its ground for picking.
     fn enter_map(&mut self, name: &str) {
         // A loading screen covers the map load (not behind the login screens or in captures).
@@ -2568,6 +2581,7 @@ impl App {
                 self.script_progress = Some((std::time::Instant::now(), secs.max(1) as f32 * 1000.0));
             }
             ProgressCancel => self.script_progress = None,
+            ReadBook { id, page } => self.open_book(id, page),
             UnitProgress { id, secs } => {
                 self.unit_progress.insert(id, (0.0, secs.max(1) as f32 * 1000.0));
             }
@@ -3263,7 +3277,13 @@ impl App {
         use ro_net::{Command, ItemRequest, StatRequest};
         use windows::UiAction::*;
         match a {
-            UseItem(index) => self.send(Command::Item(ItemRequest::Use { index, account_id: self.account_id })),
+            UseItem(index) => {
+                // Book items open locally, as the original (no use request is sent).
+                match self.inventory.items.get(&index).map(|i| i.id).filter(|id| self.books.is_book(*id)) {
+                    Some(id) => self.open_book(id, 1),
+                    None => self.send(Command::Item(ItemRequest::Use { index, account_id: self.account_id })),
+                }
+            }
             Equip { index, location } => self.send(Command::Item(ItemRequest::Equip { index, location })),
             Unequip(index) => self.send(Command::Item(ItemRequest::Unequip { index })),
             UnequipAll(location) => self.send(Command::Item(ItemRequest::UnequipAll { location })),
@@ -5708,6 +5728,7 @@ impl App {
                         a.sfx_volume = self.settings.sfx_volume;
                     }
                 }
+                self.books.show(ui.ctx());
                 answer = self.hud.show_dialog(ui.ctx(), &mut self.dialog, self.cutin.as_ref());
                 ui_action = self.windows.show(ui.ctx(), &view);
                 self.social.show_party = self.windows.party;
@@ -6282,6 +6303,7 @@ fn main() -> anyhow::Result<()> {
         fake_click: None,
         fake_frames: Default::default(),
         social: Default::default(),
+        books: Default::default(),
         trade_partner: None,
         player_menu: None,
         auto_deal: arg("--deal").map(|d| d == "buy"),
@@ -6342,6 +6364,7 @@ fn main() -> anyhow::Result<()> {
     uitex::set_upscaler(ro_render::Upscaler::new(app.settings.upscale.clone()));
     app.class_names = app.vfs.as_ref().map(load_class_names).unwrap_or_default();
     app.pet_talk = app.vfs.as_ref().map(pettalk::PetTalk::load).unwrap_or_default();
+    app.books = app.vfs.as_ref().map(book::Books::load).unwrap_or_default();
     app.guild.client_dir = app.client_dir.clone();
     app.hat_files = app.vfs.as_ref().map(fx::hat_effects).unwrap_or_default();
     app.ui_scale = app.settings.ui_scale;

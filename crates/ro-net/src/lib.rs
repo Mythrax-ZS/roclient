@@ -292,6 +292,8 @@ pub enum Event {
     Progress { secs: u32 },
     /// ZC_PROGRESS_CANCEL: the server aborted our progress bar (we moved).
     ProgressCancel,
+    /// ZC_READ_BOOK: open book `id` (an item id) at `page`.
+    ReadBook { id: u32, page: u32 },
     /// ZC_PROGRESS_ACTOR: a `progressbar_npc` over a unit; `secs` left.
     UnitProgress { id: u32, secs: u32 },
     /// ZC_SHOWSCRIPT: `showscript` text called out over a unit (not in the chat log).
@@ -1336,6 +1338,7 @@ impl MapSession {
                         0x01b9 if data.len() >= 6 => Some(Event::CastCancel(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x02f0 if data.len() >= 10 => Some(Event::Progress { secs: l(&data, 6) }),
                         0x02f2 => Some(Event::ProgressCancel),
+                        0x0294 if data.len() >= 10 => Some(Event::ReadBook { id: l(&data, 2), page: l(&data, 6) }),
                         0x09d1 if data.len() >= 14 => Some(Event::UnitProgress { id: l(&data, 2), secs: l(&data, 10) }),
                         0x08b3 if data.len() >= 8 => Some(Event::ShowScript { id: l(&data, 4), text: ro_proto::packets::get_fixed_str(&mut &data[8..], data.len() - 8) }),
                         0x01b1 if data.len() >= 7 => Some(Event::ShowDigit { kind: data[2], value: l(&data, 3) as i32 }),
