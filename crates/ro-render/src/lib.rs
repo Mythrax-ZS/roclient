@@ -3,6 +3,7 @@
 mod camera;
 mod scene;
 mod effect;
+mod particle;
 mod fx;
 mod post;
 mod shadow;
@@ -20,6 +21,7 @@ pub use scene::{SceneBuilder, SceneMesh};
 pub use upscale::{is_sprite_path, AssetClass, Quality as UpscaleQuality, UpscaleSettings, Upscaler};
 pub use water::{flag as water_flag, Foam, WaterMesh, WaterQuality, WaterSettings};
 pub use effect::{ProcFx, Shape, TexId};
+pub use particle::{Emitter, EmitterDef};
 pub use fx::{Fx, FxId};
 pub use post::PostSettings;
 pub use sprite::{Actor, Dir, SheetId};
@@ -183,6 +185,8 @@ pub struct Renderer {
     last_frame: std::time::Instant,
     /// Code-drawn effects playing this frame; the client advances and removes them.
     pub procs: Vec<ProcFx>,
+    /// Map particle emitters (RSW EF_EMITTER).
+    particles: particle::Particles,
     /// STR effects playing this frame; the client advances and removes them.
     pub effects: Vec<Fx>,
     effect_pipeline: wgpu::RenderPipeline,
@@ -457,6 +461,7 @@ impl Renderer {
         });
         // The sun shadow map is bound with the globals so world shaders can sample it.
         let shadow = shadow::Shadow::new(&device, &sprite_layout);
+        let particles = particle::Particles::new(&device, &globals_layout, &sprite_layout, samples);
         let room_mask = room_mask_view(&device, &queue, 1, 1, &[255]);
         let globals_bind = globals_bind_group(&device, &globals_layout, &globals, &shadow, &room_mask);
         let effect_pipeline = pipeline(
@@ -542,6 +547,7 @@ impl Renderer {
             day_start: 0.3,
             was_night: false,
             procs: vec![],
+            particles,
             effects: vec![],
             effect_pipeline,
             started: std::time::Instant::now(),
@@ -651,6 +657,12 @@ impl Renderer {
     }
 
     /// Uploads a texture for code-drawn effects (light columns, ground circles).
+    /// Replaces the map's particle emitters (textures from `add_effect_texture`).
+    pub fn set_emitters(&mut self, emitters: Vec<Emitter>) {
+        let now = self.started.elapsed().as_secs_f32();
+        self.particles.set(&self.device, emitters, now);
+    }
+
     pub fn add_effect_texture(&mut self, img: &Rgba) -> TexId {
         let view = scene::upload_texture(&self.device, &self.queue, img, true);
         self.effect_textures.push(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1159,6 +1171,27 @@ impl Renderer {
                         pass.set_bind_group(1, &self.effect_textures[tex], &[]);
                         pass.draw(range, 0..1);
                     }
+                }
+            }
+            // Map particle emitters (smoke, sparks, dust...), each with its map-given blend
+            // (RO_PARTICLES_OFF hides them, for comparing).
+            if !self.particles.is_empty() && std::env::var_os("RO_PARTICLES_OFF").is_none() {
+                let now = self.started.elapsed().as_secs_f32();
+                let (eye, focus) = (self.camera.eye(), self.camera.target);
+                let range = 60.0 * CELL;
+                self.particles.update(now, focus, range);
+                let groups = self.particles.vertices(now, eye, focus, range);
+                for (key, tex, verts) in groups {
+                    let (Some(pipe), Some(bind)) = (self.particles.pipeline_for(&key), self.effect_textures.get(tex.0)) else { continue };
+                    let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("particles"),
+                        contents: bytemuck::cast_slice(&verts),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    pass.set_pipeline(pipe);
+                    pass.set_bind_group(1, bind, &[]);
+                    pass.set_vertex_buffer(0, buffer.slice(..));
+                    pass.draw(0..verts.len() as u32, 0..1);
                 }
             }
             // Skill effects over everything else in the world.
