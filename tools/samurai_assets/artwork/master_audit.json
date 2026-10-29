@@ -1,0 +1,196 @@
+{
+  "method": "Selected user reference copied without repainting; common sheet scale360/436 targets median idle height90 native pixels. Pose roots authored at pelvis axis and ground plane. No per-frame silhouette normalization.",
+  "source_scale": 0.8256880733944955,
+  "cells": [
+    {
+      "row": 0,
+      "column": 0,
+      "direction": "S",
+      "rect": [
+        0,
+        0,
+        291,
+        540
+      ],
+      "origin": [
+        152,
+        536
+      ],
+      "absolute_root": [
+        152,
+        536
+      ]
+    },
+    {
+      "row": 0,
+      "column": 1,
+      "direction": "SW",
+      "rect": [
+        291,
+        0,
+        582,
+        540
+      ],
+      "origin": [
+        137,
+        536
+      ],
+      "absolute_root": [
+        428,
+        536
+      ]
+    },
+    {
+      "row": 0,
+      "column": 2,
+      "direction": "W",
+      "rect": [
+        582,
+        0,
+        873,
+        540
+      ],
+      "origin": [
+        106,
+        536
+      ],
+      "absolute_root": [
+        688,
+        536
+      ]
+    },
+    {
+      "row": 0,
+      "column": 3,
+      "direction": "NW",
+      "rect": [
+        873,
+        0,
+        1164,
+        540
+      ],
+      "origin": [
+        135,
+        536
+      ],
+      "absolute_root": [
+        1008,
+        536
+      ]
+    },
+    {
+      "row": 0,
+      "column": 4,
+      "direction": "N",
+      "rect": [
+        1164,
+        0,
+        1455,
+        540
+      ],
+      "origin": [
+        140,
+        536
+      ],
+      "absolute_root": [
+        1304,
+        536
+      ]
+    },
+    {
+      "row": 1,
+      "column": 0,
+      "direction": "S",
+      "rect": [
+        0,
+        540,
+        291,
+        1081
+      ],
+      "origin": [
+        152,
+        448
+      ],
+      "absolute_root": [
+        152,
+        988
+      ]
+    },
+    {
+      "row": 1,
+      "column": 1,
+      "direction": "SW",
+      "rect": [
+        291,
+        540,
+        582,
+        1081
+      ],
+      "origin": [
+        137,
+        448
+      ],
+      "absolute_root": [
+        428,
+        988
+      ]
+    },
+    {
+      "row": 1,
+      "column": 2,
+      "direction": "W",
+      "rect": [
+        582,
+        540,
+        873,
+        1081
+      ],
+      "origin": [
+        106,
+        448
+      ],
+      "absolute_root": [
+        688,
+        988
+      ]
+    },
+    {
+      "row": 1,
+      "column": 3,
+      "direction": "NW",
+      "rect": [
+        873,
+        540,
+        1164,
+        1081
+      ],
+      "origin": [
+        135,
+        448
+      ],
+      "absolute_root": [
+        1008,
+        988
+      ]
+    },
+    {
+      "row": 1,
+      "column": 4,
+      "direction": "N",
+      "rect": [
+        1164,
+        540,
+        1455,
+        1081
+      ],
+      "origin": [
+        140,
+        448
+      ],
+      "absolute_root": [
+        1304,
+        988
+      ]
+    }
+  ]
+}

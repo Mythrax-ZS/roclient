@@ -1,31 +1,21 @@
 {
-  "note": "Authored pelvis-axis roots, with waist-to-ground distance calibrated against the corresponding master idle rig. Origins are NOT derived from individual foot minima. Uniform scale per whole direction sheet. Sampling/preview only; source pixels unchanged. S is a curated compromise with shared neutral passing frame2 and omitted wrong-side frame4. Final S order is neutral, right swing, right heel contact, right flat contact, neutral, left swing, left heel contact, left flat contact; aligns passing/contact phases with W/SW. Supplemental walk_S_contact cell2 replaces old S cell6 at timeline frame3; timelines map is final authority for mixed-sheet playback.",
+  "note": "v3 restores selected original black/red long-ponytail Samurai identity while retaining working v2 walk phases. All five unique directions accepted. Explicit roots align pelvis axis and shared anatomical ground plane; no foot-following or per-frame silhouette scaling. S replaces faulty originalcells0/3/4 with two independently generated accepted repair poses: neutral at output0/4, rightflat at output3. Top-level timelines are authoritative.",
   "sheets": {
-    "walk_S": {
-      "path": "source/walk_S.png",
+    "walk_SW": {
+      "path": "source/walk_SW.png",
       "x_edges": [
         0,
-        416,
-        832,
-        1248,
-        1659
+        444,
+        888,
+        1332,
+        1774
       ],
       "y_edges": [
         0,
-        476,
-        948
+        444,
+        887
       ],
-      "source_scale": 0.95,
-      "timeline": [
-        2,
-        1,
-        7,
-        6,
-        2,
-        5,
-        3,
-        0
-      ],
+      "source_scale": 1.035,
       "cells": [
         {
           "index": 0,
@@ -34,16 +24,16 @@
           "rect": [
             0,
             0,
-            416,
-            476
+            444,
+            444
           ],
           "origin": [
-            224,
-            448
+            220,
+            400
           ],
           "absolute_root": [
-            224,
-            448
+            220,
+            400
           ]
         },
         {
@@ -51,18 +41,18 @@
           "row": 0,
           "column": 1,
           "rect": [
-            416,
+            444,
             0,
-            832,
-            476
+            888,
+            444
           ],
           "origin": [
-            208,
-            448
+            220,
+            400
           ],
           "absolute_root": [
-            624,
-            448
+            664,
+            400
           ]
         },
         {
@@ -70,18 +60,18 @@
           "row": 0,
           "column": 2,
           "rect": [
-            832,
+            888,
             0,
-            1248,
-            476
+            1332,
+            444
           ],
           "origin": [
-            196,
-            448
+            224,
+            404
           ],
           "absolute_root": [
-            1028,
-            448
+            1112,
+            404
           ]
         },
         {
@@ -89,18 +79,18 @@
           "row": 0,
           "column": 3,
           "rect": [
-            1248,
+            1332,
             0,
-            1659,
-            476
+            1774,
+            444
           ],
           "origin": [
-            192,
-            448
+            224,
+            404
           ],
           "absolute_root": [
-            1440,
-            448
+            1556,
+            404
           ]
         },
         {
@@ -109,17 +99,17 @@
           "column": 0,
           "rect": [
             0,
-            476,
-            416,
-            948
+            444,
+            444,
+            887
           ],
           "origin": [
-            228,
-            428
+            220,
+            400
           ],
           "absolute_root": [
-            228,
-            904
+            220,
+            844
           ]
         },
         {
@@ -127,18 +117,18 @@
           "row": 1,
           "column": 1,
           "rect": [
-            416,
-            476,
-            832,
-            948
+            444,
+            444,
+            888,
+            887
           ],
           "origin": [
-            212,
-            428
+            220,
+            400
           ],
           "absolute_root": [
-            628,
-            904
+            664,
+            844
           ]
         },
         {
@@ -146,18 +136,18 @@
           "row": 1,
           "column": 2,
           "rect": [
-            832,
-            476,
-            1248,
-            948
+            888,
+            444,
+            1332,
+            887
           ],
           "origin": [
-            196,
-            428
+            224,
+            404
           ],
           "absolute_root": [
-            1028,
-            904
+            1112,
+            848
           ]
         },
         {
@@ -165,37 +155,21 @@
           "row": 1,
           "column": 3,
           "rect": [
-            1248,
-            476,
-            1659,
-            948
+            1332,
+            444,
+            1774,
+            887
           ],
           "origin": [
-            204,
-            432
+            224,
+            404
           ],
           "absolute_root": [
-            1452,
-            908
+            1556,
+            848
           ]
         }
-      ]
-    },
-    "walk_SW": {
-      "path": "source/walk_SW.png",
-      "x_edges": [
-        0,
-        416,
-        832,
-        1248,
-        1659
       ],
-      "y_edges": [
-        0,
-        476,
-        948
-      ],
-      "source_scale": 0.9,
       "timeline": [
         0,
         1,
@@ -205,177 +179,177 @@
         5,
         6,
         7
-      ],
-      "cells": [
-        {
-          "index": 0,
-          "row": 0,
-          "column": 0,
-          "rect": [
-            0,
-            0,
-            416,
-            476
-          ],
-          "origin": [
-            204,
-            444
-          ],
-          "absolute_root": [
-            204,
-            444
-          ]
-        },
-        {
-          "index": 1,
-          "row": 0,
-          "column": 1,
-          "rect": [
-            416,
-            0,
-            832,
-            476
-          ],
-          "origin": [
-            200,
-            444
-          ],
-          "absolute_root": [
-            616,
-            444
-          ]
-        },
-        {
-          "index": 2,
-          "row": 0,
-          "column": 2,
-          "rect": [
-            832,
-            0,
-            1248,
-            476
-          ],
-          "origin": [
-            200,
-            448
-          ],
-          "absolute_root": [
-            1032,
-            448
-          ]
-        },
-        {
-          "index": 3,
-          "row": 0,
-          "column": 3,
-          "rect": [
-            1248,
-            0,
-            1659,
-            476
-          ],
-          "origin": [
-            204,
-            448
-          ],
-          "absolute_root": [
-            1452,
-            448
-          ]
-        },
-        {
-          "index": 4,
-          "row": 1,
-          "column": 0,
-          "rect": [
-            0,
-            476,
-            416,
-            948
-          ],
-          "origin": [
-            204,
-            428
-          ],
-          "absolute_root": [
-            204,
-            904
-          ]
-        },
-        {
-          "index": 5,
-          "row": 1,
-          "column": 1,
-          "rect": [
-            416,
-            476,
-            832,
-            948
-          ],
-          "origin": [
-            200,
-            428
-          ],
-          "absolute_root": [
-            616,
-            904
-          ]
-        },
-        {
-          "index": 6,
-          "row": 1,
-          "column": 2,
-          "rect": [
-            832,
-            476,
-            1248,
-            948
-          ],
-          "origin": [
-            196,
-            428
-          ],
-          "absolute_root": [
-            1028,
-            904
-          ]
-        },
-        {
-          "index": 7,
-          "row": 1,
-          "column": 3,
-          "rect": [
-            1248,
-            476,
-            1659,
-            948
-          ],
-          "origin": [
-            204,
-            428
-          ],
-          "absolute_root": [
-            1452,
-            904
-          ]
-        }
       ]
     },
     "walk_W": {
       "path": "source/walk_W.png",
       "x_edges": [
         0,
-        416,
-        832,
-        1248,
-        1659
+        444,
+        888,
+        1332,
+        1774
       ],
       "y_edges": [
         0,
-        476,
-        948
+        444,
+        887
       ],
-      "source_scale": 0.94,
+      "source_scale": 0.985,
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            444,
+            444
+          ],
+          "origin": [
+            212,
+            420
+          ],
+          "absolute_root": [
+            212,
+            420
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            444,
+            0,
+            888,
+            444
+          ],
+          "origin": [
+            212,
+            420
+          ],
+          "absolute_root": [
+            656,
+            420
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            888,
+            0,
+            1332,
+            444
+          ],
+          "origin": [
+            220,
+            420
+          ],
+          "absolute_root": [
+            1108,
+            420
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1332,
+            0,
+            1774,
+            444
+          ],
+          "origin": [
+            216,
+            420
+          ],
+          "absolute_root": [
+            1548,
+            420
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            444,
+            444,
+            887
+          ],
+          "origin": [
+            216,
+            416
+          ],
+          "absolute_root": [
+            216,
+            860
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            444,
+            444,
+            888,
+            887
+          ],
+          "origin": [
+            216,
+            416
+          ],
+          "absolute_root": [
+            660,
+            860
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            888,
+            444,
+            1332,
+            887
+          ],
+          "origin": [
+            224,
+            416
+          ],
+          "absolute_root": [
+            1112,
+            860
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1332,
+            444,
+            1774,
+            887
+          ],
+          "origin": [
+            216,
+            416
+          ],
+          "absolute_root": [
+            1548,
+            860
+          ]
+        }
+      ],
       "timeline": [
         0,
         1,
@@ -385,187 +359,23 @@
         5,
         6,
         7
-      ],
-      "cells": [
-        {
-          "index": 0,
-          "row": 0,
-          "column": 0,
-          "rect": [
-            0,
-            0,
-            416,
-            476
-          ],
-          "origin": [
-            192,
-            432
-          ],
-          "absolute_root": [
-            192,
-            432
-          ]
-        },
-        {
-          "index": 1,
-          "row": 0,
-          "column": 1,
-          "rect": [
-            416,
-            0,
-            832,
-            476
-          ],
-          "origin": [
-            200,
-            432
-          ],
-          "absolute_root": [
-            616,
-            432
-          ]
-        },
-        {
-          "index": 2,
-          "row": 0,
-          "column": 2,
-          "rect": [
-            832,
-            0,
-            1248,
-            476
-          ],
-          "origin": [
-            200,
-            444
-          ],
-          "absolute_root": [
-            1032,
-            444
-          ]
-        },
-        {
-          "index": 3,
-          "row": 0,
-          "column": 3,
-          "rect": [
-            1248,
-            0,
-            1659,
-            476
-          ],
-          "origin": [
-            192,
-            444
-          ],
-          "absolute_root": [
-            1440,
-            444
-          ]
-        },
-        {
-          "index": 4,
-          "row": 1,
-          "column": 0,
-          "rect": [
-            0,
-            476,
-            416,
-            948
-          ],
-          "origin": [
-            192,
-            420
-          ],
-          "absolute_root": [
-            192,
-            896
-          ]
-        },
-        {
-          "index": 5,
-          "row": 1,
-          "column": 1,
-          "rect": [
-            416,
-            476,
-            832,
-            948
-          ],
-          "origin": [
-            204,
-            424
-          ],
-          "absolute_root": [
-            620,
-            900
-          ]
-        },
-        {
-          "index": 6,
-          "row": 1,
-          "column": 2,
-          "rect": [
-            832,
-            476,
-            1248,
-            948
-          ],
-          "origin": [
-            200,
-            428
-          ],
-          "absolute_root": [
-            1032,
-            904
-          ]
-        },
-        {
-          "index": 7,
-          "row": 1,
-          "column": 3,
-          "rect": [
-            1248,
-            476,
-            1659,
-            948
-          ],
-          "origin": [
-            188,
-            432
-          ],
-          "absolute_root": [
-            1436,
-            908
-          ]
-        }
       ]
     },
     "walk_NW": {
       "path": "source/walk_NW.png",
       "x_edges": [
         0,
-        416,
-        832,
-        1248,
-        1659
+        444,
+        888,
+        1332,
+        1774
       ],
       "y_edges": [
         0,
-        476,
-        948
+        444,
+        887
       ],
-      "source_scale": 1.0,
-      "timeline": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7
-      ],
+      "source_scale": 0.99,
       "cells": [
         {
           "index": 0,
@@ -574,16 +384,16 @@
           "rect": [
             0,
             0,
-            416,
-            476
+            444,
+            444
           ],
           "origin": [
-            216,
-            408
+            228,
+            412
           ],
           "absolute_root": [
-            216,
-            408
+            228,
+            412
           ]
         },
         {
@@ -591,18 +401,18 @@
           "row": 0,
           "column": 1,
           "rect": [
-            416,
+            444,
             0,
-            832,
-            476
+            888,
+            444
           ],
           "origin": [
-            208,
-            408
+            232,
+            412
           ],
           "absolute_root": [
-            624,
-            408
+            676,
+            412
           ]
         },
         {
@@ -610,17 +420,17 @@
           "row": 0,
           "column": 2,
           "rect": [
-            832,
+            888,
             0,
-            1248,
-            476
+            1332,
+            444
           ],
           "origin": [
-            204,
+            232,
             412
           ],
           "absolute_root": [
-            1036,
+            1120,
             412
           ]
         },
@@ -629,17 +439,17 @@
           "row": 0,
           "column": 3,
           "rect": [
-            1248,
+            1332,
             0,
-            1659,
-            476
+            1774,
+            444
           ],
           "origin": [
-            208,
+            232,
             412
           ],
           "absolute_root": [
-            1456,
+            1564,
             412
           ]
         },
@@ -649,17 +459,17 @@
           "column": 0,
           "rect": [
             0,
-            476,
-            416,
-            948
+            444,
+            444,
+            887
           ],
           "origin": [
-            208,
-            400
+            232,
+            408
           ],
           "absolute_root": [
-            208,
-            876
+            232,
+            852
           ]
         },
         {
@@ -667,18 +477,18 @@
           "row": 1,
           "column": 1,
           "rect": [
-            416,
-            476,
-            832,
-            948
+            444,
+            444,
+            888,
+            887
           ],
           "origin": [
-            204,
-            400
+            232,
+            408
           ],
           "absolute_root": [
-            620,
-            876
+            676,
+            852
           ]
         },
         {
@@ -686,18 +496,18 @@
           "row": 1,
           "column": 2,
           "rect": [
-            832,
-            476,
-            1248,
-            948
+            888,
+            444,
+            1332,
+            887
           ],
           "origin": [
-            200,
-            400
+            236,
+            408
           ],
           "absolute_root": [
-            1032,
-            876
+            1124,
+            852
           ]
         },
         {
@@ -705,37 +515,201 @@
           "row": 1,
           "column": 3,
           "rect": [
-            1248,
-            476,
-            1659,
-            948
+            1332,
+            444,
+            1774,
+            887
           ],
           "origin": [
-            208,
-            404
+            232,
+            408
           ],
           "absolute_root": [
-            1456,
-            880
+            1564,
+            852
           ]
         }
+      ],
+      "timeline": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
       ]
     },
     "walk_N": {
       "path": "source/walk_N.png",
       "x_edges": [
         0,
-        416,
-        832,
-        1248,
-        1659
+        444,
+        888,
+        1332,
+        1774
       ],
       "y_edges": [
         0,
-        476,
-        948
+        444,
+        887
       ],
-      "source_scale": 1.0,
+      "source_scale": 1.04,
+      "cells": [
+        {
+          "index": 0,
+          "row": 0,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            444,
+            444
+          ],
+          "origin": [
+            220,
+            400
+          ],
+          "absolute_root": [
+            220,
+            400
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
+          "rect": [
+            444,
+            0,
+            888,
+            444
+          ],
+          "origin": [
+            224,
+            400
+          ],
+          "absolute_root": [
+            668,
+            400
+          ]
+        },
+        {
+          "index": 2,
+          "row": 0,
+          "column": 2,
+          "rect": [
+            888,
+            0,
+            1332,
+            444
+          ],
+          "origin": [
+            220,
+            400
+          ],
+          "absolute_root": [
+            1108,
+            400
+          ]
+        },
+        {
+          "index": 3,
+          "row": 0,
+          "column": 3,
+          "rect": [
+            1332,
+            0,
+            1774,
+            444
+          ],
+          "origin": [
+            224,
+            400
+          ],
+          "absolute_root": [
+            1556,
+            400
+          ]
+        },
+        {
+          "index": 4,
+          "row": 1,
+          "column": 0,
+          "rect": [
+            0,
+            444,
+            444,
+            887
+          ],
+          "origin": [
+            220,
+            396
+          ],
+          "absolute_root": [
+            220,
+            840
+          ]
+        },
+        {
+          "index": 5,
+          "row": 1,
+          "column": 1,
+          "rect": [
+            444,
+            444,
+            888,
+            887
+          ],
+          "origin": [
+            220,
+            396
+          ],
+          "absolute_root": [
+            664,
+            840
+          ]
+        },
+        {
+          "index": 6,
+          "row": 1,
+          "column": 2,
+          "rect": [
+            888,
+            444,
+            1332,
+            887
+          ],
+          "origin": [
+            220,
+            396
+          ],
+          "absolute_root": [
+            1108,
+            840
+          ]
+        },
+        {
+          "index": 7,
+          "row": 1,
+          "column": 3,
+          "rect": [
+            1332,
+            444,
+            1774,
+            887
+          ],
+          "origin": [
+            220,
+            396
+          ],
+          "absolute_root": [
+            1552,
+            840
+          ]
+        }
+      ],
       "timeline": [
         0,
         1,
@@ -745,7 +719,23 @@
         5,
         6,
         7
+      ]
+    },
+    "walk_S": {
+      "path": "source/walk_S.png",
+      "x_edges": [
+        0,
+        444,
+        888,
+        1332,
+        1774
       ],
+      "y_edges": [
+        0,
+        444,
+        887
+      ],
+      "source_scale": 0.985,
       "cells": [
         {
           "index": 0,
@@ -754,15 +744,15 @@
           "rect": [
             0,
             0,
-            416,
-            476
+            444,
+            444
           ],
           "origin": [
-            204,
+            224,
             416
           ],
           "absolute_root": [
-            204,
+            224,
             416
           ]
         },
@@ -771,18 +761,18 @@
           "row": 0,
           "column": 1,
           "rect": [
-            416,
+            444,
             0,
-            832,
-            476
+            888,
+            444
           ],
           "origin": [
-            200,
-            420
+            224,
+            416
           ],
           "absolute_root": [
-            616,
-            420
+            668,
+            416
           ]
         },
         {
@@ -790,18 +780,18 @@
           "row": 0,
           "column": 2,
           "rect": [
-            832,
+            888,
             0,
-            1248,
-            476
+            1332,
+            444
           ],
           "origin": [
-            204,
-            428
+            224,
+            416
           ],
           "absolute_root": [
-            1036,
-            428
+            1112,
+            416
           ]
         },
         {
@@ -809,18 +799,18 @@
           "row": 0,
           "column": 3,
           "rect": [
-            1248,
+            1332,
             0,
-            1659,
-            476
+            1774,
+            444
           ],
           "origin": [
-            208,
-            424
+            224,
+            416
           ],
           "absolute_root": [
-            1456,
-            424
+            1556,
+            416
           ]
         },
         {
@@ -829,17 +819,17 @@
           "column": 0,
           "rect": [
             0,
-            476,
-            416,
-            948
+            444,
+            444,
+            887
           ],
           "origin": [
-            200,
-            420
+            224,
+            412
           ],
           "absolute_root": [
-            200,
-            896
+            224,
+            856
           ]
         },
         {
@@ -847,18 +837,18 @@
           "row": 1,
           "column": 1,
           "rect": [
-            416,
-            476,
-            832,
-            948
+            444,
+            444,
+            888,
+            887
           ],
           "origin": [
-            196,
-            420
+            224,
+            412
           ],
           "absolute_root": [
-            612,
-            896
+            668,
+            856
           ]
         },
         {
@@ -866,18 +856,18 @@
           "row": 1,
           "column": 2,
           "rect": [
-            832,
-            476,
-            1248,
-            948
+            888,
+            444,
+            1332,
+            887
           ],
           "origin": [
-            204,
-            424
+            224,
+            412
           ],
           "absolute_root": [
-            1036,
-            900
+            1112,
+            856
           ]
         },
         {
@@ -885,55 +875,71 @@
           "row": 1,
           "column": 3,
           "rect": [
-            1248,
-            476,
-            1659,
-            948
+            1332,
+            444,
+            1774,
+            887
           ],
           "origin": [
-            204,
-            420
+            224,
+            412
           ],
           "absolute_root": [
-            1452,
-            896
+            1556,
+            856
           ]
         }
       ]
     },
-    "walk_S_contact": {
-      "path": "source/walk_S_contact.png",
+    "walk_S_repair": {
+      "path": "source/walk_S_repair.png",
       "x_edges": [
         0,
-        416,
         832,
-        1248,
         1659
       ],
       "y_edges": [
         0,
-        476,
         948
       ],
-      "source_scale": 0.98,
+      "source_scale": 0.512,
       "cells": [
         {
-          "index": 2,
+          "index": 0,
           "row": 0,
-          "column": 2,
+          "column": 0,
+          "rect": [
+            0,
+            0,
+            832,
+            948
+          ],
+          "origin": [
+            448,
+            800
+          ],
+          "absolute_root": [
+            448,
+            800
+          ]
+        },
+        {
+          "index": 1,
+          "row": 0,
+          "column": 1,
           "rect": [
             832,
             0,
-            1248,
-            476
+            1659,
+            948
           ],
           "origin": [
-            208,
-            440
+            384,
+            808
           ],
           "absolute_root": [
-            1040,
-            440
+            1216,
+            808
           ]
         }
       ]
@@ -942,44 +948,44 @@
   "timelines": {
     "S": [
       {
-        "sheet": "walk_S",
-        "row": 0,
-        "column": 2
-      },
-      {
-        "sheet": "walk_S",
-        "row": 0,
-        "column": 1
-      },
-      {
-        "sheet": "walk_S",
-        "row": 1,
-        "column": 3
-      },
-      {
-        "sheet": "walk_S_contact",
-        "row": 0,
-        "column": 2
-      },
-      {
-        "sheet": "walk_S",
-        "row": 0,
-        "column": 2
-      },
-      {
-        "sheet": "walk_S",
-        "row": 1,
-        "column": 1
-      },
-      {
-        "sheet": "walk_S",
-        "row": 0,
-        "column": 3
-      },
-      {
-        "sheet": "walk_S",
+        "sheet": "walk_S_repair",
         "row": 0,
         "column": 0
+      },
+      {
+        "sheet": "walk_S",
+        "row": 0,
+        "column": 1
+      },
+      {
+        "sheet": "walk_S",
+        "row": 0,
+        "column": 2
+      },
+      {
+        "sheet": "walk_S_repair",
+        "row": 0,
+        "column": 1
+      },
+      {
+        "sheet": "walk_S_repair",
+        "row": 0,
+        "column": 0
+      },
+      {
+        "sheet": "walk_S",
+        "row": 1,
+        "column": 1
+      },
+      {
+        "sheet": "walk_S",
+        "row": 1,
+        "column": 2
+      },
+      {
+        "sheet": "walk_S",
+        "row": 1,
+        "column": 3
       }
     ],
     "SW": [
@@ -1150,5 +1156,6 @@
         "column": 3
       }
     ]
-  }
+  },
+  "pending": []
 }

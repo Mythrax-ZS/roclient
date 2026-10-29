@@ -24,11 +24,13 @@ The game job is **Samurai** (4500); **Ember Ronin** remains the asset filename.
 - Both pairs use SPR 2.1 truecolor RGBA and ACT 2.5. Keep the four files together
   when replacing an asset revision.
 
-## RO style revision
+## Reference design revision
 
-The replacement artwork uses a smaller face, narrower silhouette, muted slate
-cloth and burgundy accents, with stock RO player sprites used as anatomy and
-motion references. No extracted stock sprites are distributed here.
+The artwork matches the reference selected by the user on 2026-10-30: charcoal
+wrap clothing with bright red piping and cord knots, a red rope belt, long red
+split coat panels, black/red boots and a long dark ponytail. The exact selected
+image supplies idle and ready poses; the other actions use that same design.
+The previous corrected walk poses provide the movement reference.
 
 Walk cycles use explicit pose selection and fixed anatomical ground origins.
 One scale calibration applies to each complete source sheet. Individual frames

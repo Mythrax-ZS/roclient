@@ -1,5 +1,5 @@
 {
-  "note": "One authored six-frame attack cycle is reused for standard groups 5, 10 and 11. Original images are preserved. Each whole sheet has one fixed scale calibrated against the corresponding master idle height. Roots and hand points are visually authored in original coordinates. Weapon scale 0.75 matches the ready poses.",
+  "note": "Six-frame attack poses restyled to user-selected black/red design. V2 pose geometry, roots, hands and blade angles retained after visual review; uniform whole-sheet sampling calibrated to90nativepixels. No body pixels modified after imagegen.",
   "timeline": [
     0,
     1,
@@ -33,7 +33,7 @@
         0,
         0
       ],
-      "source_scale": 0.7872340425531915,
+      "source_scale": 0.7563025210084033,
       "cells": [
         {
           "index": 0,
@@ -58,15 +58,15 @@
             254
           ],
           "alpha_bbox_absolute": [
-            141,
-            36,
-            427,
-            506
+            140,
+            28,
+            430,
+            504
           ],
           "weapon_pose": {
             "grip": [
-              -1.7713,
-              -49.5957
+              -1.7017,
+              -47.6471
             ],
             "rotation": 270,
             "scale": [
@@ -98,15 +98,15 @@
             170
           ],
           "alpha_bbox_absolute": [
-            628,
-            34,
-            919,
-            506
+            624,
+            28,
+            942,
+            504
           ],
           "weapon_pose": {
             "grip": [
-              -18.5,
-              -66.1277
+              -17.7731,
+              -63.5294
             ],
             "rotation": 225,
             "scale": [
@@ -138,15 +138,15 @@
             88
           ],
           "alpha_bbox_absolute": [
-            1141,
-            36,
-            1430,
-            506
+            1137,
+            28,
+            1448,
+            504
           ],
           "weapon_pose": {
             "grip": [
-              -5.3138,
-              -82.266
+              -5.105,
+              -79.0336
             ],
             "rotation": 235,
             "scale": [
@@ -178,15 +178,15 @@
             815
           ],
           "alpha_bbox_absolute": [
-            143,
-            537,
-            444,
-            1002
+            121,
+            536,
+            459,
+            1000
           ],
           "weapon_pose": {
             "grip": [
-              1.3777,
-              -37.1968
+              1.3235,
+              -35.7353
             ],
             "rotation": 55,
             "scale": [
@@ -218,15 +218,15 @@
             834
           ],
           "alpha_bbox_absolute": [
-            608,
-            552,
-            926,
-            1002
+            603,
+            539,
+            940,
+            1003
           ],
           "weapon_pose": {
             "grip": [
-              15.7447,
-              -33.4574
+              15.1261,
+              -32.1429
             ],
             "rotation": 40,
             "scale": [
@@ -258,15 +258,15 @@
             766
           ],
           "alpha_bbox_absolute": [
-            1131,
-            537,
-            1417,
+            1125,
+            532,
+            1435,
             1006
           ],
           "weapon_pose": {
             "grip": [
-              -1.9681,
-              -46.8404
+              -1.8908,
+              -45.0
             ],
             "rotation": 270,
             "scale": [
@@ -363,7 +363,7 @@
         0,
         0
       ],
-      "source_scale": 0.7799145299145299,
+      "source_scale": 0.767590618336887,
       "cells": [
         {
           "index": 0,
@@ -388,15 +388,15 @@
             263
           ],
           "alpha_bbox_absolute": [
-            148,
-            40,
-            405,
-            508
+            146,
+            38,
+            426,
+            507
           ],
           "weapon_pose": {
             "grip": [
-              -4.6795,
-              -47.7698
+              -4.6055,
+              -47.0149
             ],
             "rotation": 270,
             "scale": [
@@ -428,15 +428,15 @@
             178
           ],
           "alpha_bbox_absolute": [
-            651,
-            40,
-            922,
+            652,
+            33,
+            943,
             508
           ],
           "weapon_pose": {
             "grip": [
-              8.969,
-              -64.3429
+              8.8273,
+              -63.3262
             ],
             "rotation": 315,
             "scale": [
@@ -468,15 +468,15 @@
             94
           ],
           "alpha_bbox_absolute": [
-            1160,
-            39,
-            1428,
+            1157,
+            34,
+            1449,
             508
           ],
           "weapon_pose": {
             "grip": [
-              -13.0636,
-              -80.7212
+              -12.8571,
+              -79.4456
             ],
             "rotation": 235,
             "scale": [
@@ -508,15 +508,15 @@
             812
           ],
           "alpha_bbox_absolute": [
-            133,
-            550,
-            450,
+            132,
+            533,
+            466,
             1008
           ],
           "weapon_pose": {
             "grip": [
-              0.7799,
-              -38.9957
+              0.7676,
+              -38.3795
             ],
             "rotation": 135,
             "scale": [
@@ -548,15 +548,15 @@
             837
           ],
           "alpha_bbox_absolute": [
-            623,
-            557,
-            954,
+            622,
+            548,
+            971,
             1008
           ],
           "weapon_pose": {
             "grip": [
-              0.5849,
-              -34.1213
+              0.5757,
+              -33.5821
             ],
             "rotation": 145,
             "scale": [
@@ -588,15 +588,15 @@
             778
           ],
           "alpha_bbox_absolute": [
-            1157,
-            549,
-            1414,
-            1015
+            1153,
+            539,
+            1443,
+            1016
           ],
           "weapon_pose": {
             "grip": [
-              -7.0192,
-              -45.625
+              -6.9083,
+              -44.9041
             ],
             "rotation": 270,
             "scale": [
@@ -686,14 +686,14 @@
       ],
       "y_edges": [
         0,
-        512,
+        520,
         1024
       ],
       "origin": [
         0,
         0
       ],
-      "source_scale": 0.7547169811320755,
+      "source_scale": 0.743801652892562,
       "cells": [
         {
           "index": 0,
@@ -703,7 +703,7 @@
             0,
             0,
             512,
-            512
+            520
           ],
           "origin": [
             282,
@@ -718,15 +718,15 @@
             243
           ],
           "alpha_bbox_absolute": [
-            176,
-            32,
-            408,
+            174,
+            25,
+            430,
             509
           ],
           "weapon_pose": {
             "grip": [
-              -16.0377,
-              -50.1887
+              -15.8058,
+              -49.4628
             ],
             "rotation": 270,
             "scale": [
@@ -743,7 +743,7 @@
             512,
             0,
             1024,
-            512
+            520
           ],
           "origin": [
             247,
@@ -758,15 +758,15 @@
             164
           ],
           "alpha_bbox_absolute": [
-            649,
-            33,
-            915,
-            509
+            644,
+            25,
+            932,
+            511
           ],
           "weapon_pose": {
             "grip": [
-              11.1321,
-              -65.0943
+              10.9711,
+              -64.1529
             ],
             "rotation": 270,
             "scale": [
@@ -783,7 +783,7 @@
             1024,
             0,
             1536,
-            512
+            520
           ],
           "origin": [
             235,
@@ -798,15 +798,15 @@
             77
           ],
           "alpha_bbox_absolute": [
-            1145,
-            30,
-            1428,
-            509
+            1141,
+            23,
+            1440,
+            510
           ],
           "weapon_pose": {
             "grip": [
-              -8.3019,
-              -81.5094
+              -8.1818,
+              -80.3306
             ],
             "rotation": 305,
             "scale": [
@@ -821,13 +821,13 @@
           "column": 0,
           "rect": [
             0,
-            512,
+            520,
             512,
             1024
           ],
           "origin": [
             298,
-            484
+            476
           ],
           "absolute_root": [
             298,
@@ -838,15 +838,15 @@
             826
           ],
           "alpha_bbox_absolute": [
-            159,
-            543,
-            475,
+            155,
+            538,
+            485,
             996
           ],
           "weapon_pose": {
             "grip": [
-              -19.8113,
-              -32.0755
+              -19.5248,
+              -31.6116
             ],
             "rotation": 135,
             "scale": [
@@ -861,13 +861,13 @@
           "column": 1,
           "rect": [
             512,
-            512,
+            520,
             1024,
             1024
           ],
           "origin": [
             267,
-            484
+            476
           ],
           "absolute_root": [
             779,
@@ -878,15 +878,15 @@
             836
           ],
           "alpha_bbox_absolute": [
-            629,
-            563,
-            960,
-            995
+            624,
+            552,
+            972,
+            996
           ],
           "weapon_pose": {
             "grip": [
-              1.3208,
-              -30.1887
+              1.3017,
+              -29.7521
             ],
             "rotation": 135,
             "scale": [
@@ -901,13 +901,13 @@
           "column": 2,
           "rect": [
             1024,
-            512,
+            520,
             1536,
             1024
           ],
           "origin": [
             234,
-            484
+            476
           ],
           "absolute_root": [
             1258,
@@ -918,15 +918,15 @@
             740
           ],
           "alpha_bbox_absolute": [
-            1166,
-            540,
-            1405,
+            1163,
+            532,
+            1445,
             998
           ],
           "weapon_pose": {
             "grip": [
-              -13.2075,
-              -48.3019
+              -13.0165,
+              -47.6033
             ],
             "rotation": 270,
             "scale": [
@@ -1023,7 +1023,7 @@
         0,
         0
       ],
-      "source_scale": 0.7758241758241758,
+      "source_scale": 0.7929515418502202,
       "cells": [
         {
           "index": 0,
@@ -1048,15 +1048,15 @@
             207
           ],
           "alpha_bbox_absolute": [
-            155,
-            38,
-            402,
-            493
+            147,
+            36,
+            412,
+            490
           ],
           "weapon_pose": {
             "grip": [
-              -12.8011,
-              -55.4714
+              -13.0837,
+              -56.696
             ],
             "rotation": 235,
             "scale": [
@@ -1088,15 +1088,15 @@
             166
           ],
           "alpha_bbox_absolute": [
-            634,
-            32,
-            900,
-            493
+            632,
+            33,
+            929,
+            490
           ],
           "weapon_pose": {
             "grip": [
-              -16.6802,
-              -63.4236
+              -17.0485,
+              -64.8238
             ],
             "rotation": 235,
             "scale": [
@@ -1128,15 +1128,15 @@
             39
           ],
           "alpha_bbox_absolute": [
-            1140,
+            1136,
             13,
-            1389,
-            493
+            1417,
+            494
           ],
           "weapon_pose": {
             "grip": [
-              -6.0126,
-              -88.056
+              -6.1454,
+              -90.0
             ],
             "rotation": 235,
             "scale": [
@@ -1168,15 +1168,15 @@
             791
           ],
           "alpha_bbox_absolute": [
-            143,
-            538,
-            442,
+            138,
+            531,
+            461,
             995
           ],
           "weapon_pose": {
             "grip": [
-              -23.2747,
-              -40.5368
+              -23.7885,
+              -41.4317
             ],
             "rotation": 135,
             "scale": [
@@ -1208,15 +1208,15 @@
             841
           ],
           "alpha_bbox_absolute": [
-            609,
-            567,
-            936,
-            995
+            607,
+            558,
+            951,
+            996
           ],
           "weapon_pose": {
             "grip": [
-              -21.5291,
-              -30.839
+              -22.0044,
+              -31.5198
             ],
             "rotation": 135,
             "scale": [
@@ -1248,15 +1248,15 @@
             713
           ],
           "alpha_bbox_absolute": [
-            1149,
-            544,
-            1397,
-            1003
+            1140,
+            534,
+            1432,
+            1002
           ],
           "weapon_pose": {
             "grip": [
-              -13.189,
-              -55.6654
+              -13.4802,
+              -56.8943
             ],
             "rotation": 235,
             "scale": [
@@ -1353,7 +1353,7 @@
         0,
         0
       ],
-      "source_scale": 0.7627118644067796,
+      "source_scale": 0.7563025210084033,
       "cells": [
         {
           "index": 0,
@@ -1378,15 +1378,15 @@
             244
           ],
           "alpha_bbox_absolute": [
-            185,
-            31,
-            414,
+            147,
+            27,
+            399,
             503
           ],
           "weapon_pose": {
             "grip": [
-              -0.572,
-              -49.3856
+              -0.5672,
+              -48.9706
             ],
             "rotation": 315,
             "scale": [
@@ -1418,15 +1418,15 @@
             131
           ],
           "alpha_bbox_absolute": [
-            653,
-            28,
-            893,
-            503
+            641,
+            24,
+            900,
+            504
           ],
           "weapon_pose": {
             "grip": [
-              16.9703,
-              -70.9322
+              16.8277,
+              -70.3361
             ],
             "rotation": 315,
             "scale": [
@@ -1458,15 +1458,15 @@
             34
           ],
           "alpha_bbox_absolute": [
-            1164,
+            1162,
             16,
-            1392,
-            503
+            1407,
+            504
           ],
           "weapon_pose": {
             "grip": [
-              -1.3347,
-              -89.428
+              -1.3235,
+              -88.6765
             ],
             "rotation": 270,
             "scale": [
@@ -1498,15 +1498,15 @@
             783
           ],
           "alpha_bbox_absolute": [
-            171,
-            526,
-            467,
+            167,
+            522,
+            473,
             998
           ],
           "weapon_pose": {
             "grip": [
-              -22.8814,
-              -42.3305
+              -22.6891,
+              -41.9748
             ],
             "rotation": 135,
             "scale": [
@@ -1538,15 +1538,15 @@
             822
           ],
           "alpha_bbox_absolute": [
-            643,
-            538,
-            943,
-            998
+            646,
+            530,
+            953,
+            997
           ],
           "weapon_pose": {
             "grip": [
-              -21.3559,
-              -34.8941
+              -21.1765,
+              -34.6008
             ],
             "rotation": 135,
             "scale": [
@@ -1578,15 +1578,15 @@
             749
           ],
           "alpha_bbox_absolute": [
-            1161,
-            529,
-            1390,
-            1005
+            1155,
+            523,
+            1404,
+            1004
           ],
           "weapon_pose": {
             "grip": [
-              -0.3814,
-              -48.8136
+              -0.3782,
+              -48.4034
             ],
             "rotation": 315,
             "scale": [

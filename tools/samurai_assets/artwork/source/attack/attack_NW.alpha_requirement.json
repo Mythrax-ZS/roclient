@@ -1,3 +1,0 @@
-{
-  "additional_prompt": "CRITICAL: the background must be literally alpha=0 everywhere around each isolated character, just like the reference. No colored backdrop, black canvas, halo, gradient, mist or semi-transparent glow."
-}

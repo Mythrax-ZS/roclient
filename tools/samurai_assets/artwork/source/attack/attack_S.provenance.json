@@ -1,7 +1,0 @@
-{
-  "mode": "built-in image_gen",
-  "original_file": "C:\\Users\\Mythrax\\.codex\\generated_images\\01a1878d-6558-7953-bf4f-583dfe01146f\\exec-c93974f6-319c-4cee-87f3-9efe29566ea2.png",
-  "selected_file": "source/attack/attack_S.png",
-  "prompt_file": "source/attack/attack_S.prompt.json",
-  "visual_review": "Selected: six coherent front-facing poses. Apparent background haze is hidden RGB with alpha0; verified high-alpha gutters empty. No background extraction edit performed."
-}
