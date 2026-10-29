@@ -38,7 +38,7 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_SPIRITS2 / SPIRITS_ATTRIBUTE / SOULENERGY, ZC_MILLENNIUMSHIELD (orbs coloured by kind)
 - [x] ZC_TARGET_SPIRITS (Enchanting Shadow orbs, dark violet)
 - [x] ZC_DISPEL (cast cancel), ZC_HIGHJUMP (slide); ZC_NOTIFY_SKILL_POSITION unused by rAthena
-- [ ] ZC_COMBODELAY, ZC_BLADESTOP
+- [x] ZC_COMBODELAY (tracked), ZC_BLADESTOP (both units held in place) — untested in game
 - [x] ZC_NOTIFY_BIND_ON_EQUIP (chat notice)
 - [ ] ZC_CHANGE_ITEM_OPTION, ZC_UPDATE_CARDSLOT
 - [x] ZC_ACK_TAKEOFF_EQUIP_ALL ("Take off all" button per equipment tab), ZC_MOVE_ITEM_FAILED
@@ -51,9 +51,10 @@ Ticked items are handled and tested in game against the local server.
 - [x] ZC_NOTIFY_MEMBERINFO_TO_GROUPM
 - [x] ZC_NOTIFY_MAPINFO, ZC_BOSS_INFO (Convex Mirror: chat + minimap mark)
 - [x] ZC_UPDATE_MAPINFO (setcell/setwall change client pathing), ZC_MONSTER_INFO (Sense window)
-- [ ] ZC_NOTIFY_MAPPROPERTY2 (only sent for battlegrounds)
+- [x] ZC_NOTIFY_MAPPROPERTY2 (battleground map type; consumed, nothing to draw)
 - [x] ZC_CHANGE_DIRECTION
-- [ ] ZC_SKILL_SCALE, ZC_NOTIFY_ACTORINIT, ZC_COUPLENAME
+- [x] ZC_COUPLENAME (Call Partner notice)
+- [ ] ZC_SKILL_SCALE (not sent by rAthena), ZC_NOTIFY_ACTORINIT
 - [x] Taming (ZC_START_CAPTURE / TRYCAPTURE_MONSTER)
 - [x] ZC_FEED_PET, ZC_FEED_MER (chat result)
 - [x] ZC_PET_ACT (pettalktable.xml lines in chat, emotions)

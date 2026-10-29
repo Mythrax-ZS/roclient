@@ -418,6 +418,12 @@ pub enum Event {
     Spirits { id: u32, count: u16, kind: u8 },
     /// ZC_GUILD_POSITION: a player's guild rank title changed (empty: none).
     GuildTitle { id: u32, position: String },
+    /// ZC_COUPLENAME: our partner's name, sent when we Call Partner (empty: none online).
+    CoupleName(String),
+    /// ZC_BLADESTOP: two units locked by Blade Stop / Cursed Circle (false when released).
+    BladeStop { src: u32, target: u32, active: bool },
+    /// ZC_COMBODELAY: our combo window (ms) for chaining the next combo skill.
+    ComboDelay { id: u32, ms: u32 },
     /// ZC_MONSTER_INFO (Sense).
     MonsterInfo { class: u16, level: u16, size: u16, hp: u32, def: i16, race: u16, mdef: i16, element: u16, mods: [u8; 9] },
     /// ZC_UPDATE_MAPINFO: a cell's GAT type changed (setcell / setwall / skills).
@@ -1263,6 +1269,18 @@ impl MapSession {
                             let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
                             Some(Event::GuildTitle { id: u32::from_le_bytes([data[4], data[5], data[6], data[7]]), position: String::from_utf8_lossy(&raw[..end]).into_owned() })
                         }
+                        0x01e6 if data.len() >= 26 => {
+                            let raw = &data[2..26];
+                            let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+                            Some(Event::CoupleName(String::from_utf8_lossy(&raw[..end]).into_owned()))
+                        }
+                        0x01d1 if data.len() >= 14 => {
+                            let l = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                            Some(Event::BladeStop { src: l(2), target: l(6), active: l(10) != 0 })
+                        }
+                        0x01d2 if data.len() >= 10 => Some(Event::ComboDelay { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), ms: u32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
+                        // ZC_NOTIFY_MAPPROPERTY2: map type (battleground mode); nothing to draw.
+                        0x01d6 => None,
                         0x018c if data.len() >= 29 => {
                             let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);
                             let mut mods = [0u8; 9];

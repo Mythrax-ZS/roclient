@@ -2766,6 +2766,22 @@ impl App {
                 let name = self.units.values().find(|m| m.class == class as i16).map(|m| m.name.clone()).or_else(|| self.class_names.get(&(class as i16)).cloned()).unwrap_or_else(|| format!("Monster #{class}"));
                 self.sense.info = Some(sense::MonsterInfo { name, level, size, hp, def, race, mdef, element, mods });
             }
+            CoupleName(name) => {
+                let line = if name.is_empty() { "Your partner can't be called right now.".to_string() } else { format!("Calling your partner, {name}.") };
+                self.hud.push_chat(ro_net::ChatKind::System, line);
+            }
+            BladeStop { src, target, active } => {
+                // Both stand locked in place while it lasts.
+                if active {
+                    for id in [src, target] {
+                        if let Some(m) = self.mob_mut(id) {
+                            let cell = m.walker.cell;
+                            m.walker.stop_at(cell);
+                        }
+                    }
+                }
+            }
+            ComboDelay { id, ms } => tracing::debug!(id, ms, "combo window"),
             GuildTitle { id, position } => {
                 if let Some(t) = self.mob_mut(id).and_then(|m| m.titles.as_mut()) {
                     t.2 = position;
