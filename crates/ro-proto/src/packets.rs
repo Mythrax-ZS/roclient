@@ -974,3 +974,13 @@ pub fn parse_delete_reply(data: &[u8]) -> (u32, i32, u32) {
 pub fn server_dir(d: u8) -> u8 {
     (12 - (d & 7)) % 8
 }
+
+/// CZ_MEMORIALDUNGEON_COMMAND (0x02cf): 3 destroys our memorial dungeon.
+pub struct MemorialCommand(pub i32);
+
+impl Encode for MemorialCommand {
+    fn encode(&self, d: &mut BytesMut) {
+        d.put_u16_le(0x02cf);
+        d.put_i32_le(self.0);
+    }
+}

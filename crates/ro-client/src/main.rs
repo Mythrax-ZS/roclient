@@ -5,6 +5,7 @@
 
 mod audio;
 mod book;
+mod memorial;
 mod sense;
 mod pettalk;
 mod fx;
@@ -966,6 +967,7 @@ struct App {
     social: social::Social,
     /// The book reader (readbook scripts, book items).
     books: book::Books,
+    memorial: memorial::Memorial,
     /// The player we asked to trade, until they answer.
     trade_partner: Option<String>,
     /// Clicked player: (id, name, menu position in UI points).
@@ -2590,21 +2592,9 @@ impl App {
             }
             ShowDigit { kind, value } => self.digit = Some((kind, value, 0.0)),
             Instance(note) => {
-                let text = match note {
-                    ro_net::InstanceNote::Queued { name, place } => format!("Memorial Dungeon, [{name}] is booked. Your Standby Priority: {place}"),
-                    ro_net::InstanceNote::Place(place) => format!("Your Standby Priority: {place}"),
-                    ro_net::InstanceNote::Status { name, enter, .. } => {
-                        let left = (enter as i64 - std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)).max(0);
-                        format!("Memorial Dungeon, [{name}] is created. Please enter within {} min {} s.", left / 60, left % 60)
-                    }
-                    ro_net::InstanceNote::Notice { kind, .. } => match kind {
-                        1 | 2 => "No one entered the Memorial Dungeon within its duration; the dungeon has disappeared.".to_string(),
-                        3 => "The Memorial Dungeon has been destroyed.".to_string(),
-                        4 => "Failed to create the Memorial Dungeon. Please try again.".to_string(),
-                        _ => return,
-                    },
-                };
-                self.hud.push_chat(ro_net::ChatKind::System, text);
+                if let Some(text) = self.memorial.apply(note) {
+                    self.hud.push_chat(ro_net::ChatKind::System, text);
+                }
             }
             ExpGain { amount, kind, .. } => {
                 let what = if kind == 2 { "Job" } else { "Base" };
@@ -5729,6 +5719,11 @@ impl App {
                     }
                 }
                 self.books.show(ui.ctx());
+                if self.memorial.show(ui.ctx()) {
+                    if let Some((tx, _)) = self.net.as_ref() {
+                        let _ = tx.send(ro_net::Command::MemorialDestroy);
+                    }
+                }
                 answer = self.hud.show_dialog(ui.ctx(), &mut self.dialog, self.cutin.as_ref());
                 ui_action = self.windows.show(ui.ctx(), &view);
                 self.social.show_party = self.windows.party;
@@ -6304,6 +6299,7 @@ fn main() -> anyhow::Result<()> {
         fake_frames: Default::default(),
         social: Default::default(),
         books: Default::default(),
+        memorial: Default::default(),
         trade_partner: None,
         player_menu: None,
         auto_deal: arg("--deal").map(|d| d == "buy"),

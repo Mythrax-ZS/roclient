@@ -725,6 +725,8 @@ pub enum Command {
     ShowEquip(bool),
     /// Our script progress bar filled (CZ_PROGRESS); the script continues.
     ProgressDone,
+    /// Destroy our memorial dungeon (CZ_MEMORIALDUNGEON_COMMAND 3).
+    MemorialDestroy,
     /// Login screen.
     Login { user: String, pass: String },
     SelectServer(usize),
@@ -884,6 +886,7 @@ impl MapSession {
                     Some(Command::ViewEquip(aid)) => self.send(CzViewEquip(aid)).await?,
                     Some(Command::ShowEquip(on)) => self.send(CzShowEquip(on)).await?,
                     Some(Command::ProgressDone) => self.send(Bare(0x02f1)).await?,
+                    Some(Command::MemorialDestroy) => self.send(MemorialCommand(3)).await?,
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
@@ -902,6 +905,7 @@ impl MapSession {
                 f = self.conn.next() => {
                     let Some(f) = f else { bail!("map server closed the connection") };
                     let Frame::Packet { opcode, data } = f? else { continue };
+                    tracing::trace!(opcode = format_args!("{opcode:#06x}"), len = data.len(), "packet");
                     let event = match opcode {
                         id::ZC_NOTIFY_PLAYERMOVE => {
                             let (_, from, to) = parse_player_move(&data);
@@ -1016,7 +1020,13 @@ impl MapSession {
                         0x02d9 if data.len() >= 10 && data[2..6] != [0, 0, 0, 0] => Some(Event::Config { kind: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), on: data[6] != 0 }),
                         0x02c9 if data.len() >= 3 => Some(Event::DenyPartyInvites(data[2] != 0)),
                         0x07d8 if data.len() >= 8 => Some(Event::PartyOptions { exp_share: data[2] != 0, pickup_share: data[6] != 0, item_share: data[7] != 0 }),
-                        0x099b if data.len() >= 8 => Some(Event::MapProperty { kind: u16::from_le_bytes([data[2], data[3]]), flags: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) }),
+                        // ZC_NOTIFY_MAPPROPERTY2 comes once we are placed on the map: answer with
+                        // CZ_BLOCKING_PLAY_CANCEL as the original does, which the server needs before it
+                        // sends ZC_NOTIFY_ACTORINIT and the memorial dungeon status (earlier, it drops it).
+                        0x099b if data.len() >= 8 => {
+                            self.send(Bare(0x0447)).await?;
+                            Some(Event::MapProperty { kind: u16::from_le_bytes([data[2], data[3]]), flags: u32::from_le_bytes([data[4], data[5], data[6], data[7]]) })
+                        }
                         0x013a if data.len() >= 4 => Some(Event::AttackRange(u16::from_le_bytes([data[2], data[3]]))),
                         0x0ade if data.len() >= 6 => Some(Event::OverweightPercent(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
                         0x0af6 => ro_proto::social::parse_ranking(&data).map(|(kind, list, mine)| Event::Ranking { kind, list, mine }),
