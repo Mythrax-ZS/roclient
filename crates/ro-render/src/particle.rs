@@ -32,6 +32,10 @@ pub struct EmitterDef {
     pub dst: u8,
     pub max: u32,
     pub zenable: bool,
+    /// Additive blends normally add in gamma space like the original (faint colours stay
+    /// visible); true adds in linear light instead, so a near-black texture background (torch
+    /// flame frames) stays invisible.
+    pub linear: bool,
     pub billboard: bool,
     /// Degrees, used when not a billboard.
     pub rotate: [f32; 3],
@@ -89,7 +93,8 @@ struct Live {
     next: f32,
 }
 
-type Key = (u8, u8, bool);
+/// (source blend, destination blend, depth test, linear add).
+type Key = (u8, u8, bool, bool);
 
 pub(crate) struct Particles {
     shader: wgpu::ShaderModule,
@@ -131,7 +136,7 @@ impl Particles {
         Self { shader, layout, samples, pipelines: HashMap::new(), live: vec![], winds: vec![], rng: 0x9e3779b97f4a7c15 }
     }
 
-    fn pipeline(&self, device: &wgpu::Device, (src, dst, z): Key) -> wgpu::RenderPipeline {
+    fn pipeline(&self, device: &wgpu::Device, (src, dst, z, linear): Key) -> wgpu::RenderPipeline {
         let blend = wgpu::BlendState {
             color: wgpu::BlendComponent { src_factor: factor(src, false), dst_factor: factor(dst, true), operation: wgpu::BlendOperation::Add },
             alpha: wgpu::BlendComponent::OVER,
@@ -151,7 +156,7 @@ impl Particles {
             multisample: wgpu::MultisampleState { count: self.samples, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &self.shader,
-                entry_point: Some(if dst == 2 { "fs_add" } else { "fs_main" }),
+                entry_point: Some(if dst == 2 && !linear { "fs_add" } else { "fs_main" }),
                 compilation_options: Default::default(),
                 targets: &[
                     Some(wgpu::ColorTargetState { format: crate::post::HDR_FORMAT, blend: Some(blend), write_mask: wgpu::ColorWrites::ALL }),
@@ -167,7 +172,7 @@ impl Particles {
     /// pipeline for each blend they use.
     pub fn set(&mut self, device: &wgpu::Device, emitters: Vec<Emitter>, winds: Vec<Wind>, now: f32) {
         for w in &winds {
-            let key = (w.src, w.dst, true);
+            let key = (w.src, w.dst, true, false);
             if !self.pipelines.contains_key(&key) {
                 let p = self.pipeline(device, key);
                 self.pipelines.insert(key, p);
@@ -177,7 +182,7 @@ impl Particles {
         self.live = emitters.into_iter().map(|e| Live { e, particles: vec![], next: now }).collect();
         for i in 0..self.live.len() {
             let d = &self.live[i].e.def;
-            let key = (d.src, d.dst, d.zenable);
+            let key = (d.src, d.dst, d.zenable, d.linear);
             if !self.pipelines.contains_key(&key) {
                 let p = self.pipeline(device, key);
                 self.pipelines.insert(key, p);
@@ -282,7 +287,7 @@ impl Particles {
                     Some(f) if !f.is_empty() => f[((t + p.phase) / 0.13) as usize % f.len()],
                     _ => d.tex,
                 };
-                groups.entry(((d.src, d.dst, d.zenable), tex.0)).or_default().extend([p0, p1, p2, p0, p2, p3]);
+                groups.entry(((d.src, d.dst, d.zenable, d.linear), tex.0)).or_default().extend([p0, p1, p2, p0, p2, p3]);
             }
         }
         for w in &self.winds {
@@ -294,7 +299,7 @@ impl Particles {
                 continue;
             }
             let (rx, rz) = (w.rotate[0].to_radians(), -w.rotate[1].to_radians());
-            let out = groups.entry(((w.src, w.dst, true), w.tex.0)).or_default();
+            let out = groups.entry(((w.src, w.dst, true, false), w.tex.0)).or_default();
             const SEGMENTS: usize = 20;
             for (i, &(s1, s2)) in w.seeds.iter().enumerate() {
                 let t = (now + duration * s1).rem_euclid(duration);

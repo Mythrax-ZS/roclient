@@ -242,10 +242,59 @@ pub fn map_emitters(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::V
                 dst: one("destmode", 2.0) as u8,
                 max: one("maxcount", 30.0).clamp(0.0, 500.0) as u32,
                 zenable: one("zenable", 1.0) != 0.0,
+                linear: false,
                 billboard: one("billboard_off", 0.0) == 0.0,
                 rotate: v3("rotate_angle", [0.0; 3]),
                 tex,
                 frames: frames.clone(),
+            },
+        });
+    }
+    out
+}
+
+/// Coloured map torches (EF_TORCH_RED 690, EF_TORCH_GREEN 691, EF_TORCH_PURPLE 696): the
+/// original draws them in code as a camera-facing flame cycling `effect\torch_<colour>01..13`
+/// (black-keyed, added). Each becomes one never-ending particle on the shared particle system,
+/// its flame's foot on the RSW position like the plain torch sprite.
+pub fn map_torches(fx: &mut FxLib, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, effects: &[(i32, glam::Vec3)]) -> Vec<ro_render::Emitter> {
+    const HALF: f32 = 4.0;
+    let mut sets: HashMap<i32, Option<Vec<ro_render::TexId>>> = HashMap::new();
+    let mut out = vec![];
+    for &(id, pos) in effects {
+        let colour = match id {
+            690 => "red",
+            691 => "green",
+            696 => "violet",
+            _ => continue,
+        };
+        let frames = sets.entry(id).or_insert_with(|| {
+            let f: Vec<_> = (1..=13).filter_map(|n| fx.texture_dyn(r, vfs, &format!("effect\\torch_{colour}{n:02}.bmp"))).collect();
+            (!f.is_empty()).then_some(f)
+        });
+        let Some(frames) = frames.clone() else { continue };
+        out.push(ro_render::Emitter {
+            // The particle system lifts emitters 10 units; set the flame's foot on the spot.
+            pos: pos + glam::Vec3::new(0.0, HALF - 10.0, 0.0),
+            def: ro_render::EmitterDef {
+                dir1: [0.0; 3],
+                dir2: [0.0; 3],
+                gravity: [0.0; 3],
+                radius: [0.0; 3],
+                color: [1.0; 4],
+                rate: [0.001, 0.001],
+                size: [HALF, HALF],
+                life: [1.0e6, 1.0e6],
+                speed: 0.0,
+                src: 2,
+                dst: 2,
+                max: 1,
+                zenable: true,
+                linear: true,
+                billboard: true,
+                rotate: [0.0; 3],
+                tex: frames[0],
+                frames: vec![frames],
             },
         });
     }

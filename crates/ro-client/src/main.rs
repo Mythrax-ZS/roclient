@@ -1092,6 +1092,8 @@ impl App {
                 let mut emitters = fx::map_emitters(&mut self.fx, r, vfs, name, &emitter_spots, false);
                 let animated_spots: Vec<glam::Vec3> = map.effects.iter().filter(|e| e.0 == 1073).map(|e| e.1).collect();
                 emitters.extend(fx::map_emitters(&mut self.fx, r, vfs, name, &animated_spots, true));
+                let spots: Vec<(i32, glam::Vec3)> = map.effects.iter().map(|e| (e.0, e.1)).collect();
+                emitters.extend(fx::map_torches(&mut self.fx, r, vfs, &spots));
                 tracing::info!(objects = emitter_spots.len(), emitters = emitters.len(), "map particle emitters");
                 let wind_spots: Vec<glam::Vec3> = map.effects.iter().filter(|e| e.0 == 2343).map(|e| e.1).collect();
                 let winds = fx::map_winds(&mut self.fx, r, vfs, name, &wind_spots);
