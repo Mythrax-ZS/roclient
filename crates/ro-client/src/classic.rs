@@ -2,6 +2,7 @@
 //! frame built from it: the blue title bar with its close button, a white body, and the
 //! striped button bar along the bottom. Windows in the Classic interface draw with these.
 
+use crate::uitex::UiSize;
 use std::collections::HashMap;
 
 use egui::{Color32, Rect, Vec2};
@@ -135,7 +136,7 @@ impl Skin {
     /// Draws an image at its own size.
     pub fn draw(&self, p: &egui::Painter, name: &str, at: egui::Pos2) -> Option<Rect> {
         let t = self.tex.get(name)?;
-        let r = Rect::from_min_size(at, t.size_vec2());
+        let r = Rect::from_min_size(at, t.ui_size());
         p.image(t.id(), r, UV, Color32::WHITE);
         Some(r)
     }
@@ -143,7 +144,7 @@ impl Skin {
     /// A three-piece bar (left cap, stretched middle, right cap) across `r`.
     pub fn bar(&self, p: &egui::Painter, r: Rect, left: &str, mid: &str, right: &str) {
         let (Some(l), Some(m), Some(rt)) = (self.tex.get(left), self.tex.get(mid), self.tex.get(right)) else { return };
-        let (lw, rw) = (l.size_vec2().x, rt.size_vec2().x);
+        let (lw, rw) = (l.ui_size().x, rt.ui_size().x);
         p.image(l.id(), Rect::from_min_size(r.min, Vec2::new(lw, r.height())), UV, Color32::WHITE);
         p.image(m.id(), Rect::from_min_max(egui::pos2(r.min.x + lw, r.min.y), egui::pos2(r.max.x - rw, r.max.y)), UV, Color32::WHITE);
         p.image(rt.id(), Rect::from_min_max(egui::pos2(r.max.x - rw, r.min.y), r.max), UV, Color32::WHITE);

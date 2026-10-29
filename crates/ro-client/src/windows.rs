@@ -1,6 +1,7 @@
 //! Game windows: inventory, equipment, character stats and skills. They read the player's
 //! state and return the actions the player chose; main.rs turns those into requests.
 
+use crate::uitex::UiSize;
 use std::collections::HashMap;
 
 use egui::{Color32, RichText, Vec2};
@@ -140,7 +141,7 @@ pub struct View<'a> {
 /// Draws a skill or item icon centred in `rect`.
 fn paint_icon(painter: &egui::Painter, rect: egui::Rect, tex: Option<&egui::TextureHandle>, tint: Color32) {
     if let Some(tex) = tex {
-        let s = tex.size_vec2().min(rect.size() - Vec2::splat(6.0));
+        let s = tex.ui_size().min(rect.size() - Vec2::splat(6.0));
         painter.image(tex.id(), egui::Rect::from_center_size(rect.center(), s), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), tint);
     }
 }
@@ -550,7 +551,7 @@ fn item_slot(ui: &mut egui::Ui, icons: &HashMap<u32, egui::TextureHandle>, it: &
     let hovered = resp.hovered();
     painter.rect_filled(rect, 4.0, if hovered { Color32::from_white_alpha(30) } else { Color32::from_white_alpha(12) });
     if let Some(tex) = icons.get(&it.id) {
-        let s = tex.size_vec2().min(Vec2::splat(size - 6.0));
+        let s = tex.ui_size().min(Vec2::splat(size - 6.0));
         painter.image(tex.id(), egui::Rect::from_center_size(rect.center(), s), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
     }
     if it.amount > 1 {
@@ -712,7 +713,7 @@ impl Windows {
                     let strip_rect = egui::Rect::from_min_size(area.min, Vec2::new(20.0, 109.0));
                     let blit = |name: &str, src: (f32, f32), dst: (f32, f32)| {
                         if let Some(t) = skin.texture(name) {
-                            let h = t.size_vec2().y;
+                            let h = t.ui_size().y;
                             let uv = egui::Rect::from_min_max(egui::pos2(0.0, src.0 / h), egui::pos2(1.0, src.1 / h));
                             let r = egui::Rect::from_min_max(strip_rect.min + Vec2::new(0.0, dst.0), strip_rect.min + Vec2::new(20.0, dst.1));
                             p.image(t.id(), r, uv, Color32::WHITE);
@@ -787,7 +788,7 @@ impl Windows {
                                 p.rect_filled(cell.shrink(1.0), 3.0, Color32::from_rgba_unmultiplied(120, 150, 230, 50));
                             }
                             if let Some(t) = v.icons.get(&it.id) {
-                                p.image(t.id(), egui::Rect::from_center_size(cell.center(), t.size_vec2().min(Vec2::splat(24.0))), uv, Color32::WHITE);
+                                p.image(t.id(), egui::Rect::from_center_size(cell.center(), t.ui_size().min(Vec2::splat(24.0))), uv, Color32::WHITE);
                             }
                             if it.amount > 1 {
                                 let font = egui::FontId::proportional(10.5);

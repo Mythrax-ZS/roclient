@@ -20,11 +20,14 @@ pub struct Settings {
     pub last_id: String,
     /// The HD-2D look (lighting, shadows, post-processing).
     pub visual: Visual,
+    /// Texture upscaling for ground, models, item icons and interface art. Character and
+    /// effect sprites are never upscaled (see ro_render::upscale).
+    pub upscale: ro_render::UpscaleSettings,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default() }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default() }
     }
 }
 
@@ -222,6 +225,33 @@ impl Settings {
                 if ui.add_enabled(v.hd2d, egui::Button::new("Reset look")).clicked() {
                     *v = Visual { hd2d: true, ..Visual::default() };
                 }
+                ui.end_row();
+                ui.label(egui::RichText::new("Textures").strong());
+                ui.end_row();
+                let u = &mut self.upscale;
+                ui.label("Upscaling").on_hover_text("Ground, models, item icons and interface art (never character sprites). Load-time upscaling applies from the next map or window opened.");
+                use ro_render::UpscaleQuality as Q;
+                let names = |q: Q| match q {
+                    Q::Off => "Off",
+                    Q::Fast => "Fast (filtering only)",
+                    Q::Balanced => "Balanced (bicubic)",
+                    Q::High => "High (Lanczos)",
+                };
+                egui::ComboBox::from_id_salt("upscale quality").selected_text(names(u.quality)).show_ui(ui, |ui| {
+                    for q in [Q::Off, Q::Fast, Q::Balanced, Q::High] {
+                        ui.selectable_value(&mut u.quality, q, names(q));
+                    }
+                });
+                ui.end_row();
+                let scaling = matches!(u.quality, Q::Balanced | Q::High);
+                ui.add_enabled_ui(scaling, |ui| ui.label("Upscale factor"));
+                ui.add_enabled_ui(scaling, |ui| {
+                    egui::ComboBox::from_id_salt("upscale factor").selected_text(format!("{}x", u.factor)).show_ui(ui, |ui| {
+                        for f in ro_render::UpscaleSettings::FACTORS {
+                            ui.selectable_value(&mut u.factor, f, format!("{f}x"));
+                        }
+                    });
+                });
                 ui.end_row();
             });
         });

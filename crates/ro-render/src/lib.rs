@@ -7,6 +7,7 @@ mod fx;
 mod post;
 mod shadow;
 mod sprite;
+mod upscale;
 mod water;
 
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use wgpu::util::DeviceExt;
 pub use camera::{Camera, CELL};
 pub use ro_formats::image::Rgba;
 pub use scene::{SceneBuilder, SceneMesh};
+pub use upscale::{is_sprite_path, AssetClass, Quality as UpscaleQuality, UpscaleSettings, Upscaler};
 pub use water::{flag as water_flag, Foam, WaterMesh, WaterQuality, WaterSettings};
 pub use effect::{ProcFx, Shape, TexId};
 pub use fx::{Fx, FxId};
@@ -55,6 +57,8 @@ struct Globals {
     water: [f32; 4],
     /// Wading: the water's scatter colour (linear rgb).
     water_tint: [f32; 4],
+    /// x: 1 to filter magnified world textures with Catmull-Rom (texture upscaling).
+    upscale: [f32; 4],
 }
 
 /// One frame of tessellated egui output.
@@ -151,6 +155,8 @@ pub struct Renderer {
     pub actors: Vec<Actor>,
     /// 0..1: the underwater screen look for submerged maps (HD-2D only).
     pub underwater: f32,
+    /// Run-time Catmull-Rom filtering of ground and model textures (never sprites).
+    pub upscale_runtime: bool,
     /// Warp portal positions drawn each frame.
     pub warps: Vec<glam::Vec3>,
     warp_texture: Option<wgpu::BindGroup>,
@@ -518,6 +524,7 @@ impl Renderer {
             ui: None,
             actors: vec![],
             underwater: 0.0,
+            upscale_runtime: false,
             warps: vec![],
             warp_texture: None,
             fx_pipeline,
@@ -993,6 +1000,7 @@ impl Renderer {
                 let c = self.water_settings.scatter_color;
                 [c[0], c[1], c[2], 0.0]
             },
+            upscale: [if self.upscale_runtime { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
 

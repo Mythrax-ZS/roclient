@@ -2,6 +2,7 @@
 //! item's collection picture and description, or for cards their full illustration
 //! (data\num2cardillustnametable.txt → texture\유저인터페이스\cardbmp\).
 
+use crate::uitex::UiSize;
 use std::collections::HashMap;
 
 use egui::{Color32, RichText, Vec2};
@@ -58,13 +59,13 @@ impl ItemInfo {
             if card {
                 // Cards: the illustration alone, large, as the original's card window.
                 if let Some(t) = pic {
-                    ui.image((t.id(), t.size_vec2() * 1.25));
+                    ui.image((t.id(), t.ui_size() * 1.25));
                 }
                 return;
             }
             ui.horizontal_top(|ui| {
                 if let Some(t) = pic {
-                    ui.image((t.id(), t.size_vec2().min(Vec2::splat(150.0))));
+                    ui.image((t.id(), t.ui_size().min(Vec2::splat(150.0))));
                 }
                 ui.vertical(|ui| {
                     ui.set_max_width(320.0);

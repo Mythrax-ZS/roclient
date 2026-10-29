@@ -21,6 +21,11 @@ struct Globals {
     lights: array<vec4<f32>, 64>,
     // x: 1 when indoors (room mask active), y/z: mask size in cells, w: world units per cell
     room: vec4<f32>,
+    // (Wading, used by sprites.)
+    water: vec4<f32>,
+    water_tint: vec4<f32>,
+    // x: 1 to filter magnified textures with Catmull-Rom (texture upscaling)
+    upscale: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -71,12 +76,53 @@ struct FsOut {
     @location(1) info: vec4<f32>,
 };
 
+// Catmull-Rom (bicubic, B = 0, C = 0.5) from 9 bilinear taps of the top mip: the middle
+// pair of each axis is merged into one tap (Jimenez / MJP). Used only where the texture is
+// magnified. World textures only; sprites have their own shader and are never filtered here.
+fn catmull_rom(uv: vec2<f32>, size: vec2<f32>) -> vec4<f32> {
+    let pos = uv * size;
+    let p1 = floor(pos - 0.5) + 0.5;
+    let f = pos - p1;
+    let w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    let w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    let w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    let w3 = f * f * (-0.5 + 0.5 * f);
+    let w12 = w1 + w2;
+    let t0 = (p1 - 1.0) / size;
+    let t3 = (p1 + 2.0) / size;
+    let t12 = (p1 + w2 / w12) / size;
+    var c = vec4(0.0);
+    c += textureSampleLevel(tex, samp, vec2(t0.x, t0.y), 0.0) * w0.x * w0.y;
+    c += textureSampleLevel(tex, samp, vec2(t12.x, t0.y), 0.0) * w12.x * w0.y;
+    c += textureSampleLevel(tex, samp, vec2(t3.x, t0.y), 0.0) * w3.x * w0.y;
+    c += textureSampleLevel(tex, samp, vec2(t0.x, t12.y), 0.0) * w0.x * w12.y;
+    c += textureSampleLevel(tex, samp, vec2(t12.x, t12.y), 0.0) * w12.x * w12.y;
+    c += textureSampleLevel(tex, samp, vec2(t3.x, t12.y), 0.0) * w3.x * w12.y;
+    c += textureSampleLevel(tex, samp, vec2(t0.x, t3.y), 0.0) * w0.x * w3.y;
+    c += textureSampleLevel(tex, samp, vec2(t12.x, t3.y), 0.0) * w12.x * w3.y;
+    c += textureSampleLevel(tex, samp, vec2(t3.x, t3.y), 0.0) * w3.x * w3.y;
+    // Catmull-Rom overshoots slightly at hard edges; keep it in range.
+    return clamp(c, vec4(0.0), vec4(1.0));
+}
+
 @fragment
 fn fs_main(in: VsOut) -> FsOut {
     if !in_room(in.world) {
         discard;
     }
-    let t = textureSample(tex, samp, in.uv);
+    // Gradients up front (uniform control flow), so both paths below can use them.
+    let ddx = dpdx(in.uv);
+    let ddy = dpdy(in.uv);
+    var t: vec4<f32>;
+    let size = vec2<f32>(textureDimensions(tex));
+    let footprint = max(dot(ddx * size, ddx * size), dot(ddy * size, ddy * size));
+    if g.upscale.x > 0.5 && footprint < 1.0 {
+        // Magnified (a texel covers more than a pixel): Catmull-Rom instead of bilinear,
+        // so close-up ground and models stay sharp without blocky or blurry texels.
+        t = catmull_rom(in.uv, size);
+    } else {
+        t = textureSampleGrad(tex, samp, in.uv, ddx, ddy);
+    }
     if t.a < 0.5 {
         discard;
     }

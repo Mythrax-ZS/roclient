@@ -1,6 +1,7 @@
 //! The pushcart window (Alt+W), setting up a shop after casting Vending, browsing other
 //! players' shops, and the shop signs over their heads.
 
+use crate::uitex::UiSize;
 use std::collections::{BTreeMap, HashMap};
 
 use egui::{Color32, RichText, Vec2};
@@ -33,7 +34,7 @@ fn name(db: Option<&ItemDb>, id: u32, refine: u8) -> String {
 fn icon(ui: &mut egui::Ui, icons: &HashMap<u32, egui::TextureHandle>, id: u32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::hover());
     if let Some(t) = icons.get(&id) {
-        ui.painter().image(t.id(), egui::Rect::from_center_size(rect.center(), t.size_vec2().min(Vec2::splat(24.0))), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+        ui.painter().image(t.id(), egui::Rect::from_center_size(rect.center(), t.ui_size().min(Vec2::splat(24.0))), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
     }
 }
 

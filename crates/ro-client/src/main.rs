@@ -48,7 +48,10 @@ mod status_icons;
 mod stores;
 mod splash;
 mod social;
+mod uitex;
 mod windows;
+
+use uitex::UiSize;
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -221,7 +224,8 @@ struct LoadedMap {
     effects: Vec<(i32, glam::Vec3, f32)>,
 }
 
-fn load_map(vfs: &ro_vfs::Vfs, name: &str) -> anyhow::Result<LoadedMap> {
+/// `up` upscales ground, water and model textures (never sprites, which load elsewhere).
+fn load_map(vfs: &ro_vfs::Vfs, name: &str, up: &ro_render::Upscaler) -> anyhow::Result<LoadedMap> {
     let started = std::time::Instant::now();
     let read = |path: String| vfs.read(&path)?.with_context(|| format!("{path} not found"));
     let rsw = ro_formats::rsw::Rsw::parse(&read(format!("data\\{name}.rsw"))?)?;
@@ -277,10 +281,12 @@ fn load_map(vfs: &ro_vfs::Vfs, name: &str) -> anyhow::Result<LoadedMap> {
             })
             .collect()
     };
-    let images = load_textures(&mesh.textures);
+    // Ground textures come first in the mesh's list, then the models'.
+    let classes = (0..mesh.textures.len()).map(|i| if i < mesh.ground_textures { ro_render::AssetClass::Ground } else { ro_render::AssetClass::Model });
+    let images = up.apply_all(classes.zip(mesh.textures.iter().cloned()).zip(load_textures(&mesh.textures)).map(|((c, n), img)| (c, n, img)).collect());
     let water = rsw.water.as_ref().map(|w| {
         let mesh = ro_render::WaterMesh::build(&gnd, w);
-        let images = load_textures(&mesh.textures);
+        let images = up.apply_all(mesh.textures.iter().cloned().zip(load_textures(&mesh.textures)).map(|(n, img)| (ro_render::AssetClass::Ground, n, img)).collect());
         (mesh, images)
     });
     tracing::info!(
@@ -496,11 +502,10 @@ fn inv_item(d: ro_net::ItemData) -> ro_game::items::InvItem {
 }
 
 /// Decodes an image from the VFS into an egui texture.
+/// An interface texture (item icons, window art...), upscaled per the settings. Size it with
+/// `ui_size()`, never `size_vec2()`. Not for sprites: they never load through here.
 fn load_texture(ctx: &egui::Context, vfs: &ro_vfs::Vfs, path: &str) -> Option<egui::TextureHandle> {
-    let data = vfs.read(path).ok().flatten()?;
-    let img = ro_formats::image::decode(&data, path).ok()?;
-    let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
-    Some(ctx.load_texture(path, color, egui::TextureOptions::NEAREST))
+    uitex::load(ctx, vfs, path, egui::TextureOptions::NEAREST)
 }
 
 /// Expanded-cell budget when planning a long (multi-hop) walk.
@@ -1017,7 +1022,7 @@ impl App {
             }
         }
         let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
-        match load_map(vfs, name) {
+        match load_map(vfs, name, &ro_render::Upscaler::new(self.settings.upscale.clone())) {
             Ok(map) => {
                 r.set_scene(&map.mesh, map.images, map.lighting);
                 tracing::info!(count = map.lights.len(), first = ?map.lights.first(), "map light sources");
@@ -5154,6 +5159,8 @@ impl App {
         }
 
         r.post_settings = self.settings.visual.post();
+        // Catmull-Rom on magnified ground and model textures (the sprite shader never reads it).
+        r.upscale_runtime = self.settings.upscale.runtime_bicubic();
         r.underwater = if self.world.as_ref().is_some_and(|w| w.submerged) { self.settings.visual.underwater } else { 0.0 };
         r.set_water_settings(self.settings.visual.water_settings());
         // HUD: names under actors, status, chat. Laid out for the capture size when capturing.
@@ -5360,7 +5367,7 @@ impl App {
                     let painter = ui.ctx().layer_painter(egui::LayerId::background());
                     for (p, mark, color) in &quest_marks {
                         if let Some(tex) = self.quests.mark_icon(ui.ctx(), vfs, *mark, *color) {
-                            let rect = egui::Rect::from_center_size(egui::pos2(p.x / ppp, p.y / ppp), tex.size_vec2() * 2.0);
+                            let rect = egui::Rect::from_center_size(egui::pos2(p.x / ppp, p.y / ppp), tex.ui_size() * 2.0);
                             painter.image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                         }
                     }
@@ -5537,6 +5544,7 @@ impl App {
                 }
                 if self.windows.settings && self.settings.show(ui.ctx(), &mut self.windows.settings) {
                     self.ui_scale = self.settings.ui_scale;
+                    uitex::set_upscaler(ro_render::Upscaler::new(self.settings.upscale.clone()));
                     if let Some(a) = self.audio.as_mut() {
                         a.set_bgm_volume(self.settings.bgm_volume);
                         a.sfx_volume = self.settings.sfx_volume;
@@ -6027,6 +6035,7 @@ fn main() -> anyhow::Result<()> {
             classic_ui: true,
             visual: Default::default(),
             last_id: String::new(),
+            upscale: Default::default(),
         }),
         audio: None,
         pending_npc: None,
@@ -6166,6 +6175,8 @@ fn main() -> anyhow::Result<()> {
         hud: hud::Hud::default(),
         ui_scale: 1.0, // from settings below
     };
+    // Interface textures loaded from here on follow the saved upscaling settings.
+    uitex::set_upscaler(ro_render::Upscaler::new(app.settings.upscale.clone()));
     app.class_names = app.vfs.as_ref().map(load_class_names).unwrap_or_default();
     app.pet_talk = app.vfs.as_ref().map(pettalk::PetTalk::load).unwrap_or_default();
     app.guild.client_dir = app.client_dir.clone();

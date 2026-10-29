@@ -1,6 +1,7 @@
 //! In-game HUD: character status, chat, and names over actors. Drawn with egui on top of
 //! the world; layout scales with the window's DPI and the configured UI scale.
 
+use crate::uitex::UiSize;
 use std::collections::VecDeque;
 
 use egui::{Align2, Color32, CornerRadius, FontId, Frame, Margin, RichText, Stroke, Vec2};
@@ -376,7 +377,7 @@ impl Hud {
                     // message box stretched across.
                     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), egui::Sense::hover());
                     let p = ui.painter();
-                    let tw = bar.size_vec2().x;
+                    let tw = bar.ui_size().x;
                     let (cut_l, cut_r) = (114.0, tw - 30.0);
                     let slice = |x0: f32, x1: f32, u0: f32, u1: f32| {
                         p.image(bar.id(), egui::Rect::from_min_max(egui::pos2(x0, r.min.y), egui::pos2(x1, r.max.y)), egui::Rect::from_min_max(egui::pos2(u0 / tw, 0.0), egui::pos2(u1 / tw, 1.0)), Color32::WHITE);
@@ -532,7 +533,7 @@ impl Hud {
         }
 
         if let Some(c) = cutin {
-            let size = c.texture.size_vec2();
+            let size = c.texture.ui_size();
             let (align, offset) = match c.position {
                 0 => (Align2::LEFT_BOTTOM, Vec2::new(20.0, -220.0)),
                 1 => (Align2::CENTER_BOTTOM, Vec2::new(0.0, -220.0)),
@@ -789,7 +790,7 @@ impl CursorSprite {
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Debug, egui::Id::unique("game cursor")));
         for l in &frame.layers {
             let Some(tex) = usize::try_from(l.sprite).ok().and_then(|i| self.images.get(i)) else { continue };
-            let size = tex.size_vec2();
+            let size = tex.ui_size();
             let min = pos + Vec2::new(l.x as f32, l.y as f32) - size / 2.0;
             let uv = if l.mirror { egui::Rect::from_min_max(egui::pos2(1.0, 0.0), egui::pos2(0.0, 1.0)) } else { egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)) };
             painter.image(tex.id(), egui::Rect::from_min_size(min, size), uv, Color32::WHITE);

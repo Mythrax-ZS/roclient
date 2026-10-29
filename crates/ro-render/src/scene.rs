@@ -181,6 +181,8 @@ pub struct SceneMesh {
     pub ranges: Vec<std::ops::Range<u32>>,
     /// Texture paths relative to `data\texture\`.
     pub textures: Vec<String>,
+    /// `textures[..ground_textures]` belong to the ground (GND); the rest to models (RSM).
+    pub ground_textures: usize,
     lightmap: Rgba,
     width: u32,
     height: u32,
@@ -195,12 +197,14 @@ pub struct SceneBuilder<'a> {
     textures: Vec<String>,
     index: HashMap<String, usize>,
     per_tex: Vec<Vec<Vertex>>,
+    ground_textures: usize,
 }
 
 impl<'a> SceneBuilder<'a> {
     pub fn new(gnd: &'a Gnd) -> Self {
-        let mut b = Self { gnd, atlas: LightmapAtlas::build(gnd), textures: vec![], index: HashMap::new(), per_tex: vec![] };
+        let mut b = Self { gnd, atlas: LightmapAtlas::build(gnd), textures: vec![], index: HashMap::new(), per_tex: vec![], ground_textures: 0 };
         b.add_ground();
+        b.ground_textures = b.textures.len();
         b
     }
 
@@ -369,6 +373,7 @@ impl<'a> SceneBuilder<'a> {
             vertices,
             ranges,
             textures: self.textures,
+            ground_textures: self.ground_textures,
             lightmap: self.atlas.image,
             width: g.width,
             height: g.height,

@@ -3,6 +3,7 @@
 //! details, delete with the 24 hour timer) and character creation (name, gender, hair
 //! style and colour with a live preview).
 
+use crate::uitex::UiSize;
 use std::collections::HashMap;
 
 use egui::{Align2, Color32, RichText, Vec2};
@@ -116,8 +117,8 @@ impl Front {
         let bg = art.get("win_login")?;
         let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         let mut action = None;
-        egui::Area::new(egui::Id::unique("classic_login")).fixed_pos(at - bg.size_vec2() / 2.0).show(ctx, |ui| {
-            let (area, _) = ui.allocate_exact_size(bg.size_vec2(), egui::Sense::hover());
+        egui::Area::new(egui::Id::unique("classic_login")).fixed_pos(at - bg.ui_size() / 2.0).show(ctx, |ui| {
+            let (area, _) = ui.allocate_exact_size(bg.ui_size(), egui::Sense::hover());
             let p = ui.painter().clone();
             p.image(bg.id(), area, uv, Color32::WHITE);
             let field = |y: f32| egui::Rect::from_min_size(area.min + Vec2::new(93.0, y), Vec2::new(122.0, 15.0));
@@ -134,7 +135,7 @@ impl Front {
             }
             let image_button = |ui: &mut egui::Ui, name: &str, hover: &str, at: egui::Pos2, salt: &str| {
                 let t = art.get(name)?;
-                let r = egui::Rect::from_min_size(at, t.size_vec2());
+                let r = egui::Rect::from_min_size(at, t.ui_size());
                 let resp = ui.interact(r, ui.scope_id().with(salt), egui::Sense::click());
                 let t = if resp.hovered() { art.get(hover).unwrap_or(t) } else { t };
                 p.image(t.id(), r, uv, Color32::WHITE);

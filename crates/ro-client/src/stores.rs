@@ -1,6 +1,7 @@
 //! Buying stores (a player posts what they want to buy; others sell to them) and the cash
 //! shop (items for cash / Kafra points, by tab).
 
+use crate::uitex::UiSize;
 use std::collections::{BTreeMap, HashMap};
 
 use egui::{Color32, RichText, Vec2};
@@ -36,7 +37,7 @@ const CASH_TABS: [&str; 9] = ["New", "Hot", "Limited", "Rental", "Permanent", "S
 fn icon(ui: &mut egui::Ui, icons: &HashMap<u32, egui::TextureHandle>, id: u32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::hover());
     if let Some(t) = icons.get(&id) {
-        ui.painter().image(t.id(), egui::Rect::from_center_size(rect.center(), t.size_vec2().min(Vec2::splat(24.0))), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+        ui.painter().image(t.id(), egui::Rect::from_center_size(rect.center(), t.ui_size().min(Vec2::splat(24.0))), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
     }
 }
 
@@ -247,13 +248,13 @@ impl Stores {
             let p = ui.painter().clone();
             let draw = |name: &str, x: f32, y: f32| {
                 if let Some(t) = art.get(name) {
-                    p.image(t.id(), at(x, y, t.size_vec2().x, t.size_vec2().y), uv, Color32::WHITE);
+                    p.image(t.id(), at(x, y, t.ui_size().x, t.ui_size().y), uv, Color32::WHITE);
                 }
             };
             // An image button with an optional label; true when clicked.
             let button = |ui: &mut egui::Ui, normal: &str, pressed: &str, disabled: &str, x: f32, y: f32, label: &str, enabled: bool| {
                 let Some(t) = art.get(normal) else { return false };
-                let r = at(x, y, t.size_vec2().x, t.size_vec2().y);
+                let r = at(x, y, t.ui_size().x, t.ui_size().y);
                 let resp = ui.interact(r, ui.scope_id().with(("cash_btn", normal, x as i32, y as i32)), egui::Sense::click());
                 let shown = if !enabled { disabled } else if resp.is_pointer_button_down_on() { pressed } else { normal };
                 draw(if art.contains_key(shown) { shown } else { normal }, x, y);

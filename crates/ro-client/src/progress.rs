@@ -2,6 +2,7 @@
 //! rewards; the server sends progress), titles earned through them (titletable.lub), and
 //! attendance (check_attendance art, the server's day counter).
 
+use crate::uitex::UiSize;
 use std::collections::{BTreeMap, HashMap};
 
 use egui::{Color32, RichText, Vec2};
@@ -288,7 +289,7 @@ impl Progress {
         let mut open = true;
         let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         crate::classic::show(ctx, egui::Window::new("Attendance").open(&mut open).resizable(false).collapsible(false), "Attendance", true, |ui| {
-            let bg = self.art.get("bg").map_or(Vec2::new(560.0, 300.0), |t| t.size_vec2());
+            let bg = self.art.get("bg").map_or(Vec2::new(560.0, 300.0), |t| t.ui_size());
             let (r, _) = ui.allocate_exact_size(bg, egui::Sense::hover());
             let p = ui.painter();
             if let Some(t) = self.art.get("bg") {

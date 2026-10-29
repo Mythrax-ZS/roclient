@@ -3,6 +3,7 @@
 //! random loading screen (texture\유저인터페이스\loadingNN.jpg) with a progress bar while
 //! a map loads.
 
+use crate::uitex::UiSize;
 use egui::{Color32, Pos2, Rect, Vec2};
 
 const UI: &str = "data\\texture\\유저인터페이스\\";
@@ -19,17 +20,14 @@ pub struct Splash {
 }
 
 fn load(ctx: &egui::Context, vfs: &ro_vfs::Vfs, path: &str) -> Option<egui::TextureHandle> {
-    let data = vfs.read(path).ok()??;
-    let img = ro_formats::image::decode(&data, path).ok()?;
-    let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
-    Some(ctx.load_texture(path, color, egui::TextureOptions::LINEAR))
+    crate::uitex::load(ctx, vfs, path, egui::TextureOptions::LINEAR)
 }
 
 /// Draws `tex` whole and undistorted, centred (4:3 art on wide screens keeps its shape);
 /// the bars beside it show a dim, enlarged copy instead of plain black.
 fn cover(ctx: &egui::Context, tex: &egui::TextureHandle, alpha: f32) {
     let screen = ctx.content_rect();
-    let size = tex.size_vec2();
+    let size = tex.ui_size();
     let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
     let painter = ctx.layer_painter(egui::LayerId::background());
     painter.rect_filled(screen, 0.0, Color32::BLACK);
@@ -69,7 +67,7 @@ impl Splash {
         if let Some(g) = &self.grade {
             // Fade in, hold, fade out.
             let a = (t / FADE_SECS).min(1.0).min((SPLASH_SECS - t) / FADE_SECS) as f32;
-            let size = g.size_vec2() * (screen.height() / 540.0).max(1.0);
+            let size = g.ui_size() * (screen.height() / 540.0).max(1.0);
             let rect = Rect::from_center_size(screen.center(), size);
             painter.image(g.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::from_white_alpha((a * 255.0) as u8));
         }
@@ -112,7 +110,7 @@ impl Splash {
         }
         let screen = ctx.content_rect();
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("loading screen")));
-        let size = tex.size_vec2();
+        let size = tex.ui_size();
         let scale = (screen.width() / size.x).min(screen.height() / size.y);
         let rect = Rect::from_center_size(screen.center(), size * scale);
         let a = (alpha * 255.0) as u8;
