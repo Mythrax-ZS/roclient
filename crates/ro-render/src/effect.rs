@@ -83,6 +83,38 @@ pub enum Shape {
     /// One layer of the level 99 aura, held under its owner while it stands in view
     /// (`time_ms` runs from when it appeared; `seed` varies the sparkles between owners).
     Aura { layer: AuraLayer, seed: u32, style: AuraStyle },
+    /// One layer of a Mortal Flame (Tenseiga) skill effect, over the effect's whole
+    /// duration (layers that come in late wait inside it). Rings, sparks and shards take
+    /// the effect's colour; slashes and souls carry Tenseiga's own. `solid` layers paint
+    /// true colour (alpha-blended); the others add a narrower glowing core over them.
+    Tenseiga { part: TenseigaPart, solid: bool },
+}
+
+/// The pieces the Mortal Flame skills' effects are built from. Streaks and rings use
+/// textures the client generates (a soft line, a soft ring); the rest a soft glow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TenseigaPart {
+    /// Severing Heaven's Lies: a crescent cut swept across the target, crimson at its tail
+    /// and cyan at its leading edge (streak).
+    Arc,
+    /// Severing Heaven's Lies: a golden halo over the target that breaks in two and falls
+    /// away (ring).
+    Halo,
+    /// Light and Shadow: the cut of light, gold-white, top left to bottom right (streak).
+    CutLight,
+    /// Light and Shadow: the cut of shadow, crimson, crossing it a moment later (streak).
+    CutShadow,
+    /// A burst of light where cuts meet or a strike lands (glow).
+    Spark,
+    /// A ring racing outward along the ground (ring).
+    Ring,
+    /// Unchained Will: the broken chain's pieces flying off (glow).
+    Shards,
+    /// Forge of Ten Souls: ten souls circling up around the target (glow).
+    Souls,
+    /// Destiny's Severance: a blade of light falling from the sky onto the target, crimson
+    /// at the ground and cyan above (streak).
+    Beam,
 }
 
 /// Whose colours an aura wears.
@@ -90,15 +122,17 @@ pub enum Shape {
 pub enum AuraStyle {
     /// The original's level 99 aura: blue throughout.
     Level,
-    /// Tenseiga-no-Hayate's (a custom hat effect): its blade from crimson hilt to cyan tip.
-    /// Drawn with whitened textures, so the colours here are the whole of it.
+    /// Tenseiga-no-Hayate's (a custom hat effect): its blade's crimson, with the cyan of its
+    /// edge. Drawn with whitened textures, so the colours here are the whole of it.
     Tenseiga,
 }
 
-const CRIMSON: [f32; 3] = [1.0, 0.06, 0.18];
-const MAGENTA: [f32; 3] = [1.0, 0.3, 0.72];
-const VIOLET: [f32; 3] = [0.45, 0.15, 1.0];
+// Tenseiga's colours. Crimson stays a deep red (no blue in it), so added light reads as
+// crimson rather than drifting to pink; a darker crimson for the ends of ribbons.
+const CRIMSON: [f32; 3] = [1.0, 0.03, 0.06];
+const DEEP_CRIMSON: [f32; 3] = [0.55, 0.0, 0.03];
 const CYAN: [f32; 3] = [0.1, 0.75, 1.0];
+const GOLD: [f32; 3] = [1.0, 0.82, 0.45];
 
 impl AuraStyle {
     /// Ribbon colour at its foot and at its top.
@@ -108,7 +142,7 @@ impl AuraStyle {
                 let c = [100.0 / 255.0, 100.0 / 255.0, 1.0, 120.0 / 255.0];
                 (c, c)
             }
-            AuraStyle::Tenseiga => ([CRIMSON[0], CRIMSON[1], CRIMSON[2], 2.0], [VIOLET[0], VIOLET[1], VIOLET[2], 2.0]),
+            AuraStyle::Tenseiga => ([CRIMSON[0], CRIMSON[1], CRIMSON[2], 2.0], [DEEP_CRIMSON[0], DEEP_CRIMSON[1], DEEP_CRIMSON[2], 1.6]),
         }
     }
 
@@ -116,15 +150,16 @@ impl AuraStyle {
     fn ground(self) -> ([[f32; 4]; 2], f32) {
         match self {
             AuraStyle::Level => ([[1.0, 1.0, 1.0, 0.8]; 2], 0.0),
-            AuraStyle::Tenseiga => ([[CRIMSON[0], CRIMSON[1], CRIMSON[2], 1.0], [CYAN[0], CYAN[1], CYAN[2], 0.8]], 1.0 / 800.0),
+            AuraStyle::Tenseiga => ([[CRIMSON[0], CRIMSON[1], CRIMSON[2], 0.7], [DEEP_CRIMSON[0], DEEP_CRIMSON[1], DEEP_CRIMSON[2], 1.0]], 1.0 / 800.0),
         }
     }
 
-    /// The dark pool under the aura (the blade's indigo body), if it has one.
+    /// The dark pool under the aura, if it has one: crimson-black, so the light over it stays
+    /// red on pale ground.
     fn shade(self) -> Option<[f32; 4]> {
         match self {
             AuraStyle::Level => None,
-            AuraStyle::Tenseiga => Some([0.05, 0.02, 0.14, 0.92]),
+            AuraStyle::Tenseiga => Some([0.09, 0.0, 0.02, 0.92]),
         }
     }
 
@@ -132,8 +167,8 @@ impl AuraStyle {
     fn sparkle(self, j: u32) -> [f32; 3] {
         match self {
             AuraStyle::Level => [80.0 / 255.0, 80.0 / 255.0, 1.0],
-            // The runes' magenta, the edge's cyan and the body's violet.
-            AuraStyle::Tenseiga => [MAGENTA, CYAN, VIOLET][j as usize % 3],
+            // Mostly crimson embers, with the edge's cyan.
+            AuraStyle::Tenseiga => [CRIMSON, CRIMSON, CYAN][j as usize % 3],
         }
     }
 }
@@ -156,7 +191,7 @@ pub enum AuraLayer {
 impl ProcFx {
     /// Drawn alpha-blended (darkening) rather than added.
     pub fn shades(&self) -> bool {
-        matches!(self.shape, Shape::Aura { layer: AuraLayer::Shade, .. })
+        matches!(self.shape, Shape::Aura { layer: AuraLayer::Shade, .. } | Shape::Tenseiga { solid: true, .. })
     }
 }
 
@@ -254,6 +289,160 @@ fn aura(layer: AuraLayer, seed: u32, style: AuraStyle, pos: Vec3, time_ms: f32, 
     }
 }
 
+/// A camera-facing frame at `centre`: (right, up).
+fn facing(centre: Vec3, eye: Vec3) -> (Vec3, Vec3) {
+    let fwd = (centre - eye).normalize_or_zero();
+    let right = fwd.cross(Vec3::Y).normalize_or_zero();
+    (right, right.cross(fwd))
+}
+
+/// A quad around `c` spanning `a` and `b` (half extents), with the texture's `u0..u1` on it.
+fn quad_u(out: &mut Vec<Vertex>, c: Vec3, a: Vec3, b: Vec3, u0: f32, u1: f32, color: [f32; 4]) {
+    let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color };
+    let (p0, p1, p2, p3) = (v(c - a - b, u0, 1.0), v(c + a - b, u1, 1.0), v(c + a + b, u1, 0.0), v(c - a + b, u0, 0.0));
+    out.extend([p0, p1, p2, p0, p2, p3]);
+}
+
+fn quad(out: &mut Vec<Vertex>, c: Vec3, a: Vec3, b: Vec3, color: [f32; 4]) {
+    quad_u(out, c, a, b, 0.0, 1.0, color);
+}
+
+fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+}
+
+fn rgba(c: [f32; 3], k: f32, a: f32) -> [f32; 4] {
+    [c[0] * k, c[1] * k, c[2] * k, a]
+}
+
+/// A straight streak from `from` to `to`, `width` across, turned to face the camera.
+fn streak(out: &mut Vec<Vertex>, from: Vec3, to: Vec3, width: f32, eye: Vec3, color: [f32; 4]) {
+    let along = to - from;
+    let side = along.cross(((from + to) * 0.5 - eye).normalize_or_zero()).normalize_or_zero() * width * 0.5;
+    let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color };
+    let (p0, p1, p2, p3) = (v(from - side, 0.0, 0.0), v(to - side, 1.0, 0.0), v(to + side, 1.0, 1.0), v(from + side, 0.0, 1.0));
+    out.extend([p0, p1, p2, p0, p2, p3]);
+}
+
+fn ease_out(t: f32) -> f32 {
+    1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
+}
+
+/// One layer of a Mortal Flame skill effect at progress `t` (0..1). `tint` colours rings,
+/// sparks and shards. A `solid` layer paints the colour itself; the glow layer drawn over it
+/// is a narrower, paler core (added light), so crimson reads as crimson even on pale ground.
+fn tenseiga(part: TenseigaPart, solid: bool, pos: Vec3, t: f32, tint: [f32; 3], eye: Vec3, out: &mut Vec<Vertex>) {
+    use std::f32::consts::PI;
+    let chest = pos + Vec3::Y * CELL * 1.1;
+    let (right, up) = facing(chest, eye);
+    let fade = |from: f32| 1.0 - ((t - from) / (1.0 - from)).clamp(0.0, 1.0);
+    // Solid: the colour at `opacity`. Glow: a whiter core of it, `k` bright.
+    let paint = |c: [f32; 3], opacity: f32, k: f32| if solid { rgba(c, 1.0, opacity) } else { rgba(mix(c, [1.0, 0.95, 0.95], 0.55), k, opacity) };
+    let core = if solid { 1.0 } else { 0.35 };
+    match part {
+        TenseigaPart::Arc => {
+            // The head sweeps a 190-degree arc over the first half; the tail follows.
+            let (a0, a1) = (150f32.to_radians(), (-40f32).to_radians());
+            let head = a0 + (a1 - a0) * ease_out(t / 0.45);
+            let tail = a0 + (a1 - a0) * ease_out((t - 0.2) / 0.6);
+            let (radius, width) = (CELL * 1.5, CELL * 0.34 * core);
+            const N: usize = 24;
+            let alpha = fade(0.55);
+            let edge = |k: usize| {
+                let s = k as f32 / N as f32;
+                let a = tail + (head - tail) * s;
+                let dir = right * a.cos() + up * a.sin();
+                let w = width * (PI * s).sin().max(0.15);
+                let color = paint(mix(CRIMSON, CYAN, s * s * s), alpha * (0.5 + 0.5 * s), 1.4);
+                let inner = Vertex { pos: (chest + dir * (radius - w)).into(), uv: [s, 0.0], color };
+                let outer = Vertex { pos: (chest + dir * (radius + w)).into(), uv: [s, 1.0], color };
+                (inner, outer)
+            };
+            for k in 0..N {
+                let ((i0, o0), (i1, o1)) = (edge(k), edge(k + 1));
+                out.extend([i0, o0, o1, i0, o1, i1]);
+            }
+        }
+        TenseigaPart::Halo => {
+            // Appears as the cut passes over, then splits and drops away to either side.
+            let show = ((t - 0.25) / 0.1).clamp(0.0, 1.0) * fade(0.5);
+            if show <= 0.0 {
+                return;
+            }
+            let split = ease_out((t - 0.35) / 0.65);
+            let centre = pos + Vec3::Y * (CELL * 2.6 - split * CELL * 1.2);
+            let r = CELL * 0.75;
+            let depth = right.cross(Vec3::Y).normalize_or_zero() * r;
+            for (side, u0) in [(-1.0f32, 0.0f32), (1.0, 0.5)] {
+                let c = centre + right * side * (split * CELL * 0.8 + r * 0.5);
+                quad_u(out, c, right * r * 0.5, depth, u0, u0 + 0.5, paint(GOLD, show * 0.9, 1.2));
+            }
+        }
+        TenseigaPart::CutLight | TenseigaPart::CutShadow => {
+            let (start, dir, color) = match part {
+                TenseigaPart::CutLight => (0.0, (up - right).normalize_or_zero(), GOLD),
+                _ => (0.28, (up + right).normalize_or_zero(), CRIMSON),
+            };
+            let local = ((t - start) / (1.0 - start)).clamp(0.0, 1.0);
+            if local <= 0.0 {
+                return;
+            }
+            let half = CELL * 1.8;
+            let from = chest + dir * half;
+            let to = from - dir * (2.0 * half * ease_out(local / 0.3));
+            let width = CELL * 0.32 * core * (1.0 - ((local - 0.3) / 0.7).clamp(0.0, 1.0));
+            streak(out, from, to, width, eye, paint(color, 0.95, 1.6));
+        }
+        TenseigaPart::Spark => {
+            let local = ((t - 0.3) / 0.7).clamp(0.0, 1.0);
+            if local <= 0.0 {
+                return;
+            }
+            let size = CELL * 1.6 * core.max(0.5) * ease_out(local / 0.4);
+            quad(out, chest, right * size, up * size, paint(tint, (1.0 - local) * 0.7, 1.6));
+        }
+        TenseigaPart::Ring => {
+            let r = CELL * (0.4 + 3.2 * ease_out(t));
+            quad(out, pos + Vec3::Y * 0.2, Vec3::X * r, Vec3::Z * r, paint(tint, (1.0 - t).powf(1.5) * 0.85, 1.2));
+        }
+        TenseigaPart::Shards => {
+            for i in 0..10 {
+                let a = i as f32 * 36f32.to_radians() + 0.3;
+                let c = pos + Vec3::new(a.cos(), 0.0, a.sin()) * ease_out(t) * CELL * 2.6 + Vec3::Y * (CELL * (1.0 + (PI * t).sin() * 1.3));
+                let colour = if i % 2 == 0 { tint } else { [0.85, 0.85, 1.0] };
+                let s = CELL * 0.3 * core.max(0.6);
+                quad(out, c, right * s, up * s, paint(colour, 1.0 - t, 2.0));
+            }
+        }
+        TenseigaPart::Souls => {
+            let colours = [CRIMSON, CRIMSON, CYAN, GOLD, CRIMSON];
+            for i in 0..10 {
+                let a = i as f32 * 36f32.to_radians() + t * 3.0 * PI;
+                let r = CELL * 1.3 * (1.0 - 0.35 * t);
+                let c = pos + Vec3::new(a.cos() * r, CELL * (0.3 + 3.4 * t), a.sin() * r);
+                let s = CELL * 0.45 * core.max(0.5);
+                quad(out, c, right * s, up * s, paint(colours[i % colours.len()], (PI * t).sin(), 2.0));
+            }
+        }
+        TenseigaPart::Beam => {
+            // A blade of light: falls over the first fifth, stands, then narrows away.
+            let fall = ease_out(t / 0.2);
+            let width = CELL * 0.9 * core * if t < 0.3 { fall } else { 1.0 - ((t - 0.3) / 0.7).clamp(0.0, 1.0) };
+            if width <= 0.0 {
+                return;
+            }
+            let top = pos + Vec3::Y * CELL * 14.0;
+            let bottom = top + (pos - top) * fall;
+            const N: usize = 8;
+            for k in 0..N {
+                let (s0, s1) = (k as f32 / N as f32, (k + 1) as f32 / N as f32);
+                let (p0, p1) = (bottom + (top - bottom) * s0, bottom + (top - bottom) * s1);
+                streak(out, p0, p1, width, eye, paint(mix(CRIMSON, CYAN, (s0 + s1) * 0.5), 0.95, 1.8));
+            }
+        }
+    }
+}
+
 fn hash(mut x: u32) -> u32 {
     x ^= x >> 16;
     x = x.wrapping_mul(0x7feb_352d);
@@ -281,6 +470,7 @@ impl ProcFx {
         let color = [self.color[0], self.color[1], self.color[2], fade];
         match self.shape {
             Shape::Aura { layer, seed, style } => aura(layer, seed, style, self.pos, self.time_ms, eye, out),
+            Shape::Tenseiga { part, solid } => tenseiga(part, solid, self.pos, t, self.color, eye, out),
             Shape::Column { radius, height } => {
                 let h = height * CELL * (t / 0.3).min(1.0);
                 let r = radius * CELL;

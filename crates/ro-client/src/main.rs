@@ -1066,6 +1066,8 @@ struct App {
     dead: bool,
     /// `--fx name`: loop one STR effect on the player (effect previews).
     fx_test: Option<&'static str>,
+    /// `--fx skill:<id>`: when the effect plays next.
+    fx_test_next: Option<std::time::Instant>,
     alt: bool,
     queued_action: Option<windows::UiAction>,
     /// A pointer move the test script queued (UI points); egui keeps the position.
@@ -4200,6 +4202,16 @@ impl App {
                 }
             }
             Some(fx::Visual::Code) => {}
+            Some(fx::Visual::Tenseiga) => {
+                for &(part, texture, duration_ms, color) in fx::tenseiga_layers(skill) {
+                    let Some(tex) = self.fx.fx_texture(r, vfs, texture) else { continue };
+                    let shape = match part {
+                        Some((part, solid)) => ro_render::Shape::Tenseiga { part, solid },
+                        None => ro_render::Shape::Column { radius: 0.9, height: 3.5 },
+                    };
+                    r.procs.push(ro_render::ProcFx { tex, shape, pos, color, time_ms: 0.0, duration_ms });
+                }
+            }
             None => {
                 let by_name = self.skill_names.internal(skill).map(|n| {
                     let short = n.split_once('_').map_or(n, |(_, rest)| rest).to_ascii_lowercase();
@@ -5906,10 +5918,12 @@ impl App {
                 self.talk(npc);
             }
         }
-        // `--fx skill:<id>`: replay a skill's effect on the player whenever the last one ended.
+        // `--fx skill:<id>`: replay a skill's effect on the player every 1.5 seconds (a
+        // timer rather than waiting for quiet, which maps with lasting effects never are).
         if let Some(id) = self.fx_test.and_then(|n| n.strip_prefix("skill:")).and_then(|n| n.parse::<u16>().ok()) {
-            let idle = self.renderer.as_ref().is_some_and(|r| r.effects.is_empty() && r.procs.is_empty()) && self.sprite_fx.is_empty();
-            if idle {
+            let now = std::time::Instant::now();
+            if self.player.is_some() && self.fx_test_next.is_none_or(|t| now >= t) {
+                self.fx_test_next = Some(now + std::time::Duration::from_millis(1500));
                 let pos = self.unit_pos(self.account_id).or_else(|| self.player.as_ref().map(|p| p.actor.pos));
                 if let (137, Some(p)) = (id, pos) {
                     self.spike_line(p, p + glam::Vec3::new(6.0 * ro_render::CELL, 0.0, -3.0 * ro_render::CELL));
@@ -6015,7 +6029,9 @@ impl App {
                         let mut get = |n: &'static str| if white { self.fx.texture_white(r, vfs, n) } else { self.fx.texture(r, vfs, n) };
                         Some([get("ring_blue.tga")?, get("pikapika2.bmp")?, get("whitelight.tga")?])
                     };
-                    AuraTextures { level: set(false), white: set(true), level_off: self.settings.aura_off, simple: self.settings.aura_simple }
+                    let (level, white) = (set(false), set(true));
+                    let disc = self.fx.fx_texture(r, vfs, fx::FxTexture::Disc);
+                    AuraTextures { level, white, disc, level_off: self.settings.aura_off, simple: self.settings.aura_simple }
                 }
                 None => AuraTextures::default(),
             };
@@ -7307,6 +7323,7 @@ fn main() -> anyhow::Result<()> {
         pad_walk_ms: 0.0,
         dead: false,
         fx_test: arg("--fx").map(|s| &*s.leak()),
+        fx_test_next: None,
         alt: false,
         queued_action: None,
         fake_pointer: None,
@@ -7600,6 +7617,8 @@ struct AuraTextures {
     level: Option<[ro_render::TexId; 3]>,
     /// The same, whitened, for custom auras that bring their own colours.
     white: Option<[ro_render::TexId; 3]>,
+    /// The soft disc that shapes a custom aura's dark pool.
+    disc: Option<ro_render::TexId>,
     /// /aura2 and /aura (which touch only the level aura).
     level_off: bool,
     simple: bool,
@@ -7618,8 +7637,8 @@ impl AuraTextures {
             None => return 0.0,
         };
         let Some(tex) = tex.filter(|_| a.alpha >= 1.0) else { return 0.0 };
-        // Custom auras lay a dark pool first (its texture is unused).
-        for (layer, tex) in [(Shade, tex[2]), (Ground, tex[1]), (Swirl, tex[0]), (Sparkles, tex[2])] {
+        // Custom auras lay a dark pool first, shaped by the disc texture.
+        for (layer, tex) in [(Shade, self.disc.unwrap_or(tex[2])), (Ground, tex[1]), (Swirl, tex[0]), (Sparkles, tex[2])] {
             if (simple && layer != Sparkles) || (layer == Shade && custom.is_none()) {
                 continue;
             }

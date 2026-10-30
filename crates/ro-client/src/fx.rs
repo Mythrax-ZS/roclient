@@ -14,6 +14,74 @@ pub enum Visual {
     Sprite(&'static str),
     /// Drawn by the client's own code where the hit is handled (Grimtooth, Soul Breaker...).
     Code,
+    /// A Mortal Flame (Tenseiga) skill's own code-drawn effect: see `tenseiga_layers`.
+    Tenseiga,
+}
+
+/// A texture a code-drawn effect uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FxTexture {
+    /// A soft line, bright along its middle (generated).
+    Streak,
+    /// A soft ring (generated).
+    Ring,
+    /// A soft round disc (generated): the aura's dark pool.
+    Disc,
+    /// effect\whitelight.tga: a soft round glow.
+    Glow,
+    /// effect\alpha_down.tga, drawn as the stock light column.
+    Column,
+}
+
+/// The layers of a Mortal Flame skill's effect: (piece and whether it is the solid colour
+/// layer, texture, duration ms, tint). A `None` piece is the stock light column. Crimson
+/// pieces come as a solid layer with a glowing core over it, so they stay crimson on pale
+/// ground instead of washing out to pink.
+pub fn tenseiga_layers(skill: u16) -> &'static [(Option<(ro_render::TenseigaPart, bool)>, FxTexture, f32, [f32; 3])] {
+    use ro_render::TenseigaPart::*;
+    const CRIMSON: [f32; 3] = [0.8, 0.02, 0.06];
+    const CYAN: [f32; 3] = [0.1, 0.75, 1.0];
+    const GOLD: [f32; 3] = [1.0, 0.82, 0.45];
+    const WHITE: [f32; 3] = [1.0, 0.92, 0.92];
+    match skill {
+        // Severing Heaven's Lies: a crimson-to-cyan crescent cut, and the halo it breaks.
+        7010 => &[
+            (Some((Arc, true)), FxTexture::Streak, 500.0, CRIMSON),
+            (Some((Arc, false)), FxTexture::Streak, 500.0, CRIMSON),
+            (Some((Halo, true)), FxTexture::Ring, 800.0, GOLD),
+            (Some((Spark, false)), FxTexture::Glow, 500.0, WHITE),
+        ],
+        // Light and Shadow: a gold cut, a crimson cut across it, a flash where they meet.
+        7011 => &[
+            (Some((CutLight, true)), FxTexture::Streak, 650.0, GOLD),
+            (Some((CutLight, false)), FxTexture::Streak, 650.0, GOLD),
+            (Some((CutShadow, true)), FxTexture::Streak, 650.0, CRIMSON),
+            (Some((CutShadow, false)), FxTexture::Streak, 650.0, CRIMSON),
+            (Some((Spark, true)), FxTexture::Glow, 650.0, CRIMSON),
+            (Some((Spark, false)), FxTexture::Glow, 650.0, WHITE),
+        ],
+        // Unchained Will: a cyan column, a ring bursting out, the chain's pieces flying off.
+        7012 => &[
+            (None, FxTexture::Column, 1200.0, CYAN),
+            (Some((Ring, true)), FxTexture::Ring, 900.0, CYAN),
+            (Some((Shards, false)), FxTexture::Glow, 900.0, CYAN),
+        ],
+        // Forge of Ten Souls: ten souls rising round the target over a crimson ring.
+        7013 => &[
+            (Some((Ring, true)), FxTexture::Ring, 1000.0, CRIMSON),
+            (Some((Souls, true)), FxTexture::Glow, 1400.0, CRIMSON),
+            (Some((Souls, false)), FxTexture::Glow, 1400.0, CRIMSON),
+        ],
+        // Destiny's Severance: a blade of light falls from the sky, flashes and sends a
+        // crimson ring across the ground.
+        7014 => &[
+            (Some((Ring, true)), FxTexture::Ring, 1100.0, CRIMSON),
+            (Some((Beam, true)), FxTexture::Streak, 900.0, CRIMSON),
+            (Some((Beam, false)), FxTexture::Streak, 900.0, CRIMSON),
+            (Some((Spark, false)), FxTexture::Glow, 900.0, WHITE),
+        ],
+        _ => &[],
+    }
 }
 
 /// What plays on the target (or cell) when a skill lands, by rAthena skill id.
@@ -25,11 +93,7 @@ pub fn skill_visual(skill: u16) -> Option<Visual> {
         7007 => Visual::Str("brandish"),
         7008 => Visual::Str("bowling"),
         // The Mortal Flame line, in Tenseiga's colours where they are tinted.
-        7010 => Visual::Str("eraser_cutter"),
-        7011 => Visual::Str("holy_cross"),
-        7012 => Visual::Column("alpha_down.tga", [0.25, 0.85, 1.0]),
-        7013 => Visual::Column("alpha_down.tga", [1.0, 0.3, 0.72]),
-        7014 => Visual::Str("asum"),
+        7010..=7014 => Visual::Tenseiga,
         28 => Visual::Column("alpha_down.tga", [0.3, 0.55, 0.3]),
         29 => Visual::Column("agi_up.bmp", [0.7, 1.0, 0.8]),
         30 => Visual::Column("alpha_down.tga", [0.25, 0.25, 0.55]),
@@ -495,6 +559,8 @@ pub struct FxLib {
     textures: HashMap<&'static str, Option<ro_render::TexId>>,
     /// Effect textures turned to white light (see `texture_white`).
     textures_white: HashMap<&'static str, Option<ro_render::TexId>>,
+    /// Textures made in code (`FxTexture::Streak`, `Ring`).
+    generated: HashMap<FxTexture, ro_render::TexId>,
     sprites: HashMap<&'static str, Option<ro_render::SheetId>>,
     /// STR paths under effect that sit in subfolders (see `index`).
     strs: Vec<String>,
@@ -562,6 +628,39 @@ impl FxLib {
             }
             Some(r.add_effect_texture(&img))
         })
+    }
+
+    /// A code-drawn effect's texture: generated, or an effect texture from the game.
+    pub fn fx_texture(&mut self, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, which: FxTexture) -> Option<ro_render::TexId> {
+        let (size, alpha): (u32, fn(f32, f32) -> f32) = match which {
+            FxTexture::Glow => return self.texture(r, vfs, "whitelight.tga"),
+            FxTexture::Column => return self.texture(r, vfs, "alpha_down.tga"),
+            // Bright along v = 0.5, fading to nothing at both edges.
+            FxTexture::Streak => (64, |_, v| (-((v - 0.5) / 0.2).powi(2)).exp()),
+            // Solid in the middle, fading out over the outer three quarters.
+            FxTexture::Disc => (64, |u, v| {
+                let r = ((u - 0.5).powi(2) + (v - 0.5).powi(2)).sqrt() * 2.0;
+                1.0 - ((r - 0.25) / 0.75).clamp(0.0, 1.0).powi(2) * (3.0 - 2.0 * ((r - 0.25) / 0.75).clamp(0.0, 1.0))
+            }),
+            // A ring at 78% of the radius with a faint wider glow.
+            FxTexture::Ring => (128, |u, v| {
+                let r = ((u - 0.5).powi(2) + (v - 0.5).powi(2)).sqrt() * 2.0;
+                ((-((r - 0.78) / 0.07).powi(2)).exp() + 0.25 * (-((r - 0.78) / 0.25).powi(2)).exp()).min(1.0)
+            }),
+        };
+        if let Some(t) = self.generated.get(&which) {
+            return Some(*t);
+        }
+        let mut pixels = Vec::with_capacity((size * size * 4) as usize);
+        for y in 0..size {
+            for x in 0..size {
+                let a = alpha((x as f32 + 0.5) / size as f32, (y as f32 + 0.5) / size as f32);
+                pixels.extend([255, 255, 255, (a * 255.0).round() as u8]);
+            }
+        }
+        let t = r.add_effect_texture(&ro_formats::image::Rgba { width: size, height: size, pixels });
+        self.generated.insert(which, t);
+        Some(t)
     }
 
     /// A texture by path under data\texture\ (or data\texture\effect\ when not found there).

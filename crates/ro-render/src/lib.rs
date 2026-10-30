@@ -22,7 +22,7 @@ pub use ro_formats::image::Rgba;
 pub use scene::{SceneBuilder, SceneMesh};
 pub use upscale::{is_sprite_path, AssetClass, Quality as UpscaleQuality, UpscaleSettings, Upscaler};
 pub use water::{flag as water_flag, Foam, WaterMesh, WaterQuality, WaterSettings};
-pub use effect::{AuraLayer, AuraStyle, ProcFx, Shape, TexId};
+pub use effect::{AuraLayer, AuraStyle, ProcFx, Shape, TenseigaPart, TexId};
 pub use particle::{Emitter, EmitterDef, Glow, Waterfall, Wind};
 pub use fx::{Fx, FxId};
 pub use post::PostSettings;

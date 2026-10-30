@@ -53,10 +53,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     let t = textureSample(tex, samp, in.uv);
     if SHADE {
-        // Alpha-blended (premultiplied): a soft disc over the quad that darkens what is
-        // behind, so glows read on bright ground. The texture is not used.
-        let r = length(in.uv * 2.0 - 1.0);
-        let a = (1.0 - smoothstep(0.25, 1.0, r)) * in.color.a;
+        // Alpha-blended (premultiplied): the vertex colour itself, shaped by the texture's
+        // alpha. Paints true colour (crimson stays crimson) and darkens pale ground, where
+        // added light would only wash out.
+        let a = t.a * in.color.a;
         return vec4(srgb_to_linear(in.color.rgb) * a, a);
     }
     // Additive: brightness carries the effect; alpha only scales it.

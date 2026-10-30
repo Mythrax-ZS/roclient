@@ -90,6 +90,16 @@ buffs (`efst_sam_unchained_will.tga`, `efst_sam_forge_of_ten_souls.tga`) use a m
 theme in [buff_icons.py](../../tools/samurai_assets/buff_icons.py). The line sits in the
 skill tree's middle columns, between the Kusanagi and Muramasa branches.
 
+The line's five active skills also have their own effects, drawn in code in Tenseiga's
+crimson, cyan and gold (`TenseigaPart` in `crates/ro-render/src/effect.rs`, layered per
+skill by `tenseiga_layers` in `crates/ro-client/src/fx.rs`): a crimson crescent cut that
+breaks a golden halo (Severing Heaven's Lies), a gold and a crimson cut crossing (Light and
+Shadow), a cyan burst of chain shards (Unchained Will), ten souls spiralling up from a
+crimson ring (Forge of Ten Souls) and a blade of light falling from the sky (Destiny's
+Severance). Crimson is painted as solid colour with a glowing core over it, so it stays
+crimson on pale ground instead of washing out to pink. `--fx skill:<id>` replays one on
+the player every 1.5 seconds.
+
 `System/samurai_iteminfo.lua` supplies item 900000, **Samurai Initiate's Katana**.
 It references the installed game's stock Katana item/collection icons; those
 icons are not redistributed in this overlay.
@@ -164,5 +174,6 @@ While it is equipped the server turns on custom hat effect 2000
 (`HAT_EF_SAMURAI_TENSEIGA`), which the client draws in code as the Mortal Flame
 aura (`AuraStyle::Tenseiga` in `crates/ro-render/src/effect.rs`). It reuses the
 level aura's ribbons, ground stars and sparkles with whitened textures, tinted with
-the blade's colours, over a dark indigo pool so they read on bright ground. It
+the blade's crimson (cyan in a few sparks), over a crimson-black pool so they read as
+crimson rather than pink on bright ground. It
 takes the place of the level aura, and `/aura` and `/aura2` leave it alone.
