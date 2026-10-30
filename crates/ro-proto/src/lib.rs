@@ -8,6 +8,7 @@ pub mod chatroom;
 pub mod codec;
 pub mod companions;
 pub mod generated;
+pub mod gm;
 pub mod guild;
 pub mod items;
 pub mod mail;

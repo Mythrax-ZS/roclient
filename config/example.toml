@@ -7,6 +7,11 @@ login_addr = "127.0.0.1:6900"
 # rAthena's web-server (Adventurer's Agency party board). Defaults to the login host on
 # port 8888; set it when web-server runs elsewhere, e.g. "192.168.1.50:8888".
 # web_addr = "127.0.0.1:8888"
+# Game Masters: add the GM actions (kick, mute, recall, go to, check stats, ...) to the
+# player right-click menu. GM slash commands (/b, /nb, /lb, /nlb, /hide, /mm, /recall,
+# /shift, /item, /monster, /rc, /check, /killall, /resetstate, /resetcooltime,
+# /changemaptype) work either way; the server checks the account's group permissions.
+# gm = true
 username = "test"
 password = "test"
 char_slot = 0

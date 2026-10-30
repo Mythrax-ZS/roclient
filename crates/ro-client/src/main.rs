@@ -120,6 +120,10 @@ struct Config {
     /// rAthena's web server (Adventurer's Agency, …); defaults to the login host on port 8888.
     #[serde(default)]
     web_addr: Option<String>,
+    /// Game Master: adds the GM actions (kick, mute, recall, …) to the player right-click menu.
+    /// The GM slash commands work regardless; the server checks permissions either way.
+    #[serde(default)]
+    gm: bool,
 }
 
 fn default_grfs() -> Vec<String> {
@@ -1012,6 +1016,8 @@ struct App {
     /// Adventurer's Agency, and the web server it talks to.
     agency: agency::Agency,
     web_url: String,
+    /// Show the GM actions in the player menu (config `gm`).
+    gm: bool,
     /// The last /ex or /in sent: (name, block).
     ignore_pending: Option<(String, bool)>,
     /// A companion window request, handled after the UI pass.
@@ -3283,6 +3289,21 @@ impl App {
                 };
                 self.hud.push_chat(ro_net::ChatKind::Guild, text.into());
             }
+            GmKicked(ok) => {
+                let text = if ok { msgstr::get(151, &[]).unwrap_or_else(|| "Kick/Disconnected User.".into()) } else { msgstr::get(152, &[]).unwrap_or_else(|| "Kick has failed.".into()) };
+                self.hud.push_chat(ro_net::ChatKind::System, text);
+            }
+            GmStatus(s) => {
+                const NAMES: [&str; 6] = ["Str", "Agi", "Vit", "Int", "Dex", "Luk"];
+                let stats: Vec<String> = s.stats.iter().zip(NAMES).map(|((v, need), n)| format!("{n} {v} ({need})")).collect();
+                for line in [
+                    stats.join("  "),
+                    format!("Atk {} + {}  Matk {} ~ {}  Def {} + {}  Mdef {} + {}", s.atk.0, s.atk.1, s.matk.1, s.matk.0, s.def.0, s.def.1, s.mdef.0, s.mdef.1),
+                    format!("Hit {}  Flee {} + {}  Critical {}  Aspd {}", s.hit, s.flee.0, s.flee.1, s.crit, s.aspd),
+                ] {
+                    self.hud.push_chat(ro_net::ChatKind::System, line);
+                }
+            }
             DisconnectAck(result) => {
                 if result == 0 {
                     self.quit = self.quit_asked.take().is_some() || self.quit;
@@ -4489,6 +4510,35 @@ impl App {
                 notes.push(if on { say(2978, "You can be called with various skills (Emergency Call,...). (/call)") } else { say(2979, "You cannot be called with various skills (Emergency Call,...). (/call)") });
             }
             "/memo" => self.send(ro_net::Command::Memo),
+            // GM commands, as the original client sends them; the server checks permissions.
+            "/b" | "/nb" | "/lb" | "/nlb" if !arg.is_empty() => {
+                // /b and /lb sign the message with our name; /nb and /nlb don't.
+                let rest = t.split_once(' ').map_or("", |(_, r)| r.trim());
+                let text = if head.starts_with("/n") { rest.to_string() } else { format!("{}: {rest}", self.hud.status.name) };
+                self.send(ro_net::Command::Gm(if head.ends_with("lb") { ro_net::GmRequest::LocalBroadcast(text) } else { ro_net::GmRequest::Broadcast(text) }));
+            }
+            "/hide" => self.send(ro_net::Command::Gm(ro_net::GmRequest::Hide)),
+            "/mm" | "/mapmove" if !arg.is_empty() => {
+                let mut parts = t.split_whitespace().skip(1);
+                let map = parts.next().unwrap_or_default().to_string();
+                let (x, y) = (parts.next().and_then(|v| v.parse().ok()).unwrap_or(0), parts.next().and_then(|v| v.parse().ok()).unwrap_or(0));
+                self.send(ro_net::Command::Gm(ro_net::GmRequest::MapMove { map, x, y }));
+            }
+            "/recall" if !arg.is_empty() => self.send(ro_net::Command::Gm(ro_net::GmRequest::Recall(arg.to_string()))),
+            "/shift" | "/remove" if !arg.is_empty() => self.send(ro_net::Command::Gm(ro_net::GmRequest::Shift(arg.to_string()))),
+            "/item" | "/monster" if !arg.is_empty() => self.send(ro_net::Command::Gm(ro_net::GmRequest::Create(arg.to_string()))),
+            "/rc" if !arg.is_empty() => self.send(ro_net::Command::Gm(ro_net::GmRequest::Mute(arg.to_string()))),
+            "/check" if !arg.is_empty() => self.send(ro_net::Command::Gm(ro_net::GmRequest::Check(arg.to_string()))),
+            "/killall" => self.send(ro_net::Command::Gm(ro_net::GmRequest::KickAll)),
+            "/resetstate" => self.send(ro_net::Command::Gm(ro_net::GmRequest::ResetStats)),
+            "/resetcooltime" => self.send(ro_net::Command::Gm(ro_net::GmRequest::ResetCooltime)),
+            "/changemaptype" => {
+                let v: Vec<u16> = arg.split_whitespace().filter_map(|v| v.parse().ok()).collect();
+                match v[..] {
+                    [x, y, kind] => self.send(ro_net::Command::Gm(ro_net::GmRequest::ChangeMapType { x, y, kind })),
+                    _ => notes.push("Usage: /changemaptype <x> <y> <type>".into()),
+                }
+            }
             "/deal" if !arg.is_empty() => match self.units.iter().find(|(_, u)| u.name.eq_ignore_ascii_case(arg)).map(|(id, _)| *id) {
                 Some(target) => self.send(ro_net::Command::Trade(ro_net::TradeRequest::Ask { target })),
                 None => notes.push(say(148, "There is no such character name or the user is offline.")),
@@ -6634,6 +6684,25 @@ ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(i
                                     keep = false;
                                 }
                             }
+                            // Game Masters (config `gm`): the original's GM right-click actions.
+                            if self.gm {
+                                ui.separator();
+                                let gm = |r| Some((ro_net::Command::Gm(r), None));
+                                let kick = msgstr::get(127, &[]).unwrap_or_else(|| "Kick Character Out".into());
+                                for (label, r) in [
+                                    (kick.as_str(), ro_net::GmRequest::Kick(id)),
+                                    ("Mute for 60 minutes", ro_net::GmRequest::Mute(name.clone())),
+                                    ("Remove all equipment", ro_net::GmRequest::FullStrip(id)),
+                                    ("Recall here", ro_net::GmRequest::RecallId(id)),
+                                    ("Go to", ro_net::GmRequest::GoTo(id)),
+                                    ("Check stats", ro_net::GmRequest::Check(name.clone())),
+                                ] {
+                                    if ui.button(label).clicked() {
+                                        player_cmd = gm(r);
+                                        keep = false;
+                                    }
+                                }
+                            }
                             if ui.button("Close").clicked() {
                                 keep = false;
                             }
@@ -7166,6 +7235,7 @@ fn main() -> anyhow::Result<()> {
         booking: Default::default(),
         agency: Default::default(),
         web_url: web_url(cfg.web_addr.as_deref(), &cfg.login_addr),
+        gm: cfg.gm,
         ignore_pending: None,
         companion_action: None,
         follow_at: std::time::Instant::now(),

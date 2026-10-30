@@ -17,6 +17,7 @@ use ro_proto::items::*;
 pub use ro_proto::guild::{RelationRequest, GuildInfo, GuildMember, GuildRequest, GuildSkill, Position, StorageLogEntry};
 use ro_proto::guild::*;
 pub use ro_proto::menus::{Menu, MenuReply};
+pub use ro_proto::gm::{GmRequest, GmStatus};
 pub use ro_proto::quests::{Objective, Quest};
 pub use ro_proto::merchant::{BankRequest, BuyingStoreRequest, CashShopRequest, MerchantRequest, SaleNote, SaleRequest, VendItem, WantedItem};
 pub use ro_proto::search::{Found, SearchRequest};
@@ -543,6 +544,10 @@ pub enum Event {
     /// ZC_ACK_REQ_DISCONNECT: 0 we may leave, 1 not within 10 seconds of combat (also the
     /// refusal of a character-select request).
     DisconnectAck(u16),
+    /// ZC_ACK_DISCONNECT_CHARACTER: a GM kick worked (true) or failed.
+    GmKicked(bool),
+    /// ZC_ACK_STATUS_GM: the stats /check asked for.
+    GmStatus(GmStatus),
     AllyRequest { inviter: u32, guild: String },
     RelationNotice(String),
     RelationRemoved { guild: u32, relation: u32 },
@@ -800,6 +805,8 @@ pub enum Command {
     /// CZ_STANDING_RESURRECTION (0x0292): get up where we fell, using a Token of Siegfried
     /// (or Light of Regene).
     AutoRevive,
+    /// A Game Master request (slash command or right-click menu).
+    Gm(GmRequest),
     /// Talk to an NPC or answer its dialog.
     Npc { npc: u32, reply: NpcReply },
     /// Say something in public chat.
@@ -1047,6 +1054,7 @@ impl MapSession {
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
                     Some(Command::Quit) => self.send(CzReqDisconnect).await?,
                     Some(Command::AutoRevive) => self.send(CzStandingResurrection).await?,
+                    Some(Command::Gm(r)) => self.send(r).await?,
                     // Login and character-select screen commands mean nothing once in game.
                     Some(Command::Login { .. } | Command::SelectServer(_) | Command::Char(_) | Command::Pin(_) | Command::SelectChar(_)) => {}
                     Some(Command::Npc { npc, reply }) => self.send(CzNpc { npc, reply: &reply }).await?,
@@ -1570,6 +1578,8 @@ impl MapSession {
                         0x0a57 if data.len() >= 6 => Some(Event::MacroApplied(l(&data, 2))),
                         0x0adf if data.len() >= 58 => Some(Event::NpcName { id: l(&data, 2), name: ro_proto::packets::get_fixed_str(&mut &data[10..34], 24), title: ro_proto::packets::get_fixed_str(&mut &data[34..58], 24) }),
                         // ZC_CHANGE_GUILD (this version's layout: guild, emblem, unit).
+                        0x00cd if data.len() >= 3 => Some(Event::GmKicked(data[2] != 0)),
+                        0x0214 => ro_proto::gm::parse_gm_status(&data).map(Event::GmStatus),
                         0x018b if data.len() >= 4 => Some(Event::DisconnectAck(u16::from_le_bytes([data[2], data[3]]))),
                         0x0b47 if data.len() >= 14 => Some(Event::UnitGuild { id: l(&data, 10), guild: l(&data, 2), emblem: l(&data, 6) }),
                         0x09da => ro_proto::guild::parse_storage_log(&data).map(|(r, e)| Event::GuildStorageLog(r, e)),
