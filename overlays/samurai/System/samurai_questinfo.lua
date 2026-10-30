@@ -51,8 +51,8 @@ QuestInfoList[900122] = {
 }
 QuestInfoList[900131] = {
     Title = "Twin Flames IV: Whispers in Steel",
-    Summary = "Cut through 40 soldiers and the Shade of Yami in the Crimson Fields.",
-    Description = { "War has come to the fields north of Amatsu.", "Defeat 40 Crimson Fields Soldiers, then call what waits at the battle standard." },
+    Summary = "Hold the Crimson Fields for the villagers caught in the war.",
+    Description = { "Kurogane's death broke the truce. His captains and the clan lords are tearing apart the fields north of Amatsu.", "Cut down 40 Crimson Fields Soldiers.", "A scorched clan standard still stands where the armies met, past the stone path. Something stronger waits beneath it: call it out and destroy it." },
     NpcNavi = "ama_fild01",
     NpcPosX = 200,
     NpcPosY = 291,
@@ -75,7 +75,7 @@ QuestInfoList[900133] = {
 }
 QuestInfoList[900134] = {
     Title = "Twin Flames IV: The Hidden Leaf",
-    Summary = "Defeat Kage, assassin of the Hidden Leaf's killers, for Ayame.",
+    Summary = "Defeat Kage, who slaughtered Ayame's clan.",
     Description = { "Kage led the slaughter of Ayame's clan.", "Pull his kunai from the wall on the second floor of the Amatsu dungeon.", "Bring Ayame her clan's kunai, and 5 Holy Water to purify it." },
     NpcNavi = "ama_dun02",
     NpcPosX = 40,
