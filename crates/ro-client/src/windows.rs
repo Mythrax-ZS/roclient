@@ -296,8 +296,17 @@ fn hotkey_slot_ui(ui: &mut egui::Ui, v: &View, index: usize, key_label: &str, si
 fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
     const SIZE: f32 = 40.0;
     let mut action = None;
+    // Gap under the bar.
+    const BAR_BOTTOM: f32 = 12.0;
+    // A bar anchored by its bottom is placed from last frame's size; when the row count
+    // changes, lay the frame out again so it is never drawn a frame out of place.
+    let shown = egui::Id::unique("hotkey rows shown");
+    if ctx.data(|d| d.get_temp::<u8>(shown)) != Some(v.hotkey_rows) {
+        ctx.data_mut(|d| d.insert_temp(shown, v.hotkey_rows));
+        ctx.request_discard("shortcut bar rows changed");
+    }
     if v.hotkey_rows > 0 {
-        egui::Area::new(egui::Id::unique("hotkeys")).anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -12.0)).show(ctx, |ui| {
+        egui::Area::new(egui::Id::unique("hotkeys")).anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -BAR_BOTTOM)).show(ctx, |ui| {
             let frame = if v.skin.is_some() {
                 egui::Frame::new().fill(Color32::WHITE).stroke(egui::Stroke::new(1.0, Color32::from_rgb(150, 160, 190))).inner_margin(4)
             } else {
@@ -353,8 +362,11 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                 }
             }
             if let (true, Some(p)) = (grip.dragged(), grip.interact_pointer_pos()) {
-                // Rows stack up from the bottom of the bar, one slot plus spacing each.
-                let rows = ((rect.bottom() - p.y) / (SIZE + 4.0)).round().clamp(1.0, HOTKEY_ROWS as f32) as u8;
+                // Rows stack up from where the bar is anchored, one slot plus spacing each. (Not
+                // from the bar's own rect: while it changes size that lags a frame, and the count
+                // would flicker.)
+                let bottom = ui.ctx().content_rect().bottom() - BAR_BOTTOM;
+                let rows = ((bottom - p.y) / (SIZE + 4.0)).round().clamp(1.0, HOTKEY_ROWS as f32) as u8;
                 if rows != v.hotkey_rows {
                     action = Some(UiAction::HotkeyRows(rows));
                 }
