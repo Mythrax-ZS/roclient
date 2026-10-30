@@ -179,6 +179,18 @@ mod tests {
     }
 
     #[test]
+    fn every_skill_has_a_bundled_icon() {
+        let root = overlay_path().expect("bundled Samurai overlay");
+        for s in SKILLS {
+            let path = format!("data/texture/유저인터페이스/item/{}.bmp", s.internal.to_ascii_lowercase());
+            let bytes = std::fs::read(root.join(&path)).expect("bundled skill icon");
+            let image = ro_formats::image::decode(&bytes, &path).unwrap();
+            assert_eq!((image.width, image.height), (24, 24), "{path}");
+            assert!(image.pixels.chunks_exact(4).any(|p| p[3] == 0), "{path}: magenta corners must be transparent");
+        }
+    }
+
+    #[test]
     fn dual_wielded_katanas_resolve_to_their_offhand_sprites() {
         assert_eq!(offhand(900000), Some(KATANA_OFFHAND));
         assert_eq!(offhand(900001), Some(KUSANAGI_OFFHAND));

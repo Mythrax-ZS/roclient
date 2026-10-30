@@ -59,5 +59,20 @@
     "scope": "Evidence from before the current attack orientation change; retained as history, not a claim of current runtime coverage."
   },
   "weapon_pose_audit": "tools/samurai_assets/artwork/weapon_pose_audit.json",
-  "dual_wield": "katana_offhand is the starter katana on the off-hand cross-slash poses (weapon_pose_audit.json, offhand_cross_slash). The client draws it when item 900000 is in the left hand. Body, katana and their timelines are byte-identical to the previous revision."
+  "dual_wield": "katana_offhand is the starter katana on the off-hand cross-slash poses (weapon_pose_audit.json, offhand_cross_slash). The client draws it when item 900000 is in the left hand. Body, katana and their timelines are byte-identical to the previous revision.",
+  "skill_icons": {
+    "generator": "tools/samurai_assets/skill_icons.py",
+    "style": "24x24 pixel art after the Guillotine Cross skill icons (dark field, wine and rose fringe frame, cream blades, gold sparks). Frame and motifs are drawn in the generator; nothing is copied from game data.",
+    "validation": "Live login as Hayate: all eight icons in the hotkey bar and the Blade Harmony buff icon render with transparent magenta corners.",
+    "sha256": {
+      "data/texture/유저인터페이스/item/sam_ashen_wind_slash.bmp": "d1c56c741732e6679c55933e66e5483c07a539d5d5f825fd02c97b1826430471",
+      "data/texture/유저인터페이스/item/sam_blade_harmony.bmp": "cef1bbdffd27e3e09ba9ce8a461f33c8df6fa52ed05471a8c2e81d7e057d16a6",
+      "data/texture/유저인터페이스/item/sam_blood_covenant.bmp": "7a3e94425c8eb715cc2805d1a00cdd111ecc5b34d5704256c6f35dbe44099102",
+      "data/texture/유저인터페이스/item/sam_heavens_severance.bmp": "5d04dc15ed4349f04ba173a9e677db90e6db25eb4105e3fc52fb02fb773897e3",
+      "data/texture/유저인터페이스/item/sam_kusanagi_guard.bmp": "8d7597f5a38aa3601ba44629e798000424eda0e58bfe77959533264621f8eeea",
+      "data/texture/유저인터페이스/item/sam_moonlit_reflection.bmp": "e4ebe68ce13270913cc6b7acd8df5e5890de4e378dd5ddf8b610a5246c64880d",
+      "data/texture/유저인터페이스/item/sam_muramasas_curse.bmp": "1c1452b412223e8ee7c6f87c59617c1630a0a3aca2424d153d43cff3cfcb9f72",
+      "data/texture/유저인터페이스/item/sam_wrath_unbound.bmp": "057e9f62acedbc324ec247c4800fa51ba155817a1e82b6fd08881ddcce4cbc66"
+    }
+  }
 }

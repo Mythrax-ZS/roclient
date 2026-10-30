@@ -81,6 +81,10 @@ locations. The artwork was generated with the built-in image-generation tool.
 Source images retain their generated alpha; nearest-neighbor sampling and ACT
 placement are reproducible from the metadata.
 
+The eight skills have their own 24x24 icons (`data/texture/유저인터페이스/item/sam_*.bmp`),
+pixel art in the manner of the Guillotine Cross icons, drawn by
+[skill_icons.py](../../tools/samurai_assets/skill_icons.py).
+
 `System/samurai_iteminfo.lua` supplies item 900000, **Samurai Initiate's Katana**.
 It references the installed game's stock Katana item/collection icons; those
 icons are not redistributed in this overlay.

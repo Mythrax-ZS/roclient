@@ -179,3 +179,19 @@ package. It includes links to primary format implementations consulted by that
 writer. No game artwork or stock extracted reference sprites are included in
 this tooling directory. The package's generated artwork provenance belongs with
 the runtime overlay and its source build metadata.
+
+## Skill icons
+
+`skill_icons.py` draws the eight Samurai skill icons as 24x24 pixel art in the
+manner of the Guillotine Cross icons: a dark field inside a wine-and-rose fringe
+frame, cream blades and gold sparks. Divinity (Kusanagi) skills use pale blades
+and gold light. Cursed (Muramasa) skills use crimson blades and wine-dark auras.
+Each icon is a character grid in the script, so a pixel can be changed in place.
+
+```powershell
+py tools/samurai_assets/skill_icons.py --output overlays/samurai --preview target/skill-icons.png
+```
+
+It writes `data/texture/유저인터페이스/item/sam_<skill>.bmp` (24-bit, magenta
+transparent). The client uses these before the stock stand-in icons, in the skill
+window, hotkeys and the buff column.

@@ -71,8 +71,11 @@ impl Buffs {
         self.icons
             .entry(id)
             .or_insert_with(|| {
+                // Samurai buffs show their skill's icon: the bundled one, else the stock stand-in.
                 if let Some(skill) = crate::samurai::buff_skill(id) {
-                    return crate::load_texture(ctx, vfs, &format!(r"data\texture\유저인터페이스\item\{}.bmp", skill.icon));
+                    return [skill.internal.to_ascii_lowercase(), skill.icon.to_string()]
+                        .iter()
+                        .find_map(|name| crate::load_texture(ctx, vfs, &format!(r"data\texture\유저인터페이스\item\{name}.bmp")));
                 }
                 let classic = crate::status_icons::ICONS.iter().find(|(i, _)| *i == id).map(|(_, f)| f.to_string());
                 let modern = names.get(&id).map(|n| format!("{}.tga", n.to_ascii_lowercase()));
