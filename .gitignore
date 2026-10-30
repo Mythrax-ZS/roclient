@@ -3,3 +3,6 @@
 /config/local2.toml
 /config/settings.toml
 /cache
+
+# In-game screenshots (Print Screen)
+/ScreenShot/

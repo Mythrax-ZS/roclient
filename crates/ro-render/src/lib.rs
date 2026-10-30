@@ -892,7 +892,7 @@ impl Renderer {
         let view = tex.texture.create_view(&Default::default());
         // egui blends in gamma space: give it a non-sRGB view of the same surface.
         let ui_view = tex.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(self.config.format.remove_srgb_suffix()), ..Default::default() });
-        let cmd = self.encode(&view, &ui_view, None, self.size());
+        let cmd = self.encode(&view, &ui_view, None, self.size(), true);
 
         self.queue.submit([cmd]);
         self.queue.present(tex);
@@ -901,6 +901,11 @@ impl Renderer {
 
     /// Renders one frame offscreen at `width`x`height` and returns it as RGBA8 (sRGB).
     pub fn capture(&mut self, width: u32, height: u32) -> anyhow::Result<Rgba> {
+        self.capture_with(width, height, true)
+    }
+
+    /// As `capture`, with or without the UI drawn over the world.
+    pub fn capture_with(&mut self, width: u32, height: u32, ui: bool) -> anyhow::Result<Rgba> {
         let mut config = self.config.clone();
         config.width = width;
         config.height = height;
@@ -917,7 +922,7 @@ impl Renderer {
         });
         let view = texture.create_view(&Default::default());
         let ui_view = texture.create_view(&wgpu::TextureViewDescriptor { format: Some(config.format.remove_srgb_suffix()), ..Default::default() });
-        let cmd = self.encode(&view, &ui_view, Some(&targets), (width, height));
+        let cmd = self.encode(&view, &ui_view, Some(&targets), (width, height), ui);
 
 
         // Rows must be padded to 256 bytes for buffer copies.
@@ -958,7 +963,8 @@ impl Renderer {
     }
 
     /// Records the whole frame into `view` using `targets` (depth / MSAA of the same size).
-    fn encode(&mut self, view: &wgpu::TextureView, ui_view: &wgpu::TextureView, targets: Option<&Targets>, size: (u32, u32)) -> wgpu::CommandBuffer {
+    /// `draw_ui` false leaves the UI out (its texture changes are still applied).
+    fn encode(&mut self, view: &wgpu::TextureView, ui_view: &wgpu::TextureView, targets: Option<&Targets>, size: (u32, u32), draw_ui: bool) -> wgpu::CommandBuffer {
         // Night: blend the map's light and the look toward moonlight for this frame only.
         let now = std::time::Instant::now();
         // Uncapped: after a long gap (a capture, a stall) the fade simply completes.
@@ -1316,8 +1322,8 @@ impl Renderer {
                 }
             }
             let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [size.0, size.1], pixels_per_point: ui.pixels_per_point };
-            self.ui_renderer.update_buffers(&self.device, &self.queue, &mut enc, &ui.primitives, &screen);
-            {
+            if draw_ui {
+                self.ui_renderer.update_buffers(&self.device, &self.queue, &mut enc, &ui.primitives, &screen);
                 let mut pass = enc
                     .begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("ui"),

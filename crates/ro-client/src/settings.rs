@@ -36,11 +36,13 @@ pub struct Settings {
     pub hotkey_rows: u8,
     /// What Alt+1..Alt+0 say (the macro window, Alt+M).
     pub macros: Vec<String>,
+    /// Screenshots (Print Screen) include the interface; off, they show the world alone.
+    pub screenshot_ui: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect() }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true }
     }
 }
 
@@ -177,7 +179,10 @@ impl Settings {
                 });
                 ui.end_row();
                 ui.label("Minimap");
-                ui.checkbox(&mut self.minimap, "Show (Alt+M)");
+                ui.checkbox(&mut self.minimap, "Show (Ctrl+Tab)");
+                ui.end_row();
+                ui.label("Screenshots");
+                ui.checkbox(&mut self.screenshot_ui, "Include the interface").on_hover_text("Print Screen or Scroll Lock saves a lossless PNG in the ScreenShot folder");
                 ui.end_row();
                 ui.label(egui::RichText::new("Visual").strong());
                 ui.checkbox(&mut self.visual.hd2d, "HD-2D lighting and effects");

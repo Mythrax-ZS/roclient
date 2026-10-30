@@ -624,6 +624,16 @@ fn hotkey_slot(k: winit::keyboard::NamedKey) -> Option<usize> {
     [F1, F2, F3, F4, F5, F6, F7, F8, F9].iter().position(|&f| f == k)
 }
 
+/// The next free ScreenShot\screenNNNN.png in the working directory (the original numbers
+/// its shots in a ScreenShot folder beside the client too).
+fn screenshot_path() -> PathBuf {
+    let dir = std::env::current_dir().unwrap_or_default().join("ScreenShot");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!(dir = %dir.display(), "screenshot folder: {e}");
+    }
+    (0..).map(|n| dir.join(format!("screen{n:04}.png"))).find(|p| !p.exists()).unwrap_or_default()
+}
+
 /// Battle mode: the shortcut slot a letter key uses. Q ~ O is the row after the one on show,
 /// A ~ L the next and Z ~ > the one after (rows wrap around).
 fn battle_slot(key: &str, page: u8) -> Option<usize> {
@@ -1088,6 +1098,8 @@ struct App {
     fx_test_next: Option<std::time::Instant>,
     alt: bool,
     ctrl: bool,
+    /// Print Screen was pressed: the next frame is saved instead of shown.
+    screenshot: bool,
     /// The Emotion List (Alt+L) and the macro window (Alt+M).
     emote_win: emotes::EmoteWindow,
     queued_action: Option<windows::UiAction>,
@@ -3778,6 +3790,8 @@ impl App {
                 self.press_hotkey(slot, logical_key.clone());
             }
             Key::Character(c) if self.alt => self.alt_key(&c.to_ascii_lowercase()),
+            // Scroll Lock also takes a screenshot, as in the original.
+            Key::Named(NamedKey::ScrollLock) => self.screenshot = true,
             // Ctrl+Tab: the minimap on or off.
             Key::Named(NamedKey::Tab) if self.ctrl => {
                 self.settings.minimap = !self.settings.minimap;
@@ -5627,6 +5641,11 @@ impl App {
                         self.alt_key(k);
                         None
                     }
+                    // screenshot takes one, as Print Screen does.
+                    Some(("screenshot", _)) => {
+                        self.screenshot = true;
+                        None
+                    }
                     // press:k presses a key over the game: a letter, F1..F12, Space or Enter.
                     Some(("press", k)) => {
                         use winit::keyboard::{Key, NamedKey};
@@ -6482,7 +6501,7 @@ impl App {
             let map_name = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
             let out = self.egui_ctx.run_ui(input, |ui| {
                 // The game cursor on every screen (its own top layer, so draw order does not matter).
-                if let (Some(c), Some((x, y))) = (self.cursor_sprite.as_ref(), self.cursor) {
+                if let (Some(c), Some((x, y)), false) = (self.cursor_sprite.as_ref(), self.cursor, self.screenshot) {
                     let time = ui.ctx().input(|i| i.time);
                     let action = if self.front.is_some() { hud::cursor::ARROW } else { self.cursor_action };
                     c.draw(ui.ctx(), egui::pos2(x as f32 / ppp, y as f32 / ppp), action, time);
@@ -6995,7 +7014,24 @@ ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(i
             return;
         }
 
-        if let Err(e) = r.frame() {
+        if std::mem::take(&mut self.screenshot) {
+            // Rendered again offscreen (with or without the UI) and saved; the window keeps
+            // the previous frame for this one.
+            let (w, h) = r.size();
+            match r.capture_with(w, h, self.settings.screenshot_ui) {
+                Ok(img) => {
+                    let path = screenshot_path();
+                    self.hud.push_chat(ro_net::ChatKind::System, format!("Screenshot saved: {}", path.display()));
+                    // PNG (lossless), encoded off the frame loop.
+                    std::thread::spawn(move || {
+                        if let Err(e) = image::save_buffer(&path, &img.pixels, img.width, img.height, image::ColorType::Rgba8) {
+                            tracing::error!(path = %path.display(), "save screenshot: {e:#}");
+                        }
+                    });
+                }
+                Err(e) => tracing::error!("screenshot: {e:#}"),
+            }
+        } else if let Err(e) = r.frame() {
             tracing::error!("frame: {e:#}");
         }
         if let Some(fps) = self.fps.tick() {
@@ -7159,6 +7195,10 @@ impl ApplicationHandler for App {
             WindowEvent::ModifiersChanged(m) => {
                 self.alt = m.state().alt_key();
                 self.ctrl = m.state().control_key();
+            }
+            // Print Screen saves a screenshot, as in the original (Windows reports only its release).
+            WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key: winit::keyboard::Key::Named(winit::keyboard::NamedKey::PrintScreen), state: ElementState::Released, .. }, .. } => {
+                self.screenshot = true;
             }
             WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key, state: ElementState::Released, .. }, .. }
                 if self.held_skill.as_ref().is_some_and(|(_, held)| *held == logical_key) =>
@@ -7429,6 +7469,7 @@ fn main() -> anyhow::Result<()> {
         fx_test_next: None,
         alt: false,
         ctrl: false,
+        screenshot: false,
         emote_win: Default::default(),
         queued_action: None,
         fake_pointer: None,

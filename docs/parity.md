@@ -90,6 +90,7 @@ epute*.bson)
 - [x] Macro window (Alt+M, "Shortcut List"): what Alt+1..Alt+0 say, the first ten emotes by default; any emote, phrase or / command. The minimap toggle moved to Ctrl+Tab, as in the original
 - [x] Battle mode (/bm, /battlemode, msgstringtable 785-796): Q ~ O, A ~ L and Z ~ > use the second, third and fourth shortcut rows; Enter or Space opens the chat and sending a line gives the keys back. Outside it, typing over the game goes to the chat and the chat keeps the keyboard, while F1..F12 and Alt shortcuts still work
 - [x] Shortcut bar rows: F12 shows one to four rows or hides the bar (the original's extend); the page button turns which row comes first. Rows above the first are labelled with their battle mode keys
+- [x] Screenshots: Print Screen or Scroll Lock saves ScreenShot\screenNNNN.png (lossless PNG at the window's size; the original saved JPEG). Settings > Screenshots chooses whether the interface is included; without it the shot has the world alone (no windows, names, chat or cursor)
 - Unverified: the original's strings say Z ~ > is shortcut window 1 (the 3-row era); with four rows this client uses it for the fourth. The original's later key-binding window (Shortcut Settings, MSI_HOTKEYWND) is not done
 - Deliberate difference: Prontera's south avenue paving (`src/mapfix.rs`). The map mirrors its cobble rosettes across the avenue's centre line but sets the mirrored tiles half a rosette lower, so the original shows a seam down the middle; this client aligns them (307 tiles, ground drawing only)
 
