@@ -145,17 +145,17 @@
       "data/sprite/custom/samurai/tenseiga.act": "a1ac228fe27cebeb12375a2c7e9b3253f667b3e6e4ba415b1c627cd8e9c109e4",
       "data/sprite/custom/samurai/tenseiga.spr": "6032316054ea4fb4782ec282bf1230067c1ffa848cc8bc88c37599eda376a842",
       "data/sprite/아이템/samurai_kusanagi.act": "bdce179c49a9177d0d58370878b84d936621882a364dae5b555b2fe09a1f91fa",
-      "data/sprite/아이템/samurai_kusanagi.spr": "8c2512de57fd662095aa89f988be81a5943210676a6f57d54e4bb44359027d28",
+      "data/sprite/아이템/samurai_kusanagi.spr": "d52f442408586f2ebad3bf8f764ac874474e651c7a2ecaf1f8e9fa14a38cc5e1",
       "data/sprite/아이템/samurai_muramasa.act": "bdce179c49a9177d0d58370878b84d936621882a364dae5b555b2fe09a1f91fa",
-      "data/sprite/아이템/samurai_muramasa.spr": "100a82ea22ff296cce414a00b4be9ecaeff85f3e0e3c9f3127a8c3d1b78f2041",
+      "data/sprite/아이템/samurai_muramasa.spr": "92d284a2d527fa9266e682cca0021e3474ffee5c3d50e49d7efdbc8982207d94",
       "data/sprite/아이템/samurai_tenseiga.act": "bdce179c49a9177d0d58370878b84d936621882a364dae5b555b2fe09a1f91fa",
-      "data/sprite/아이템/samurai_tenseiga.spr": "6a4c25a64928a99aceb864a48da424ecaf8ea6144fdf3eb1d49a55fe0f731f0d",
+      "data/sprite/아이템/samurai_tenseiga.spr": "43c5ec69c63b80de5878555126111520e1e8660b4178b388daf44c324717eb9a",
       "data/texture/유저인터페이스/collection/samurai_kusanagi.bmp": "59b53285eba50e232b625591621aa362ede196ea5042ddaf2643b3e69f39c023",
       "data/texture/유저인터페이스/collection/samurai_muramasa.bmp": "a77fa40abe3d8ff2a9a0834267427dd12a2b3d4f48edce73b366ee4c2670230e",
       "data/texture/유저인터페이스/collection/samurai_tenseiga.bmp": "ae32fa86c9d92686d4d7e232a2c0e9acd94cadcfdbe719450d78b231127180d4",
-      "data/texture/유저인터페이스/item/samurai_kusanagi.bmp": "75713b40375ec7dea6ebe2e4cb9e49a63246a0cdc02c24125597b4ffcd2a5749",
-      "data/texture/유저인터페이스/item/samurai_muramasa.bmp": "bda8f25df1ded8457f7aeaa4e2ab9718497b95919b9a2c497b21b19d214b166a",
-      "data/texture/유저인터페이스/item/samurai_tenseiga.bmp": "e1d5c324c1ddc1ac2be503abb62105535987a46b031ac9d18c90a51ffdcd98cb"
+      "data/texture/유저인터페이스/item/samurai_kusanagi.bmp": "093da9340f78366b68a03f71b13a05409e061d80b1e121bf27789b0cab43a085",
+      "data/texture/유저인터페이스/item/samurai_muramasa.bmp": "c245f8948792a52948a264519f4a856c86e72fd2d6fc745970a6dff6b789a538",
+      "data/texture/유저인터페이스/item/samurai_tenseiga.bmp": "44fac2b7319c02659c3098a9a28a6cc4741d373d2bc9cfcda2e7b701daed4191"
     }
   },
   "selected_sources": [
@@ -190,5 +190,6 @@
     "native": "64x12 game pixels, pommel to tip 62, thicken x1.5, saturation and brightness x1.5, navy rim; source_grip [10, 5].",
     "two_handed": "No off-hand pair (\"offhand\": false); Kusanagi and Muramasa outputs rebuilt byte-identical.",
     "validation": "compile_weapons strict SPR/ACT validation passed (104 actions); compiler unit tests 18 passed; samurai client tests 9 passed. Live as Hayate: Masaru took the dual-wielded Kusanagi and Muramasa with 10 Oridecon and 10 Burning Hearts, gave Tenseiga (+0) and announced it; equipping it set both hands (equip 34)."
-  }
+  },
+  "floor_icons": "2026-10-30: inventory icons and floor sprites are area-averaged with faint coverage kept and a one-pixel dark outline (icon_picture in compile_weapons.py), like the stock ones; nearest-neighbour shrinking had left Muramasa's dropped sprite a one-to-two-pixel line on bright ground. Equipped sprites and collection pictures are unchanged."
 }

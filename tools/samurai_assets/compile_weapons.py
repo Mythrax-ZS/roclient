@@ -18,7 +18,7 @@ from pathlib import Path
 import re
 import shutil
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageFilter
 
 from compile import compile_package, raw_image, sampled_weapon_png
 from ro_formats import validate_pair, write_act, write_spr
@@ -39,6 +39,30 @@ def item_picture(source, size):
     image = image.resize(tuple(max(1, round(v * ratio)) for v in image.size), Image.Resampling.NEAREST)
     canvas = Image.new("RGBA", (size, size))
     canvas.alpha_composite(image, ((size - image.width) // 2, (size - image.height) // 2))
+    return canvas
+
+
+def icon_picture(source, size):
+    """The inventory icon and floor sprite: like the stock ones, a solid shape with a dark outline.
+
+    Shrinking by nearest neighbour drops whole rows, which left slender blades one or two pixels
+    thick and lost on bright ground, so the rotated art is area-averaged, faint coverage kept,
+    and ringed with a one-pixel outline.
+    """
+    image = source.rotate(45, Image.Resampling.NEAREST, expand=True)
+    image = image.crop(image.getchannel("A").getbbox())
+    ratio = (size - 4) / max(image.size)
+    shape = tuple(max(1, round(v * ratio)) for v in image.size)
+    small = image.convert("RGBa").resize(shape, Image.Resampling.BOX).convert("RGBA")
+    solid = small.getchannel("A").point(lambda alpha: 255 if alpha >= 48 else 0)
+    small.putalpha(solid)
+    canvas = Image.new("RGBA", (size, size))
+    canvas.alpha_composite(small, ((size - small.width) // 2, (size - small.height) // 2))
+    body = canvas.getchannel("A")
+    ring = ImageChops.subtract(body.filter(ImageFilter.MaxFilter(3)), body)
+    outline = Image.new("RGBA", (size, size), (24, 14, 14, 255))
+    outline.putalpha(ring)
+    canvas.alpha_composite(outline)
     return canvas
 
 
@@ -109,7 +133,7 @@ def compile_weapons(base_path, manifest_path, output):
             for extension in ("spr", "act"):
                 shutil.copy2(destination / f"{pair}.{extension}", armed / f"{pair}.{extension}")
         source = sampled_weapon_png(png, {"rect": entry["rect"]} if "rect" in entry else {})
-        small = item_picture(source, 32)
+        small = icon_picture(source, 32)
         save_colorkey_bmp(overlay / f"data/texture/유저인터페이스/item/{resource}.bmp", small)
         # The item description picture: the authored illustration when there is one.
         illustration = entry.get("illustration")
