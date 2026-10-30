@@ -356,7 +356,11 @@ fn fs_rays(in: VsOut) -> @location(0) vec4<f32> {
     }
     let steps = 24;
     let delta = (p.rays.xy - in.uv) / f32(steps) * 0.85;
-    var uv = in.uv;
+    // Each pixel starts its march a different fraction of a step along (interleaved
+    // gradient noise). Without it a small bright spot (an aura, a spell) is caught at the
+    // same 24 offsets by a line of pixels and shows as a trail of separate copies.
+    let jitter = fract(52.9829189 * fract(dot(in.pos.xy, vec2(0.06711056, 0.00583715))));
+    var uv = in.uv + delta * (jitter - 1.0);
     var decay = 1.0;
     var sum = vec3(0.0);
     for (var i = 0; i < steps; i++) {
