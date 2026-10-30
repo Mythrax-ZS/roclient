@@ -77,6 +77,10 @@ pub struct Actor {
     pub once: bool,
     /// Opacity (1 normal; lower while hidden or cloaked).
     pub alpha: f32,
+    /// Size multiplier about the feet (1 normal), shadow included.
+    pub scale: f32,
+    /// Colour multiplier for the sprite (not its shadow); [1, 1, 1] leaves it as drawn.
+    pub tint: [f32; 3],
 }
 
 pub(crate) struct Sheet {
@@ -253,6 +257,22 @@ pub(crate) fn actor_quads(sheets: &[Sheet], a: &Actor) -> Vec<(usize, Vec<Vertex
     if a.alpha < 1.0 {
         for v in out.iter_mut().flat_map(|(_, v)| v.iter_mut()) {
             v.color[3] *= a.alpha;
+        }
+    }
+    // Resized and recoloured classes (custom monsters drawn from stock sprites).
+    if a.scale != 1.0 {
+        for v in out.iter_mut().flat_map(|(_, v)| v.iter_mut()) {
+            v.offset = [v.offset[0] * a.scale, v.offset[1] * a.scale];
+        }
+    }
+    if a.tint != [1.0; 3] {
+        let shadow = a.shadow.map(|s| s.0);
+        for (_, v) in out.iter_mut().filter(|(id, _)| Some(*id) != shadow) {
+            for v in v.iter_mut() {
+                for c in 0..3 {
+                    v.color[c] *= a.tint[c];
+                }
+            }
         }
     }
     out

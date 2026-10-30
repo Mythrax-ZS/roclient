@@ -20,6 +20,7 @@ mod hud;
 mod iteminfo;
 mod itemlink;
 mod jobs;
+mod saga;
 mod samurai;
 mod mail;
 mod msgstr;
@@ -249,7 +250,7 @@ fn load_character(
         dir: ro_render::Dir::S,
         time_ms: 0.0,
         once: false,
-        alpha: 1.0,
+        alpha: 1.0, scale: 1.0, tint: [1.0; 3],
     })
 }
 
@@ -1312,7 +1313,10 @@ impl App {
     fn class_actor(&mut self, job: i16) -> Option<ro_render::Actor> {
         // Newer NPC classes (10000+) this client has no name or sprite for still need a
         // body to be clicked (e.g. 10243, the Zonda teleporters): a stock townsman stands in.
+        // Twin Flames Saga monsters: a stock sprite, recoloured and resized.
+        let saga = saga::look(job);
         let name = match self.class_names.get(&job) {
+            _ if saga.is_some() => saga.map(|l| l.base.to_string()).unwrap_or_default(),
             Some(n) => n.clone(),
             None if (10000..20000).contains(&(job as i32)) => {
                 tracing::debug!(job, "unknown NPC class, using a stand-in sprite");
@@ -1320,7 +1324,7 @@ impl App {
             }
             None => return None,
         };
-        let key = format!("class:{name}");
+        let key = if saga.is_some() { format!("class#{job}") } else { format!("class:{name}") };
         if let Some(a) = self.sprites.get(&key) {
             return a.clone();
         }
@@ -1345,11 +1349,13 @@ impl App {
         let merc_head = merc_weapon.as_ref().and(name.split_once('\\')).and_then(|(sex, _)| read(&format!("data\\sprite\\인간족\\머리통\\{sex}\\{}_{sex}", (job - 6017).rem_euclid(10) + 1)));
         let actor = match found {
             Some((spr, act)) => {
-                let body = r.add_sheet(&spr, act, None);
+                let palette = saga.filter(|l| l.recoloured()).map(|l| l.recolour(&spr.palette));
+                let body = r.add_sheet(&spr, act, palette.as_ref());
                 let weapon = merc_weapon.map(|(s, a)| vec![r.add_sheet(&s, a, None)]).unwrap_or_default();
                 let head = merc_head.map(|(s, a)| r.add_sheet(&s, a, None));
                 let shadow = self.sprites.get("shadow").cloned().flatten().and_then(|a| a.shadow);
-                Some(ro_render::Actor { pos: Default::default(), body, head, headgear: vec![], weapon, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
+                let (scale, tint) = saga.map_or((1.0, [1.0; 3]), |l| (l.scale, l.tint));
+                Some(ro_render::Actor { pos: Default::default(), body, head, headgear: vec![], weapon, shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0, scale, tint })
             }
             None => {
                 tracing::debug!(job, %name, "no sprite for class");
@@ -4094,7 +4100,7 @@ impl App {
         let actor = match (spr, act) {
             (Some(spr), Some(act)) => {
                 let body = r.add_sheet(&spr, act, None);
-                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: vec![], shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0 })
+                Some(ro_render::Actor { pos: Default::default(), body, head: None, headgear: vec![], weapon: vec![], shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0, scale: 1.0, tint: [1.0; 3] })
             }
             _ => None,
         };
@@ -4310,7 +4316,7 @@ impl App {
                         dir: ro_render::Dir::S,
                         time_ms: 0.0,
                         once: true,
-                        alpha: 1.0,
+                        alpha: 1.0, scale: 1.0, tint: [1.0; 3],
                     };
                     let ms = r.action_ms(body, 0).max(200.0);
                     self.sprite_fx.push((actor, ms));
@@ -5366,6 +5372,8 @@ impl App {
                 let item = |id: u32| self.inventory.items.values().find(|i| i.id == id).map(|i| (i.index, i.location));
                 let action = match step.split_once(':').or(Some((step.as_str(), ""))) {
                     Some(("equip", id)) => id.parse().ok().and_then(item).map(|(index, location)| windows::UiAction::Equip { index, location }),
+                    // equipl:id puts a one-handed weapon in the left hand (dual wielding).
+                    Some(("equipl", id)) => id.parse().ok().and_then(item).map(|(index, _)| windows::UiAction::Equip { index, location: 0x20 }),
                     // macro: apply the macro detector to ourselves (GM); captcha:text answers it.
                     Some(("macro", _)) => {
                         self.send(ro_net::Command::Captcha(ro_net::CaptchaRequest::Apply(self.account_id)));
@@ -6204,7 +6212,8 @@ impl App {
                     }
                 }
                 let level = m.kind == 0 && m.level >= AURA_LEVEL;
-                m.aura_ms = auras.push(r, self.hat_auras.get(&id).copied(), level, &a, m.aura_ms + dt, id);
+                let custom = self.hat_auras.get(&id).copied().or_else(|| saga::look(m.class).and_then(|l| l.aura));
+                m.aura_ms = auras.push(r, custom, level, &a, m.aura_ms + dt, id);
                 r.actors.push(a);
             }
             // Ambient map effects (RSW emitters, EF_* ids): torches loop in place; bubbles and
@@ -6217,7 +6226,7 @@ impl App {
                         Some(fx::MapVisual::Sprite(name)) => {
                             e.clock_ms += dt;
                             if let (true, Some(body)) = (w.shows_cell((e.pos.x / ro_render::CELL) as i32, (e.pos.z / ro_render::CELL) as i32), self.fx.sprite(r, vfs, name)) {
-                                r.actors.push(ro_render::Actor { pos: e.pos, body, head: None, headgear: vec![], weapon: vec![], shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: e.clock_ms, once: false, alpha: 1.0 });
+                                r.actors.push(ro_render::Actor { pos: e.pos, body, head: None, headgear: vec![], weapon: vec![], shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: e.clock_ms, once: false, alpha: 1.0, scale: 1.0, tint: [1.0; 3] });
                             }
                         }
                         Some(visual) => {
@@ -6310,7 +6319,7 @@ impl App {
                             dir: ro_render::Dir::from_index(action),
                             time_ms: *t,
                             once: true,
-                            alpha: 1.0,
+                            alpha: 1.0, scale: 1.0, tint: [1.0; 3],
                         });
                     }
                     self.emotes.retain(|_, (_, t)| *t < f32::MAX);

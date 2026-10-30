@@ -63,7 +63,7 @@ pub fn iteminfo(src: &[u8], name: &str) -> Vec<(u32, ItemInfo)> {
 }
 
 /// Text quest info files (`QuestInfoList = { [id] = { Title = ..., Summary = ..., Description = {...} } }`).
-pub const QUESTINFO_SOURCES: [&str; 2] = [r"System\OngoingQuestInfoList_True.lua", r"System\questinfo_custom.lua"];
+pub const QUESTINFO_SOURCES: [&str; 3] = [r"System\OngoingQuestInfoList_True.lua", r"System\samurai_questinfo.lua", r"System\questinfo_custom.lua"];
 
 /// Runs a text quest info file: (id, (title, summary, description lines)).
 pub fn questinfo(src: &[u8], name: &str) -> Vec<(u32, (String, String, Vec<String>))> {

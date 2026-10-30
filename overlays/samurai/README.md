@@ -177,3 +177,17 @@ level aura's ribbons, ground stars and sparkles with whitened textures, tinted w
 the blade's crimson (cyan in a few sparks), over a crimson-black pool so they read as
 crimson rather than pink on bright ground. It
 takes the place of the level aura, and `/aura` and `/aura2` leave it alone.
+
+## The Twin Flames Saga
+
+The Samurai's ten-chapter quest line lives on the server (rathena
+`doc/custom_jobs/twin_flames.md`). The client side is:
+
+- `System/samurai_questinfo.lua`: titles, summaries and descriptions of the saga's quests
+  (900101-900192) for the quest log.
+- `System/samurai_iteminfo.lua`: the companions' relics and quest items (900010-900021),
+  shown with stock item icons.
+- `crates/ro-client/src/saga.rs`: the saga's monsters (31900-31917). Their ids are the
+  server's own, so each is drawn from a stock monster sprite, recoloured by palette, resized
+  and tinted. Kagutsuchi-no-Yami and his servants carry an ember aura, the goddess and hers
+  a sun-and-moon one (`AuraStyle::Yami` / `AuraStyle::Amaterasu`).

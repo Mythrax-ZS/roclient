@@ -125,6 +125,10 @@ pub enum AuraStyle {
     /// Tenseiga-no-Hayate's (a custom hat effect): its blade's crimson, with the cyan of its
     /// edge. Drawn with whitened textures, so the colours here are the whole of it.
     Tenseiga,
+    /// Kagutsuchi-no-Yami, god of ashes and chains (Twin Flames Saga): embers over a black pool.
+    Yami,
+    /// Amaterasu-no-Mikazuki, the Moon-Sun Weaver: sun gold and moon silver, no shadow.
+    Amaterasu,
 }
 
 // Tenseiga's colours. Crimson stays a deep red (no blue in it), so added light reads as
@@ -133,6 +137,11 @@ const CRIMSON: [f32; 3] = [1.0, 0.03, 0.06];
 const DEEP_CRIMSON: [f32; 3] = [0.55, 0.0, 0.03];
 const CYAN: [f32; 3] = [0.1, 0.75, 1.0];
 const GOLD: [f32; 3] = [1.0, 0.82, 0.45];
+// Yami's embers and ash; Amaterasu's sun and moon.
+const EMBER: [f32; 3] = [1.0, 0.32, 0.04];
+const ASH: [f32; 3] = [0.35, 0.3, 0.3];
+const SUN: [f32; 3] = [1.0, 0.78, 0.3];
+const MOON: [f32; 3] = [0.78, 0.85, 1.0];
 
 impl AuraStyle {
     /// Ribbon colour at its foot and at its top.
@@ -143,6 +152,8 @@ impl AuraStyle {
                 (c, c)
             }
             AuraStyle::Tenseiga => ([CRIMSON[0], CRIMSON[1], CRIMSON[2], 2.0], [DEEP_CRIMSON[0], DEEP_CRIMSON[1], DEEP_CRIMSON[2], 1.6]),
+            AuraStyle::Yami => ([EMBER[0], EMBER[1], EMBER[2], 2.0], [ASH[0], ASH[1], ASH[2], 1.2]),
+            AuraStyle::Amaterasu => ([SUN[0], SUN[1], SUN[2], 1.6], [MOON[0], MOON[1], MOON[2], 1.4]),
         }
     }
 
@@ -151,6 +162,8 @@ impl AuraStyle {
         match self {
             AuraStyle::Level => ([[1.0, 1.0, 1.0, 0.8]; 2], 0.0),
             AuraStyle::Tenseiga => ([[CRIMSON[0], CRIMSON[1], CRIMSON[2], 0.7], [DEEP_CRIMSON[0], DEEP_CRIMSON[1], DEEP_CRIMSON[2], 1.0]], 1.0 / 800.0),
+            AuraStyle::Yami => ([[EMBER[0], EMBER[1], EMBER[2], 0.8], [0.5, 0.08, 0.02, 1.0]], -1.0 / 600.0),
+            AuraStyle::Amaterasu => ([[SUN[0], SUN[1], SUN[2], 0.8], [MOON[0], MOON[1], MOON[2], 0.8]], 1.0 / 1200.0),
         }
     }
 
@@ -160,6 +173,8 @@ impl AuraStyle {
         match self {
             AuraStyle::Level => None,
             AuraStyle::Tenseiga => Some([0.09, 0.0, 0.02, 0.92]),
+            AuraStyle::Yami => Some([0.03, 0.01, 0.01, 0.95]),
+            AuraStyle::Amaterasu => None,
         }
     }
 
@@ -169,6 +184,9 @@ impl AuraStyle {
             AuraStyle::Level => [80.0 / 255.0, 80.0 / 255.0, 1.0],
             // Mostly crimson embers, with the edge's cyan.
             AuraStyle::Tenseiga => [CRIMSON, CRIMSON, CYAN][j as usize % 3],
+            // Embers rising with flakes of ash.
+            AuraStyle::Yami => [EMBER, EMBER, ASH][j as usize % 3],
+            AuraStyle::Amaterasu => [SUN, MOON, GOLD][j as usize % 3],
         }
     }
 }
