@@ -6156,8 +6156,9 @@ impl App {
         if let Some(cell) = self.navi_walk.take() {
             self.request_walk(cell);
         }
-        // The unit under the cursor (its name shows if it is a monster).
+        // The unit and the floor item under the cursor (a monster's or an item's name shows only then).
         let hovered = self.pick_unit();
+        let hovered_item = self.pick_floor_item();
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         r.actors.clear();
         r.warps = self
@@ -6366,6 +6367,18 @@ impl App {
                 let emblem = (m.guild != 0).then(|| self.emblems.get(&m.guild).cloned().flatten()).flatten().map(|t| t.id());
                 let (orbs, orb_kind) = self.spirits.get(&uid).copied().unwrap_or((0, 0));
                 labels.push(hud::Label { feet, text, color, emblem, orbs, orb_kind });
+            }
+        }
+        // A floor item's name, as the original: "Jellopy: 3 ea." (msgstringtable 183).
+        if let Some((f, w)) = hovered_item.and_then(|id| self.floor.get(&id)).map(|(f, _)| f).zip(self.world.as_ref()) {
+            let (fx, fy) = floor_cell(f);
+            let (x, z) = (fx * ro_render::CELL, fy * ro_render::CELL);
+            let y = w.gat.as_ref().and_then(|g| g.height_at(fx, fy)).map_or_else(|| w.ground.height_at(x, z), |h| -h);
+            if let Some(feet) = r.project(glam::Vec3::new(x, y, z), size) {
+                let name = self.item_db.as_ref().map_or_else(|| format!("Item #{}", f.item), |d| d.name(f.item, f.identified));
+                let amount = f.amount.max(1).to_string();
+                let text = msgstr::get(183, &[&name, &amount]).unwrap_or_else(|| format!("{name}: {amount} ea."));
+                labels.push(hud::Label { feet, text, color: egui::Color32::WHITE, emblem: None, orbs: 0, orb_kind: 0 });
             }
         }
         let floaters: Vec<_> = self.floaters.iter().filter_map(|(pos, text, color, age)| Some((r.project(*pos, size)?, text.clone(), *color, *age))).collect();
