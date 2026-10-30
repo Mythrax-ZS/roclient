@@ -398,6 +398,8 @@ pub enum PartyRequest {
     Leave,
     /// CZ_REQ_EXPEL_GROUP_MEMBER: the leader removes a member.
     Expel { account_id: u32, name: String },
+    /// CZ_CHANGE_GROUP_MASTER (0x07da): the leader hands the party to a member.
+    ChangeLeader { account_id: u32 },
     /// Party chat; `speaker` is our name ("Name : text").
     Chat { speaker: String, text: String },
     GuildChat { speaker: String, text: String },
@@ -427,6 +429,7 @@ impl Encode for PartyRequest {
                 d.put_u8(*accept as u8);
             }
             PartyRequest::Leave => d.put_u16_le(0x0100),
+            PartyRequest::ChangeLeader { account_id } => put_db_packet(d, "PartyChangeLeader", &[&account_id.to_le_bytes()]),
             PartyRequest::Expel { account_id, name } => {
                 d.put_u16_le(0x0103);
                 d.put_u32_le(*account_id);
@@ -540,6 +543,13 @@ mod tests {
         let mut b = BytesMut::new();
         r.encode(&mut b);
         b
+    }
+
+    #[test]
+    fn delegating_leadership_names_the_new_leader() {
+        let b = encoded(&PartyRequest::ChangeLeader { account_id: 2000001 });
+        assert_eq!(b.len(), client_packet("PartyChangeLeader").len as usize);
+        assert_eq!(&b[..], &[0xda, 0x07, 0x81, 0x84, 0x1e, 0x00]);
     }
 
     #[test]

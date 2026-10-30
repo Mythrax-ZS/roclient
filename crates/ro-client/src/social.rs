@@ -484,7 +484,20 @@ impl Social {
                             let color = if dead { Color32::from_rgb(200, 90, 90) } else if m.online { Color32::WHITE } else { Color32::GRAY };
                             let crown = if m.leader { "[Leader] " } else { "" };
                             let tomb = if dead { " (dead)" } else { "" };
-                            ui.label(RichText::new(format!("{crown}{} (Lv {}){tomb}", m.name, m.level)).color(crate::classic::ink(color)));
+                            let label = ui.label(RichText::new(format!("{crown}{} (Lv {}){tomb}", m.name, m.level)).color(crate::classic::ink(color)));
+                            // The leader's right-click menu on a member, as in the original.
+                            if leading && m.name != c.my_name {
+                                label.context_menu(|ui| {
+                                    if ui.button("Delegate leadership").clicked() {
+                                        out.push(Command::Party(PartyRequest::ChangeLeader { account_id: m.account_id }));
+                                        ui.close();
+                                    }
+                                    if ui.button("Expel").clicked() {
+                                        out.push(Command::Party(PartyRequest::Expel { account_id: m.account_id, name: m.name.clone() }));
+                                        ui.close();
+                                    }
+                                });
+                            }
                             ui.label(RichText::new(&m.map).size(11.0).color(crate::classic::ink(Color32::GRAY)));
                             if leading && m.name != c.my_name && ui.small_button("Expel").clicked() {
                                 out.push(Command::Party(PartyRequest::Expel { account_id: m.account_id, name: m.name.clone() }));
