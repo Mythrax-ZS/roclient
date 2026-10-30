@@ -35,6 +35,8 @@ pub enum UiAction {
     Drop { index: u16, amount: u16 },
     /// Raise a base stat; 0..6 = str, agi, vit, int, dex, luk.
     RaiseStat(usize),
+    /// Raise trait stat `i` (pow, sta, wis, spl, con, crt) by one.
+    RaiseTrait(usize),
     /// Ask which equipment can take this card (inventory index).
     CardTargets(u16),
     InsertCard { card: u16, equip: u16 },
@@ -147,6 +149,8 @@ pub struct View<'a> {
     pub icons: &'a HashMap<u32, egui::TextureHandle>,
     pub skill_icons: &'a HashMap<u16, egui::TextureHandle>,
     pub stats: Option<&'a Stats>,
+    /// A 4th job: the Status window shows trait stats.
+    pub fourth_job: bool,
     pub skills: &'a [Skill],
     pub skill_names: &'a dyn Fn(&str) -> String,
     pub skill_info: Option<&'a ro_game::skills::SkillNames>,
@@ -325,6 +329,37 @@ fn tab_slots(tab: u8) -> u32 {
 }
 
 const STAT_NAMES: [&str; 6] = ["STR", "AGI", "VIT", "INT", "DEX", "LUK"];
+const TRAIT_NAMES: [&str; 6] = ["POW", "STA", "WIS", "SPL", "CON", "CRT"];
+/// What each trait raises, beside it as in the original's trait page.
+const ADVANCED_NAMES: [&str; 6] = ["P.Atk", "S.Matk", "Res", "Mres", "H.Plus", "C.Rate"];
+
+/// The 4th-job trait stats under the base stats: each trait with its bonus and a raise button
+/// (costing trait points), the values they give, and the trait points left.
+fn trait_section(ui: &mut egui::Ui, s: &Stats, skin: Option<&crate::classic::Skin>) -> Option<UiAction> {
+    let mut action = None;
+    let gray = crate::classic::ink(Color32::GRAY);
+    egui::Grid::new("traits").num_columns(5).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+        for i in 0..6 {
+            ui.label(RichText::new(TRAIT_NAMES[i]).strong().size(11.5));
+            ui.label(RichText::new(if s.trait_plus[i] != 0 { format!("{} + {}", s.traits[i], s.trait_plus[i]) } else { s.traits[i].to_string() }).size(11.5));
+            let can = s.trait_points >= s.trait_cost[i].max(1) as u32;
+            let tip = format!("Costs {} trait point{}", s.trait_cost[i], if s.trait_cost[i] == 1 { "" } else { "s" });
+            let resp = match skin {
+                Some(skin) if can => skin.button(ui, "+"),
+                Some(_) => ui.label(""),
+                None => ui.add_enabled(can, egui::Button::new("+").small()),
+            };
+            if can && resp.on_hover_text(tip).clicked() {
+                action = Some(UiAction::RaiseTrait(i));
+            }
+            ui.label(RichText::new(ADVANCED_NAMES[i]).color(gray).size(11.5));
+            ui.label(RichText::new(s.advanced[i].to_string()).size(11.5));
+            ui.end_row();
+        }
+    });
+    ui.label(RichText::new(format!("Trait points: {}", s.trait_points)).size(11.5));
+    action
+}
 
 fn item_name(db: Option<&ItemDb>, it: &InvItem) -> String {
     let base = db.map_or_else(|| format!("Item #{}", it.id), |d| d.name(it.id, it.identified));
@@ -1124,6 +1159,7 @@ impl Windows {
         if let (true, Some(skin), Some(s)) = (self.stats, v.skin, v.stats) {
             let mut open = true;
             let mut raise = None;
+            let mut trait_raise = None;
             let mut hold = self.stat_hold;
             skin.window(
                 ctx,
@@ -1179,12 +1215,27 @@ impl Windows {
                     if let Some(g) = v.guild_name.filter(|g| !g.is_empty()) {
                         p.text(at(274.0, 5), egui::Align2::RIGHT_CENTER, g, small, crate::classic::TEXT);
                     }
+                    if v.fourth_job {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(10.0);
+                            ui.vertical(|ui| {
+                                if let Some(a) = trait_section(ui, s, Some(skin)) {
+                                    trait_raise = Some(a);
+                                }
+                            });
+                        });
+                        ui.add_space(4.0);
+                    }
                 },
                 |_| {},
             );
             self.stat_hold = hold;
             if let Some(i) = raise {
                 action = Some(UiAction::RaiseStat(i));
+            }
+            if trait_raise.is_some() {
+                action = trait_raise;
             }
             self.stats = open;
             if !held {
@@ -1243,6 +1294,12 @@ impl Windows {
                 });
                 ui.separator();
                 ui.label(format!("Status points: {}", s.points));
+                if v.fourth_job {
+                    ui.separator();
+                    if let Some(a) = trait_section(ui, s, None) {
+                        action = Some(a);
+                    }
+                }
             });
             self.stats = open;
             if !held {

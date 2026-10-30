@@ -21,6 +21,9 @@ pub struct Status {
     pub max_hp: i64,
     pub sp: i64,
     pub max_sp: i64,
+    /// 4th jobs' Activity Points (SP_AP / SP_MAXAP); max 0 for everyone else.
+    pub ap: i64,
+    pub max_ap: i64,
     pub base_exp: i64,
     pub next_base_exp: i64,
     pub job_exp: i64,
@@ -48,6 +51,8 @@ impl Status {
             sp::NEXTJOBEXP => self.next_job_exp = value,
             sp::ZENY => self.zeny = value,
             12 => self.skill_points = value, // SP_SKILLPOINT
+            232 => self.ap = value,          // SP_AP
+            233 => self.max_ap = value,      // SP_MAXAP
             sp::WEIGHT => self.weight = value,
             sp::MAXWEIGHT => self.max_weight = value,
             _ => {}
@@ -334,6 +339,16 @@ impl Hud {
                 };
                 gauge(21.5, "HP", s.hp, s.max_hp);
                 gauge(42.5, "SP", s.sp, s.max_sp);
+                // 4th jobs: an AP gauge in the gap above the grey box, its numbers beside it.
+                if s.max_ap > 0 && crate::jobs::is_fourth(s.job_id) {
+                    let y = 60.0;
+                    p.text(at(108.0, y + 4.0), Align2::RIGHT_CENTER, format!("AP {} / {}", s.ap, s.max_ap), f(9.5), ink);
+                    skin.draw(&p, "gze_bg", at(112.0, y));
+                    let w = 83.0 * (s.ap as f32 / s.max_ap as f32).clamp(0.0, 1.0);
+                    if w >= 1.0 {
+                        p.rect_filled(egui::Rect::from_min_size(at(113.0, y + 1.5), Vec2::new(w, 6.0)), 3.0, Color32::from_rgb(235, 165, 40));
+                    }
+                }
                 let pct = |v: i64, n: i64| if n > 0 { v as f32 * 100.0 / n as f32 } else { 0.0 };
                 p.text(at(14.0, 78.5), Align2::LEFT_CENTER, format!("Base Lv. {}", s.base_level), f(10.5), ink);
                 p.text(at(192.0, 78.5), Align2::RIGHT_CENTER, format!("{:.1}%", pct(s.base_exp, s.next_base_exp)), f(10.5), ink);
@@ -382,6 +397,9 @@ impl Hud {
                 ui.add_space(4.0);
                 bar(ui, "HP", s.hp, s.max_hp, Color32::from_rgb(70, 190, 90), true);
                 bar(ui, "SP", s.sp, s.max_sp, Color32::from_rgb(70, 120, 220), true);
+                if s.max_ap > 0 && crate::jobs::is_fourth(s.job_id) {
+                    bar(ui, "AP", s.ap, s.max_ap, Color32::from_rgb(235, 165, 40), true);
+                }
                 ui.add_space(2.0);
                 bar(ui, "Base", s.base_exp, s.next_base_exp, Color32::from_rgb(200, 160, 60), false);
                 bar(ui, "Job", s.job_exp, s.next_job_exp, Color32::from_rgb(160, 110, 200), false);

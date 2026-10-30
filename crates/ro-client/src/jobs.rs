@@ -187,6 +187,12 @@ pub fn appearance(sprite: &str, male: bool) -> Option<Appearance> {
     Some(Appearance { body: format!("data\\sprite\\{race}\\몸통\\{sex}\\{sprite}_{sex}"), attachments: true })
 }
 
+/// 4th jobs and their mounted forms (Dragon Knight 4252 .. Sky Emperor riding 4316): the jobs
+/// with trait stats and AP.
+pub fn is_fourth(job: i16) -> bool {
+    (4252..=4316).contains(&job)
+}
+
 pub fn is_player(job: i16) -> bool {
     job < 45 || (4001..4400).contains(&job) || job == crate::samurai::JOB
 }

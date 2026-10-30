@@ -1639,6 +1639,8 @@ impl App {
                         51 => s.flee.1 = v,
                         52 => s.crit = v,
                         53 => s.aspd = (v, 0),
+                        225..=230 => s.advanced[(id - 225) as usize] = v,
+                        231 => s.trait_points = value.max(0) as u32,
                         _ => {}
                     }
                 }
@@ -2738,22 +2740,32 @@ impl App {
             }
             Stats(s) => self.stats = Some(s),
             StatRaised { stat, ok, value } => {
-                if let (true, Some(s), 13..=18) = (ok, self.stats.as_mut(), stat) {
-                    // The ack carries one byte; past 255 the full value follows in 0x0141.
-                    if value < 255 {
-                        s.base[(stat - 13) as usize] = value as u16;
+                // The ack carries one byte; past 255 the full value follows in 0x0141.
+                if let (true, Some(s), true) = (ok, self.stats.as_mut(), value < 255) {
+                    match stat {
+                        13..=18 => s.base[(stat - 13) as usize] = value as u16,
+                        219..=224 => s.traits[(stat - 219) as usize] = value as u16,
+                        _ => {}
                     }
                 }
             }
             StatBonus { stat, base, plus } => {
-                if let (Some(s), 13..=18) = (self.stats.as_mut(), stat) {
-                    s.base[(stat - 13) as usize] = base.clamp(0, u16::MAX as i32) as u16;
-                    s.plus[(stat - 13) as usize] = plus as i16;
+                if let Some(s) = self.stats.as_mut() {
+                    let base = base.clamp(0, u16::MAX as i32) as u16;
+                    match stat {
+                        13..=18 => (s.base[(stat - 13) as usize], s.plus[(stat - 13) as usize]) = (base, plus as i16),
+                        219..=224 => (s.traits[(stat - 219) as usize], s.trait_plus[(stat - 219) as usize]) = (base, plus as i16),
+                        _ => {}
+                    }
                 }
             }
             StatCost { stat, cost } => {
-                if let (Some(s), 32..=37) = (self.stats.as_mut(), stat) {
-                    s.cost[(stat - 32) as usize] = cost;
+                if let Some(s) = self.stats.as_mut() {
+                    match stat {
+                        32..=37 => s.cost[(stat - 32) as usize] = cost,
+                        247..=252 => s.trait_cost[(stat - 247) as usize] = cost,
+                        _ => {}
+                    }
                 }
             }
             Skills(list) => {
@@ -3750,6 +3762,7 @@ impl App {
             SwitchAll => self.send(Command::Switch(ro_net::SwitchRequest::All)),
             Drop { index, amount } => self.send(Command::Item(ItemRequest::Drop { index, amount })),
             RaiseStat(i) => self.send(Command::Stat(StatRequest::Raise(13 + i as u16))),
+            RaiseTrait(i) => self.send(Command::Stat(StatRequest::RaiseTrait(219 + i as u16))),
             CardTargets(card) => {
                 self.windows.card_pick = Some((card, vec![]));
                 self.send(Command::Item(ItemRequest::CardTargets { card }));
@@ -5454,6 +5467,7 @@ impl App {
                         self.fake_click = (f.len() == 2).then(|| (egui::pos2(f[0], f[1]), true));
                         None
                     }
+                    Some(("trait", i)) => i.parse().ok().filter(|i: &usize| *i < 6).map(windows::UiAction::RaiseTrait),
                     Some(("exit", _)) => {
                         self.request_exit();
                         None
@@ -5681,7 +5695,7 @@ impl App {
         if std::mem::take(&mut self.open_windows) {
             let args: Vec<String> = std::env::args().collect();
             self.quests.open = args.iter().any(|a| a == "--quest-win");
-            if args.iter().any(|a| a == "--skills-win") { self.windows.skills = true; self.windows.skill_list = args.iter().any(|a| a == "--skill-list"); self.windows.skill_tab = args.iter().skip_while(|a| *a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()); } else if args.iter().any(|a| a == "--equip-win") { self.windows.equipment = true; } else { self.windows.guild = true; }
+            if args.iter().any(|a| a == "--skills-win") { self.windows.skills = true; self.windows.skill_list = args.iter().any(|a| a == "--skill-list"); self.windows.skill_tab = args.iter().skip_while(|a| *a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()); } else if args.iter().any(|a| a == "--equip-win") { self.windows.equipment = true; } else if args.iter().any(|a| a == "--status-win") { self.windows.stats = true; } else { self.windows.guild = true; }
             self.guild.start_tab = std::env::args().skip_while(|a| a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()).unwrap_or(0);
         }
         self.update_emblems();
@@ -6178,6 +6192,7 @@ impl App {
                 icons: &self.icons,
                 skill_icons: &self.skill_icons,
                 stats: self.stats.as_ref(),
+                fourth_job: jobs::is_fourth(self.hud.status.job_id),
                 skills: &self.skills,
                 skill_names: &skill_names,
                 skill_info: Some(&self.skill_names),

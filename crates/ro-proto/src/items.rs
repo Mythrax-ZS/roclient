@@ -253,6 +253,14 @@ pub struct Stats {
     pub flee: (i16, i16),
     pub crit: i16,
     pub aspd: (i16, i16),
+    /// 4th-job trait stats pow, sta, wis, spl, con, crt (SP_POW..SP_CRT), their bonuses, the
+    /// trait points each raise costs (SP_UPOW..SP_UCRT) and the points left (SP_TRAITPOINT).
+    pub traits: [u16; 6],
+    pub trait_plus: [i16; 6],
+    pub trait_cost: [u8; 6],
+    pub trait_points: u32,
+    /// P.ATK, S.MATK, RES, MRES, H.PLUS, C.RATE (SP_PATK..SP_CRATE).
+    pub advanced: [i16; 6],
 }
 
 pub fn parse_status(data: &[u8]) -> Stats {
@@ -271,7 +279,7 @@ pub fn parse_status(data: &[u8]) -> Stats {
     let flee = (b.get_i16_le(), b.get_i16_le());
     let crit = b.get_i16_le();
     let aspd = (b.get_i16_le(), b.get_i16_le());
-    Stats { points, base, cost, plus: [0; 6], atk, matk: (min_matk, max_matk), def, mdef, hit, flee, crit, aspd }
+    Stats { points, base, cost, plus: [0; 6], atk, matk: (min_matk, max_matk), def, mdef, hit, flee, crit, aspd, ..Default::default() }
 }
 
 /// ZC_STATUS_CHANGE_ACK (0x00bc): (stat id, accepted, new value).
@@ -326,6 +334,8 @@ pub fn parse_skill_update(data: &[u8]) -> (u16, u16, u16, u16, bool) {
 pub enum StatRequest {
     /// Raise a base stat by one; `stat` is the rAthena SP_STR..SP_LUK id (13..=18).
     Raise(u16),
+    /// Raise a trait stat by one; `stat` is the rAthena SP_POW..SP_CRT id (219..=224).
+    RaiseTrait(u16),
     SkillUp(u16),
     UseSkill { skill: u16, level: u16, target: u32 },
     UseSkillAt { skill: u16, level: u16, x: u16, y: u16 },
@@ -341,6 +351,12 @@ impl Encode for StatRequest {
     fn encode(&self, d: &mut BytesMut) {
         match *self {
             StatRequest::Raise(stat) => put_db_packet(d, "StatusUp", &[&stat.to_le_bytes(), &[1]]),
+            // CZ_ADVANCED_STATUS_CHANGE (0x0b24): <type>.W <amount>.W, one point at a time.
+            StatRequest::RaiseTrait(stat) => {
+                d.put_u16_le(0x0b24);
+                d.put_u16_le(stat);
+                d.put_u16_le(1);
+            }
             StatRequest::SkillUp(skill) => put_db_packet(d, "SkillUp", &[&skill.to_le_bytes()]),
             StatRequest::UseSkill { skill, level, target } => {
                 put_db_packet(d, "UseSkillToId", &[&level.to_le_bytes(), &skill.to_le_bytes(), &target.to_le_bytes()])
@@ -407,6 +423,7 @@ mod tests {
         assert_eq!(size(&ItemRequest::PickUp { floor_id: 3 }), client_packet("TakeItem").len as usize);
         assert_eq!(size(&ItemRequest::Equip { index: 2, location: 256 }), 8);
         assert_eq!(size(&StatRequest::Raise(13)), client_packet("StatusUp").len as usize);
+        assert_eq!(size(&StatRequest::RaiseTrait(219)), client_packet("traitstatus_up").len as usize);
         assert_eq!(size(&StatRequest::UseSkill { skill: 1, level: 1, target: 1 }), client_packet("UseSkillToId").len as usize);
     }
 }
