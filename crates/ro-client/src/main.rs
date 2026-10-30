@@ -57,6 +57,7 @@ mod companions;
 mod emblem;
 mod emotes;
 mod settings;
+mod shortcuts;
 mod skilltree;
 mod status_icons;
 mod stores;
@@ -1104,6 +1105,8 @@ struct App {
     screenshot: bool,
     /// The Emotion List (Alt+L) and the macro window (Alt+M).
     emote_win: emotes::EmoteWindow,
+    /// Shortcut Information: every key and what it does (from the Esc menu).
+    shortcut_win: shortcuts::ShortcutWindow,
     queued_action: Option<windows::UiAction>,
     /// A pointer move the test script queued (UI points); egui keeps the position.
     fake_pointer: Option<egui::Pos2>,
@@ -3815,6 +3818,11 @@ impl App {
                 self.press_hotkey(slot, logical_key.clone());
             }
             Key::Character(c) if self.alt => self.alt_key(&c.to_ascii_lowercase()),
+            // Insert: sit down or stand up, as in the original.
+            Key::Named(NamedKey::Insert) => {
+                let sitting = self.player.as_ref().is_some_and(|p| p.sitting);
+                self.send(ro_net::Command::Sit(!sitting));
+            }
             // Scroll Lock also takes a screenshot, as in the original.
             Key::Named(NamedKey::ScrollLock) => self.screenshot = true,
             // Ctrl+Tab: the minimap on or off.
@@ -4393,6 +4401,7 @@ impl App {
                 self.reputation.open = !self.reputation.open;
             }
             "opts" => self.game_opts.open = !self.game_opts.open,
+            "keys" => self.shortcut_win.open = !self.shortcut_win.open,
             "rank" => self.send(ro_net::Command::Ranking(self.ranking.kind)),
             "roulette" => self.open_roulette(),
             "battle" => {
@@ -5688,6 +5697,8 @@ impl App {
                         let named = match k {
                             "Space" => Some(NamedKey::Space),
                             "Enter" => Some(NamedKey::Enter),
+                            "Escape" => Some(NamedKey::Escape),
+                            "Insert" => Some(NamedKey::Insert),
                             "F11" => Some(NamedKey::F11),
                             "F12" => Some(NamedKey::F12),
                             f => f.strip_prefix('F').and_then(|n| n.parse::<usize>().ok()).and_then(|n| [NamedKey::F1, NamedKey::F2, NamedKey::F3, NamedKey::F4, NamedKey::F5, NamedKey::F6, NamedKey::F7, NamedKey::F8, NamedKey::F9].get(n.wrapping_sub(1)).copied()),
@@ -6744,6 +6755,10 @@ impl App {
                     self.queued_commands.extend(reqs.into_iter().map(ro_net::Command::Market));
                 }
                 let mut macros_changed = false;
+                self.shortcut_win.show(
+                    ui.ctx(),
+                    shortcuts::Ctx { battle_mode: self.settings.battle_mode, battle_keys: &self.settings.battle_keys, battle_space_chat: self.settings.battle_space_chat, playstation: self.pad.playstation },
+                );
                 if let Some(line) = self.emote_win.show(ui.ctx(), self.vfs.as_ref(), &mut self.settings.macros, &mut macros_changed) {
                     self.queued_chat.push(line);
                 }
@@ -6809,6 +6824,10 @@ impl App {
                         Some(hud::EscChoice::Options) => {
                             self.esc_menu = false;
                             self.windows.settings = true;
+                        }
+                        Some(hud::EscChoice::Shortcuts) => {
+                            self.esc_menu = false;
+                            self.shortcut_win.open = true;
                         }
                         // As request_exit (self is borrowed here): ask the server before leaving.
                         Some(hud::EscChoice::Exit) => {
@@ -7540,6 +7559,7 @@ fn main() -> anyhow::Result<()> {
         ctrl: false,
         screenshot: false,
         emote_win: Default::default(),
+        shortcut_win: Default::default(),
         queued_action: None,
         fake_pointer: None,
         fake_click: None,
