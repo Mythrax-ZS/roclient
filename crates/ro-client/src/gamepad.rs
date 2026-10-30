@@ -107,16 +107,24 @@ impl Pad {
         while let Some(ev) = g.next_event() {
             match ev.event {
                 EventType::ButtonPressed(b, _) => {
+                    if !self.used {
+                        tracing::info!(name = g.gamepad(ev.id).name(), button = ?b, "controller in use");
+                    }
                     self.active = Some(ev.id);
-                    self.detected = family(g, self.active);
                     self.used = true;
                     frame.pressed.push(b);
                 }
-                EventType::Connected => tracing::info!(name = g.gamepad(ev.id).name(), "controller connected"),
+                EventType::Connected => {
+                    let p = g.gamepad(ev.id);
+                    tracing::info!(name = p.name(), vendor = ?p.vendor_id(), product = ?p.product_id(), "controller connected");
+                    self.active.get_or_insert(ev.id);
+                }
                 EventType::Disconnected if self.active == Some(ev.id) => self.active = None,
                 EventType::AxisChanged(..) if self.active.is_none() => self.active = Some(ev.id),
                 _ => {}
             }
+            // Controllers announce themselves after start-up: label for them as they do.
+            self.detected = family(g, self.active);
         }
         let Some(pad) = self.active.map(|id| g.gamepad(id)) else { return frame };
         frame.left = deadzone(Vec2::new(pad.value(Axis::LeftStickX), pad.value(Axis::LeftStickY)));
@@ -125,6 +133,9 @@ impl Pad {
         frame.lt = trigger(Button::LeftTrigger2);
         frame.rt = trigger(Button::RightTrigger2);
         if frame.left != Vec2::ZERO || frame.right != Vec2::ZERO {
+            if !self.used {
+                tracing::info!(name = pad.name(), left = ?frame.left, right = ?frame.right, "controller in use (sticks)");
+            }
             self.used = true;
         }
         frame

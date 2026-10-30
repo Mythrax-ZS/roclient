@@ -6490,10 +6490,10 @@ impl App {
                 for e in &mut self.map_fx {
                     let near = e.pos.distance(me) < fx::MAP_FX_RANGE * ro_render::CELL;
                     match e.visual {
-                        Some(fx::MapVisual::Sprite(name)) => {
+                        Some(fx::MapVisual::Sprite(name, lift)) => {
                             e.clock_ms += dt;
                             if let (true, Some(body)) = (w.shows_cell((e.pos.x / ro_render::CELL) as i32, (e.pos.z / ro_render::CELL) as i32), self.fx.sprite(r, vfs, name)) {
-                                r.actors.push(ro_render::Actor { pos: e.pos, body, head: None, headgear: vec![], weapon: vec![], shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: e.clock_ms, once: false, alpha: 1.0, scale: 1.0, tint: [1.0; 3] });
+                                r.actors.push(ro_render::Actor { pos: e.pos + glam::Vec3::Y * lift, body, head: None, headgear: vec![], weapon: vec![], shadow: None, action: 0, dir: ro_render::Dir::S, time_ms: e.clock_ms, once: false, alpha: 1.0, scale: 1.0, tint: [1.0; 3] });
                             }
                         }
                         Some(visual) => {

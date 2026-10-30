@@ -208,8 +208,9 @@ pub fn misc_effect(effect: u32) -> Option<&'static str> {
 pub enum MapVisual {
     /// One of these STRs, chosen at random, fired once per emit.
     Str(&'static [&'static str]),
-    /// A sprite effect looping in place for as long as the map is loaded.
-    Sprite(&'static str),
+    /// A sprite effect looping in place for as long as the map is loaded, raised this many
+    /// world units above its RSW position.
+    Sprite(&'static str, f32),
     /// Code-drawn drifting motes (fireflies).
     Motes,
 }
@@ -217,7 +218,9 @@ pub enum MapVisual {
 pub fn map_effect(id: i32) -> Option<MapVisual> {
     Some(match id {
         45 => MapVisual::Motes,
-        47 => MapVisual::Sprite("torch_01"),
+        // EF_TORCH: the original raises it 10 units (m_deltaPos2.y = -10), onto the brazier
+        // it burns in (Payon Cave's stand is 8.7 tall).
+        47 => MapVisual::Sprite("torch_01", 10.0),
         109 => MapVisual::Str(&["bubble1", "bubble2", "bubble3", "bubble4"]),
         _ => return None,
     })

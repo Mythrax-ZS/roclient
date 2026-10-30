@@ -113,7 +113,17 @@ impl AudioHaptics {
             let name = d.description().map(|n| n.name().to_ascii_lowercase()).unwrap_or_default();
             (name.contains("dualsense") || name.contains("wireless controller")) && d.supported_output_configs().is_ok_and(|mut c| c.any(|c| c.channels() >= 4))
         })?;
-        let range = device.supported_output_configs().ok()?.filter(|c| c.channels() >= 4).max_by_key(|c| c.channels())?;
+        // Four channels or more, preferably at 48 kHz in floating point (the controller's own
+        // format), else as near to it as the device goes.
+        let ranges: Vec<_> = device.supported_output_configs().ok()?.filter(|c| c.channels() >= 4).collect();
+        let fits = |c: &&rodio::cpal::SupportedStreamConfigRange| (c.min_sample_rate()..=c.max_sample_rate()).contains(&48_000);
+        let range = ranges
+            .iter()
+            .filter(fits)
+            .find(|c| c.sample_format() == rodio::cpal::SampleFormat::F32)
+            .or_else(|| ranges.iter().find(fits))
+            .or_else(|| ranges.iter().min_by_key(|c| c.min_sample_rate().abs_diff(48_000)))?
+            .clone();
         let rate = 48_000u32.clamp(range.min_sample_rate(), range.max_sample_rate());
         let channels = range.channels() as usize;
         let config = rodio::cpal::StreamConfig { channels: range.channels(), sample_rate: rate, buffer_size: rodio::cpal::BufferSize::Default };
