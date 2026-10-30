@@ -5468,6 +5468,10 @@ impl App {
                         None
                     }
                     Some(("trait", i)) => i.parse().ok().filter(|i: &usize| *i < 6).map(windows::UiAction::RaiseTrait),
+                    Some(("revive", _)) => {
+                        self.send(ro_net::Command::AutoRevive);
+                        None
+                    }
                     Some(("exit", _)) => {
                         self.request_exit();
                         None
@@ -6493,8 +6497,16 @@ impl App {
                 }
                 if self.dead {
                     let hint = self.pad.in_use().then_some(if self.pad.playstation { "Cross" } else { "A" });
-                    if hud::death_window(ui.ctx(), hint) {
-                        self.queued_commands.push(ro_net::Command::Restart(0));
+                    // A Token of Siegfried in any of its forms, or Light of Regene, revives in place.
+                    const TOKENS: [u32; 4] = [7621, 6293, 6316, 25310];
+                    let token = self.inventory.items.values().find(|i| TOKENS.contains(&i.id) && i.equipped == 0);
+                    let revive = token
+                        .map(|t| self.item_db.as_ref().map_or_else(|| "Token of Siegfried".to_string(), |db| db.name(t.id, true)))
+                        .or_else(|| self.buffs.has("EFST_LIGHT_OF_REGENE").then(|| "Light of Regene".to_string()));
+                    match hud::death_window(ui.ctx(), hint, revive.as_deref()) {
+                        Some(hud::DeathChoice::SavePoint) => self.queued_commands.push(ro_net::Command::Restart(0)),
+                        Some(hud::DeathChoice::Revive) => self.queued_commands.push(ro_net::Command::AutoRevive),
+                        None => {}
                     }
                 }
                 if let Some(feet) = pad_marker {

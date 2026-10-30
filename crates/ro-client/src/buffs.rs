@@ -64,6 +64,11 @@ impl Buffs {
     }
 
     /// A status icon turned on or off for us.
+    /// Whether a status is on, by its EFST name ("EFST_LIGHT_OF_REGENE").
+    pub fn has(&self, name: &str) -> bool {
+        self.active.keys().any(|id| self.names.get(id).is_some_and(|n| n == name))
+    }
+
     pub fn set(&mut self, id: u16, on: bool, remain_ms: Option<u32>) {
         if on {
             self.active.insert(id, remain_ms.map(|ms| Instant::now() + std::time::Duration::from_millis(ms as u64)));

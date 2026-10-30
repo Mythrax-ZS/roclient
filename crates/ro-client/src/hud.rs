@@ -787,8 +787,16 @@ pub fn target_marker(ctx: &egui::Context, feet: glam::Vec2, ppp: f32, aiming: bo
 
 /// Shown while dead, like the original client's restart window: return to the save point,
 /// or wait here for a resurrection. Returns true when the player chose to return.
-pub fn death_window(ctx: &egui::Context, pad_hint: Option<&str>) -> bool {
-    let mut go = false;
+pub enum DeathChoice {
+    SavePoint,
+    /// Get up where we fell (CZ_STANDING_RESURRECTION).
+    Revive,
+}
+
+/// The death window. `revive` names what can revive us on the spot (a Token of Siegfried,
+/// Light of Regene), which adds a button for it as in the original.
+pub fn death_window(ctx: &egui::Context, pad_hint: Option<&str>, revive: Option<&str>) -> Option<DeathChoice> {
+    let mut go = None;
     egui::Window::new("death")
         .title_bar(false)
         .resizable(false)
@@ -809,7 +817,13 @@ pub fn death_window(ctx: &egui::Context, pad_hint: Option<&str>) -> bool {
                     None => "Return to Save Point".to_string(),
                 };
                 if ui.add(egui::Button::new(RichText::new(label).size(14.0)).min_size(Vec2::new(220.0, 30.0))).clicked() {
-                    go = true;
+                    go = Some(DeathChoice::SavePoint);
+                }
+                if let Some(with) = revive {
+                    ui.add_space(4.0);
+                    if ui.add(egui::Button::new(RichText::new(format!("Revive ({with})")).size(14.0)).min_size(Vec2::new(220.0, 30.0))).clicked() {
+                        go = Some(DeathChoice::Revive);
+                    }
                 }
             });
         });

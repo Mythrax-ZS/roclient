@@ -797,6 +797,9 @@ pub enum Command {
     Restart(u8),
     /// Ask to leave the game (Esc menu Exit); the answer is Event::DisconnectAck.
     Quit,
+    /// CZ_STANDING_RESURRECTION (0x0292): get up where we fell, using a Token of Siegfried
+    /// (or Light of Regene).
+    AutoRevive,
     /// Talk to an NPC or answer its dialog.
     Npc { npc: u32, reply: NpcReply },
     /// Say something in public chat.
@@ -1043,6 +1046,7 @@ impl MapSession {
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
                     Some(Command::Quit) => self.send(CzReqDisconnect).await?,
+                    Some(Command::AutoRevive) => self.send(CzStandingResurrection).await?,
                     // Login and character-select screen commands mean nothing once in game.
                     Some(Command::Login { .. } | Command::SelectServer(_) | Command::Char(_) | Command::Pin(_) | Command::SelectChar(_)) => {}
                     Some(Command::Npc { npc, reply }) => self.send(CzNpc { npc, reply: &reply }).await?,

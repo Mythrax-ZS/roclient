@@ -1050,6 +1050,15 @@ impl Encode for CzRestart {
     }
 }
 
+/// CZ_STANDING_RESURRECTION (0x0292): revive in place with a Token of Siegfried.
+pub struct CzStandingResurrection;
+
+impl Encode for CzStandingResurrection {
+    fn encode(&self, d: &mut BytesMut) {
+        d.put_u16_le(0x0292);
+    }
+}
+
 /// CZ_REQ_DISCONNECT (0x018a): ask to leave the game. The server answers ZC_ACK_REQ_DISCONNECT:
 /// 0 go ahead, 1 not yet (within prevent_logout of combat).
 pub struct CzReqDisconnect;
