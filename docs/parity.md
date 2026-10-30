@@ -82,6 +82,7 @@ epute*.bson)
 - [x] NPC classes whose sprite iRO lacks (e.g. 10243 4_m_drzonda01, Zonda teleporters) get a stand-in body so they stay usable
 - Note: `setnpcdisplay` to a monster class makes rAthena send class 0 (a Novice); the original client shows the same
 - [x] ZC_ACK_REQNAMEALL: party, guild and rank under player names
+- [x] Monster names on hover: a monster's name shows under it while the cursor is over it (players and NPCs always show theirs)
 - [x] ZC_EQUIPMENT_EFFECT: hat effects (145 from hateffectinfo), following the wearer
 - [x] Equipment switch set (Switch tab: add, remove, swap; ZC_EQUIPSWITCH_LIST/ADD/REMOVE/REPLY)
 - [x] Level aura for players reported at level 99+ (clevel from the spawn packets; EF_LEVEL99 ribbons, EF_LEVEL99_2 ground star, EF_LEVEL99_3 sparkles, code-drawn after roBrowser's reconstruction); /aura simplifies it, /aura2 turns it off. rAthena's `max_lv` / `aura_lv` / `client_limit_unit_lv` choose who gets it

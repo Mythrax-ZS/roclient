@@ -789,14 +789,15 @@ impl Mob {
     }
 
     /// Name label colour, or None when the original client would not show one
-    /// (monster names appear on hover only).
-    fn label_color(&self) -> Option<egui::Color32> {
+    /// (a monster's name shows only while the cursor is over it).
+    fn label_color(&self, hovered: bool) -> Option<egui::Color32> {
         if self.name.is_empty() {
             return None;
         }
         match self.kind {
             0 => Some(egui::Color32::WHITE),
             1 | 6 => Some(egui::Color32::from_rgb(160, 225, 255)),
+            5 if hovered && self.dying.is_none() => Some(egui::Color32::WHITE),
             _ => None,
         }
     }
@@ -6155,6 +6156,8 @@ impl App {
         if let Some(cell) = self.navi_walk.take() {
             self.request_walk(cell);
         }
+        // The unit under the cursor (its name shows if it is a monster).
+        let hovered = self.pick_unit();
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         r.actors.clear();
         r.warps = self
@@ -6347,7 +6350,7 @@ impl App {
         let mut labels = vec![];
         for (uid, m) in self.player.iter().map(|p| (self.account_id, p)).chain(self.units.iter().map(|(i, m)| (*i, m))) {
             let shown = m.actor.alpha > 0.01 && self.world.as_ref().is_none_or(|w| w.shows_cell(m.walker.cell.0, m.walker.cell.1));
-            if let (true, Some(color), Some(feet)) = (shown, m.label_color(), r.project(m.actor.pos, size)) {
+            if let (true, Some(color), Some(feet)) = (shown, m.label_color(hovered == Some(uid)), r.project(m.actor.pos, size)) {
                 // As the original: "Name (Party)", then "Guild [Rank]" on a second line.
                 let mut text = m.name.clone();
                 if let Some((party, guild, rank)) = &m.titles {
