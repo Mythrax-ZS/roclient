@@ -1105,6 +1105,12 @@ struct App {
     audio_haptics: Option<haptics::AudioHaptics>,
     haptics: haptics::Haptics,
     heartbeat_ms: f32,
+    /// A vibration test plays for this long, controller in use or not.
+    haptics_test_ms: f32,
+    /// The route rumble last went by, for the log.
+    haptics_route: &'static str,
+    /// The DualSense HD haptics setting as last applied.
+    haptics_hd: bool,
     /// The touchpad as last read, where it is steering the pointer (window pixels), the
     /// two-finger slide so far, and the mouse button a touchpad press is holding.
     touch_prev: hidpad::Touch,
@@ -4963,6 +4969,7 @@ impl App {
     /// Plays a controller feedback cue, when a controller is being played with.
     fn feel(&mut self, c: haptics::Cue) {
         if self.pad.in_use() && self.settings.vibration > 0.0 {
+            tracing::debug!(?c, "vibration cue");
             self.haptics.play(c);
         }
     }
@@ -4996,9 +5003,17 @@ impl App {
             if self.hid_retry_ms <= 0.0 {
                 self.hid_retry_ms = 3000.0;
                 self.hid = hidpad::HidPad::open(want, self.pad.detected);
-                if self.hid.as_ref().is_some_and(|h| h.kind == hidpad::Kind::DualSense) {
+                if self.settings.dualsense_hd && self.hid.as_ref().is_some_and(|h| h.kind == hidpad::Kind::DualSense) {
                     self.audio_haptics = haptics::AudioHaptics::open();
                 }
+            }
+        }
+        // The DualSense switched between HD haptics and classic rumble.
+        if self.haptics_hd != self.settings.dualsense_hd {
+            self.haptics_hd = self.settings.dualsense_hd;
+            self.audio_haptics = None;
+            if self.haptics_hd && self.hid.as_ref().is_some_and(|h| h.kind == hidpad::Kind::DualSense) {
+                self.audio_haptics = haptics::AudioHaptics::open();
             }
         }
         let (hp, max) = (self.hud.status.hp, self.hud.status.max_hp);
@@ -5012,8 +5027,16 @@ impl App {
         } else {
             self.heartbeat_ms = 0.0;
         }
-        let (mut low, mut high) = self.haptics.frame(dt, self.settings.vibration);
-        if !self.pad.in_use() {
+        if std::mem::take(&mut self.settings.vibration_test) {
+            tracing::info!(connected = self.pad.connected(), hid = ?self.hid.as_ref().map(|h| h.kind), audio = self.audio_haptics.is_some(), "vibration test");
+            self.haptics.play(haptics::Cue::Hit(0.6));
+            self.haptics.play(haptics::Cue::Crit);
+            self.haptics.play(haptics::Cue::LevelUp);
+            self.haptics_test_ms = 800.0;
+        }
+        self.haptics_test_ms -= dt;
+        let (mut low, mut high) = self.haptics.frame(dt, self.settings.vibration.max(if self.haptics_test_ms > 0.0 { 0.5 } else { 0.0 }));
+        if !self.pad.in_use() && self.haptics_test_ms <= 0.0 {
             (low.amp, high.amp) = (0.0, 0.0);
         }
         // The light bar shows HP: green, amber below half, red below a quarter, pulsing near death.
@@ -5031,12 +5054,22 @@ impl App {
             let pulse = if !self.dead && share < 0.1 { 0.35 + 0.65 * (secs * 3.0).sin().abs() } else { 1.0 };
             base.map(|c| (c * pulse * 255.0) as u8)
         });
+        let route = match (&self.audio_haptics, &self.hid) {
+            (Some(_), _) => "DualSense haptics (audio)",
+            (None, Some(_)) => "controller HID rumble",
+            (None, None) => "gilrs rumble",
+        };
+        if (low.amp > 0.0 || high.amp > 0.0) && route != self.haptics_route {
+            tracing::info!(route, "vibration");
+            self.haptics_route = route;
+        }
+        let audio_haptics = self.audio_haptics.is_some();
         if let Some(a) = &self.audio_haptics {
             a.set(low, high);
             (low.amp, high.amp) = (0.0, 0.0);
         }
         match self.hid.as_mut() {
-            Some(h) => h.set(hidpad::Output { low, high, light }),
+            Some(h) => h.set(hidpad::Output { low, high, light, audio_haptics }),
             None => self.pad.set_rumble(low.amp, high.amp),
         }
     }
@@ -5950,6 +5983,11 @@ impl App {
                             _ => padglyph::Style::Xbox,
                         };
                         self.pad_preview = Some((style, it.next().and_then(|r| r.parse().ok())));
+                        None
+                    }
+                    // vibetest: Settings > Controls > Vibration > Test.
+                    Some(("vibetest", _)) => {
+                        self.settings.vibration_test = true;
                         None
                     }
                     Some(("keys", t)) => {
@@ -7803,6 +7841,9 @@ fn main() -> anyhow::Result<()> {
         audio_haptics: None,
         haptics: Default::default(),
         heartbeat_ms: 0.0,
+        haptics_test_ms: 0.0,
+        haptics_route: "",
+        haptics_hd: true,
         touch_prev: Default::default(),
         touch_pos: None,
         touch_slide: glam::Vec2::ZERO,

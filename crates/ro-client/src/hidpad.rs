@@ -46,6 +46,9 @@ pub struct Output {
     pub high: Band,
     /// Light bar colour (Sony pads); None leaves it as the system set it.
     pub light: Option<[u8; 3]>,
+    /// A DualSense's actuators are being played as audio: leave its rumble emulation off,
+    /// which would otherwise take them over.
+    pub audio_haptics: bool,
 }
 
 /// A finger on the touchpad, scaled to 0..1 across and down.
@@ -272,10 +275,13 @@ fn sony_crc(report: &[u8]) -> u32 {
 /// DualSense output: rumble (emulated on its haptic actuators), light bar and player light.
 fn dualsense_report(bt: bool, seq: &mut u8, o: &Output, fade_startup_light: bool) -> Vec<u8> {
     let mut c = [0u8; 47];
-    // valid_flag0: compatible vibration, haptics select.
-    c[0] = 0x01 | 0x02;
-    c[2] = amp8(o.high.amp); // right, light actuator
-    c[3] = amp8(o.low.amp); // left, heavy
+    // valid_flag0: rumble emulation, and rumble instead of the haptics audio. Both stay off
+    // while the actuators play our audio: either one silences it.
+    if !o.audio_haptics {
+        c[0] = 0x01 | 0x02;
+        c[2] = amp8(o.high.amp); // right, light actuator
+        c[3] = amp8(o.low.amp); // left, heavy
+    }
     if let Some([r, g, b]) = o.light {
         // valid_flag1: light bar and player indicator.
         c[1] = 0x04 | 0x10;
@@ -284,8 +290,10 @@ fn dualsense_report(bt: bool, seq: &mut u8, o: &Output, fade_startup_light: bool
         c[45] = g;
         c[46] = b;
     }
-    // valid_flag2: the newer firmware's vibration flag, and the light bar setup.
-    c[38] = 0x04;
+    // valid_flag2: the newer firmware's rumble emulation flag, and the light bar setup.
+    if !o.audio_haptics {
+        c[38] = 0x04;
+    }
     if fade_startup_light {
         c[38] |= 0x02;
         c[41] = 0x02;

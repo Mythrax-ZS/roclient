@@ -55,11 +55,17 @@ pub struct Settings {
     pub touchpad: bool,
     /// A PlayStation pad's light bar shows our HP.
     pub light_bar: bool,
+    /// A wired DualSense plays vibration on its haptic actuators (HD); off, as classic
+    /// rumble emulation.
+    pub dualsense_hd: bool,
+    /// The vibration test button was pressed (not saved).
+    #[serde(skip)]
+    pub vibration_test: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false, pad_style: Default::default(), vibration: 1.0, touchpad: true, light_bar: true }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false, pad_style: Default::default(), vibration: 1.0, touchpad: true, light_bar: true, dualsense_hd: true, vibration_test: false }
     }
 }
 
@@ -196,7 +202,7 @@ impl Settings {
             });
         });
         ctx.data_mut(|d| d.insert_temp(tab_id, tab));
-        let changed = *self != before;
+        let changed = Settings { vibration_test: false, ..self.clone() } != before;
         if changed {
             self.save();
         }
@@ -260,13 +266,23 @@ impl Settings {
         }
         ui.end_row();
         ui.label("Vibration");
-        ui.add(egui::Slider::new(&mut self.vibration, 0.0..=1.0).custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{:.0}%", v * 100.0) }))
-            .on_hover_text("Rumble when you are hit, land a critical, level up or run low on HP. HD rumble on Switch Pro Controllers; a wired DualSense uses its haptic motors.");
+        ui.horizontal(|ui| {
+            ui.add(egui::Slider::new(&mut self.vibration, 0.0..=1.0).custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{:.0}%", v * 100.0) }))
+                .on_hover_text("Rumble when you are hit, land a critical, level up or run low on HP. HD rumble on Switch Pro Controllers; a wired DualSense uses its haptic motors.");
+            if ui.button("Test").on_hover_text("A hit, a critical and a level up, on the controller in use").clicked() {
+                self.vibration_test = true;
+            }
+        });
         ui.end_row();
         ui.label("PlayStation");
         ui.vertical(|ui| {
             ui.checkbox(&mut self.touchpad, "Touchpad moves the pointer").on_hover_text("Press to click, two fingers to right-click; swipe two fingers across to change the shortcut row, up or down to zoom");
             ui.checkbox(&mut self.light_bar, "Light bar shows HP");
+            ui.horizontal(|ui| {
+                ui.label("DualSense");
+                ui.selectable_value(&mut self.dualsense_hd, true, "HD haptics").on_hover_text("Wired: vibration played on its haptic motors, as PS5 games do");
+                ui.selectable_value(&mut self.dualsense_hd, false, "Classic rumble").on_hover_text("Rumble emulation, as over Bluetooth");
+            });
         });
         ui.end_row();
         section(ui, "Shortcut bar");
