@@ -508,6 +508,19 @@ mod tests {
         // Server direction 3 (south-west) is sprite direction 1.
         assert_eq!((a.x, a.y, a.dir), (150, 200, 1));
     }
+
+    #[test]
+    fn unit_level() {
+        // packet_idle_unit, packet_spawn_unit (no state byte) and packet_unit_walking.
+        for (opcode, len, clevel_at, name_at) in [(0x09ffu16, 108, 69, 84), (0x09fe, 107, 68, 83), (0x09fd, 114, 75, 90)] {
+            let mut d = vec![0u8; len];
+            d[..2].copy_from_slice(&opcode.to_le_bytes());
+            d[clevel_at..clevel_at + 2].copy_from_slice(&175u16.to_le_bytes());
+            d[name_at..name_at + 6].copy_from_slice(b"Hayate");
+            let u = parse_unit(opcode, &d).unwrap();
+            assert_eq!((u.level, u.name.as_str()), (175, "Hayate"), "{opcode:#06x}");
+        }
+    }
 }
 
 // ---------------------------------------------------------------- map: movement
@@ -591,6 +604,9 @@ pub struct UnitInfo {
     /// Guild id (0 none) and its emblem version.
     pub guild: u32,
     pub emblem: u16,
+    /// Base level as the server reports it (clif_setlevel); players at 99 or more show
+    /// the level aura. NPCs and pets report 0.
+    pub level: u16,
 }
 
 /// ZC packets packet_idle_unit (0x09ff), packet_spawn_unit (0x09fe) and
@@ -640,6 +656,8 @@ pub fn parse_unit(opcode: u16, data: &[u8]) -> Option<UnitInfo> {
         pos,
         guild: if data.len() >= palette_at + 14 { u32_at(palette_at + 8) } else { 0 },
         emblem: if data.len() >= palette_at + 14 { u16_at(palette_at + 12) } else { 0 },
+        // clevel sits 15 bytes before the name (font, maxHP, HP, isBoss and body follow it).
+        level: u16_at(name_at - 15),
     })
 }
 

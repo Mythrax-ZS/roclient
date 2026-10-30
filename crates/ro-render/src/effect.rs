@@ -80,6 +80,111 @@ pub enum Shape {
     Motes { drift: Vec3, size: f32 },
     /// A flat rectangle on the ground, `size` cells across (skill areas being cast).
     Area { size: (f32, f32) },
+    /// One layer of the level 99 aura, held under its owner while it stands in view
+    /// (`time_ms` runs from when it appeared; `seed` varies the sparkles between owners).
+    Aura { layer: AuraLayer, seed: u32 },
+}
+
+/// The level 99 aura's layers. The original builds them in code; the shapes and numbers
+/// follow roBrowser's reconstruction of its Level99 effects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuraLayer {
+    /// EF_LEVEL99: three ribbons (effect\ring_blue.tga) spiralling up and around.
+    Swirl,
+    /// EF_LEVEL99_2: two light stars (effect\pikapika2.bmp) on the ground, breathing.
+    Ground,
+    /// EF_LEVEL99_3: blue motes (effect\whitelight.tga) drifting up from the feet.
+    Sparkles,
+}
+
+/// The original's effect clock: one step every 25 ms.
+const AURA_TICK_MS: f32 = 25.0;
+/// roBrowser's scale from the original's aura units to cells.
+const AURA_UNIT: f32 = 0.22 * CELL;
+
+fn aura(layer: AuraLayer, seed: u32, pos: Vec3, time_ms: f32, eye: Vec3, out: &mut Vec<Vertex>) {
+    let ticks = time_ms / AURA_TICK_MS;
+    match layer {
+        AuraLayer::Swirl => {
+            const DIVISIONS: usize = 21;
+            // The ribbons grow to full height over the first 90 steps.
+            let grow = ticks.min(90.0).to_radians().sin();
+            let color = [100.0 / 255.0, 100.0 / 255.0, 1.0, 120.0 / 255.0];
+            for band in 0..3 {
+                let b = band as f32;
+                let start = b * 90.0 + ticks * (b + 3.0);
+                let radius = (3.9 + 0.2 * b) * AURA_UNIT * 0.6;
+                let height = (15.0 - 2.0 * b) * AURA_UNIT;
+                let (rise_sin, rise_cos) = (55.0 - 5.0 * b).to_radians().sin_cos();
+                let edge = |k: usize| {
+                    // Each ribbon spans 315°, tallest in its middle and flat at both ends.
+                    let h = height * (90.0 + (k as f32 - 10.0) * 9.0).to_radians().sin() * grow;
+                    let (s, c) = (start + k as f32 * 315.0 / 20.0).to_radians().sin_cos();
+                    let base = pos + Vec3::new(radius * c, 0.0, radius * s);
+                    let top = base + Vec3::new(rise_cos * h * c, rise_sin * h, rise_cos * h * s);
+                    let u = k as f32 / 20.0;
+                    (Vertex { pos: base.into(), uv: [u, 1.0], color }, Vertex { pos: top.into(), uv: [u, 0.0], color })
+                };
+                for k in 0..DIVISIONS - 1 {
+                    let ((b0, t0), (b1, t1)) = (edge(k), edge(k + 1));
+                    out.extend([b0, t0, b1, t0, t1, b1]);
+                }
+            }
+        }
+        AuraLayer::Ground => {
+            // Two stars, 23° apart, swelling and shrinking out of step over 120 steps.
+            for (i, base) in [(0, 115.0), (1, 130.0)] {
+                let breathe = (ticks / 120.0 * std::f32::consts::TAU + i as f32 * std::f32::consts::PI).sin();
+                let half = base / 35.0 * CELL * 0.5 * (1.0 + 0.07 * breathe);
+                let (s, c) = (i as f32 * 23.0).to_radians().sin_cos();
+                let corner = |x: f32, z: f32| pos + Vec3::new(x * c - z * s, 0.1, x * s + z * c);
+                let color = [1.0, 1.0, 1.0, 0.8];
+                let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color };
+                let (a, b, cc, d) = (v(corner(-half, -half), 0.0, 0.0), v(corner(half, -half), 1.0, 0.0), v(corner(half, half), 1.0, 1.0), v(corner(-half, half), 0.0, 1.0));
+                out.extend([a, b, cc, a, cc, d]);
+            }
+        }
+        AuraLayer::Sparkles => {
+            // 16 motes, each rising 30 units in 200 steps, then resting a while before
+            // starting again from the feet. Drawn twice over in the original, so doubled here.
+            const RISE: f32 = 200.0;
+            let fwd = (pos - eye).normalize_or_zero();
+            let right = fwd.cross(Vec3::Y).normalize_or_zero();
+            let up = right.cross(fwd);
+            let half = 2.4 * AURA_UNIT * 0.6;
+            for j in 0..16u32 {
+                let r = |n: u32| (hash(seed ^ j.wrapping_mul(0x9e37_79b9) ^ n.wrapping_mul(0x85eb_ca6b)) & 0xffff) as f32 / 65535.0;
+                let rest = r(1) * 660.0;
+                let cycle = RISE + rest;
+                let t = (ticks + r(2) * cycle) % cycle;
+                if t < rest {
+                    continue;
+                }
+                let lift = (t - rest) * 0.15;
+                // Full until 20 units up, gone by 28.
+                let alpha = ((250.0 - 30.0 * (lift - 20.0)).clamp(0.0, 250.0)) / 255.0;
+                if alpha <= 0.0 {
+                    continue;
+                }
+                let (f1, f2, p1, p2) = (0.02 + r(3) * 0.03, 0.02 + r(4) * 0.03, r(5) * 6.3, r(6) * 6.3);
+                let drift = |f: f32, p: f32| ((t - rest) * f + p).sin() - p.sin();
+                let centre = pos + Vec3::new(drift(f1, p1) * 3.0 * AURA_UNIT, lift * AURA_UNIT, drift(f2, p2) * 3.0 * AURA_UNIT);
+                let color = [80.0 / 255.0, 80.0 / 255.0, 1.0, alpha * 2.0];
+                let (a, b) = (right * half, up * half);
+                let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color };
+                let (p0, p1, p2, p3) = (v(centre - a - b, 0.0, 1.0), v(centre + a - b, 1.0, 1.0), v(centre + a + b, 1.0, 0.0), v(centre - a + b, 0.0, 0.0));
+                out.extend([p0, p1, p2, p0, p2, p3]);
+            }
+        }
+    }
+}
+
+fn hash(mut x: u32) -> u32 {
+    x ^= x >> 16;
+    x = x.wrapping_mul(0x7feb_352d);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x846c_a68b);
+    x ^ (x >> 16)
 }
 
 /// A playing code-drawn effect.
@@ -100,6 +205,7 @@ impl ProcFx {
         let fade = (t / 0.1).min(1.0) * ((1.0 - t) / 0.5).min(1.0);
         let color = [self.color[0], self.color[1], self.color[2], fade];
         match self.shape {
+            Shape::Aura { layer, seed } => aura(layer, seed, self.pos, self.time_ms, eye, out),
             Shape::Column { radius, height } => {
                 let h = height * CELL * (t / 0.3).min(1.0);
                 let r = radius * CELL;

@@ -657,6 +657,10 @@ struct Mob {
     /// Length of the current timed pose, and how fast its animation must play to fit.
     pose_len: f32,
     anim_rate: f32,
+    /// Base level as the server reports it (players at 99+ carry the level aura).
+    level: u16,
+    /// How long the aura has been showing (its ribbons grow in), ms.
+    aura_ms: f32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -700,6 +704,8 @@ impl Mob {
             attack_group: 10,
             pose_len: 0.0,
             anim_rate: 1.0,
+            level: 0,
+            aura_ms: 0.0,
         }
     }
 
@@ -1388,6 +1394,7 @@ impl App {
         }
         let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
         if let Some(m) = self.units.get_mut(&info.id) {
+            m.level = info.level;
             match info.pos {
                 ro_net::UnitPos::Walking { from, to } => m.walk(gat, from, to),
                 ro_net::UnitPos::At { x, y, dir } => {
@@ -1429,6 +1436,7 @@ impl App {
         mob.name = info.name.split('#').next().unwrap_or_default().trim().to_string();
         mob.kind = info.object_type;
         mob.class = info.job;
+        mob.level = info.level;
         mob.actor.alpha = option_alpha(info.option, false);
         mob.human = is_player_class(info.job);
         mob.look = look;
@@ -3237,6 +3245,7 @@ impl App {
                         pos: ro_net::UnitPos::At { x, y, dir: m.walker.dir as u8 },
                         guild: m.guild,
                         emblem: 0,
+                        level: m.level,
                     };
                     self.unit(info);
                 }
@@ -4560,6 +4569,15 @@ impl App {
                 self.settings.effects_off = !self.settings.effects_off;
                 notes.push(if self.settings.effects_off { say(24, "Effects Off") } else { say(23, "Effects On") });
             }
+            "/aura" if self.settings.aura_off => notes.push(say(2996, "Aura effect is OFF. Please turn it ON and try again")),
+            "/aura" => {
+                self.settings.aura_simple = !self.settings.aura_simple;
+                notes.push(if self.settings.aura_simple { say(712, "Simplified Aura [ON]") } else { say(711, "Simplified Aura [OFF]") });
+            }
+            "/aura2" => {
+                self.settings.aura_off = !self.settings.aura_off;
+                notes.push(if self.settings.aura_off { say(2995, "Aura effect is OFF") } else { say(2994, "Aura effect is ON") });
+            }
             "/v" | "/bv" if !arg.is_empty() => {
                 let Ok(v) = arg.parse::<u8>() else { return false };
                 let v = v.min(127) as f32 / 127.0;
@@ -4571,7 +4589,7 @@ impl App {
             }
             _ => return false,
         }
-        if matches!(head, "/bgm" | "/music" | "/sound" | "/effect" | "/v" | "/bv") {
+        if matches!(head, "/bgm" | "/music" | "/sound" | "/effect" | "/aura" | "/aura2" | "/v" | "/bv") {
             self.apply_sound_and_effects();
             self.settings.save();
         }
@@ -5972,8 +5990,18 @@ impl App {
                 Some(glam::Vec3::new(wx, h, wz))
             })
             .collect();
+        r.auras.clear();
         if let Some(w) = self.world.as_ref() {
             let octant = (r.camera.yaw / std::f32::consts::FRAC_PI_4).round() as i32;
+            // The level aura's textures, unless /aura2 turned it off.
+            let aura_tex = match (self.settings.aura_off, self.vfs.as_ref()) {
+                (false, Some(vfs)) => match (self.fx.texture(r, vfs, "ring_blue.tga"), self.fx.texture(r, vfs, "pikapika2.bmp"), self.fx.texture(r, vfs, "whitelight.tga")) {
+                    (Some(a), Some(b), Some(c)) => Some([a, b, c]),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let simple = self.settings.aura_simple;
             if let Some(p) = self.player.as_mut() {
                 // Combat stance (weapon drawn) while attacking something.
                 let idle = if self.attack.is_some() && self.action == 0 { 4 } else { self.action };
@@ -5981,9 +6009,14 @@ impl App {
                 p.fit_pose(r);
                 let a = p.update(dt, w, octant, idle);
                 r.camera.target = a.pos;
+                let aura = self.hud.status.base_level >= AURA_LEVEL as i64 && a.alpha >= 1.0;
+                p.aura_ms = if aura { p.aura_ms + dt } else { 0.0 };
+                if let (true, Some(tex)) = (aura, aura_tex) {
+                    push_aura(r, tex, simple, a.pos, p.aura_ms, self.account_id);
+                }
                 r.actors.push(a);
             }
-            for m in self.units.values_mut() {
+            for (&id, m) in self.units.iter_mut() {
                 let (action, time) = (m.actor.action, m.actor.time_ms);
                 m.attack_group = attack_group(r, &m.actor);
                 m.fit_pose(r);
@@ -5994,6 +6027,11 @@ impl App {
                     if let Some(s) = r.actor_sound(&a, from) {
                         audio.play(vfs, &s);
                     }
+                }
+                let aura = m.kind == 0 && m.level >= AURA_LEVEL && a.alpha >= 1.0;
+                m.aura_ms = if aura { m.aura_ms + dt } else { 0.0 };
+                if let (true, Some(tex)) = (aura, aura_tex) {
+                    push_aura(r, tex, simple, a.pos, m.aura_ms, id);
                 }
                 r.actors.push(a);
             }
@@ -7527,6 +7565,23 @@ mod login_addr_tests {
         assert_eq!(n("[::1]"), "[::1]:6900");
         assert_eq!(n("[::1]:7000"), "[::1]:7000");
         assert_eq!(n("::1"), "[::1]:6900");
+    }
+}
+
+/// Players at this base level or above carry the level aura. The server decides what
+/// level each player reports (rAthena's max_lv and aura_lv); the client only compares.
+const AURA_LEVEL: u16 = 99;
+
+/// The level aura under a unit standing at `pos`: EF_LEVEL99_2 on the ground, the
+/// EF_LEVEL99 ribbons and the EF_LEVEL99_3 sparkles (`simple`, the original's /aura: the
+/// sparkles alone). `tex`: ring_blue, pikapika2 and whitelight.
+fn push_aura(r: &mut ro_render::Renderer, tex: [ro_render::TexId; 3], simple: bool, pos: glam::Vec3, time_ms: f32, seed: u32) {
+    use ro_render::AuraLayer::*;
+    for (layer, tex) in [(Ground, tex[1]), (Swirl, tex[0]), (Sparkles, tex[2])] {
+        if simple && layer != Sparkles {
+            continue;
+        }
+        r.auras.push(ro_render::ProcFx { tex, shape: ro_render::Shape::Aura { layer, seed }, pos, color: [1.0; 3], time_ms, duration_ms: f32::MAX });
     }
 }
 

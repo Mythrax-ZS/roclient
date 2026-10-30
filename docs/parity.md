@@ -84,6 +84,8 @@ epute*.bson)
 - [x] ZC_ACK_REQNAMEALL: party, guild and rank under player names
 - [x] ZC_EQUIPMENT_EFFECT: hat effects (145 from hateffectinfo), following the wearer
 - [x] Equipment switch set (Switch tab: add, remove, swap; ZC_EQUIPSWITCH_LIST/ADD/REMOVE/REPLY)
+- [x] Level aura for players reported at level 99+ (clevel from the spawn packets; EF_LEVEL99 ribbons, EF_LEVEL99_2 ground star, EF_LEVEL99_3 sparkles, code-drawn after roBrowser's reconstruction); /aura simplifies it, /aura2 turns it off. rAthena's `max_lv` / `aura_lv` / `client_limit_unit_lv` choose who gets it
+- [ ] The higher auras (EF_LEVEL99_150, the 4th-job orbs EF_LEVEL99_ORB1/2): when the original shows them is unknown
 
 ## Packet audit (2026-10-30)
 Server packets for PACKETVER 20250402 were taken from rAthena's preprocessed packet

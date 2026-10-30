@@ -27,11 +27,14 @@ pub struct Settings {
     pub bgm_off: bool,
     pub sfx_off: bool,
     pub effects_off: bool,
+    /// /aura2: no level aura at all; /aura: the simplified aura (its sparkles alone).
+    pub aura_off: bool,
+    pub aura_simple: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false }
     }
 }
 

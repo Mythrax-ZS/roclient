@@ -22,7 +22,7 @@ pub use ro_formats::image::Rgba;
 pub use scene::{SceneBuilder, SceneMesh};
 pub use upscale::{is_sprite_path, AssetClass, Quality as UpscaleQuality, UpscaleSettings, Upscaler};
 pub use water::{flag as water_flag, Foam, WaterMesh, WaterQuality, WaterSettings};
-pub use effect::{ProcFx, Shape, TexId};
+pub use effect::{AuraLayer, ProcFx, Shape, TexId};
 pub use particle::{Emitter, EmitterDef, Glow, Waterfall, Wind};
 pub use fx::{Fx, FxId};
 pub use post::PostSettings;
@@ -190,6 +190,9 @@ pub struct Renderer {
     last_frame: std::time::Instant,
     /// Code-drawn effects playing this frame; the client advances and removes them.
     pub procs: Vec<ProcFx>,
+    /// Level auras under the units that carry them, drawn before the actors; the client
+    /// rebuilds the list every frame.
+    pub auras: Vec<ProcFx>,
     /// Map particle emitters (RSW EF_EMITTER).
     particles: particle::Particles,
     /// STR effects playing this frame; the client advances and removes them.
@@ -557,6 +560,7 @@ impl Renderer {
             day_start: 0.3,
             was_night: false,
             procs: vec![],
+            auras: vec![],
             particles,
             effects: vec![],
             show_effects: true,
@@ -684,6 +688,34 @@ impl Renderer {
 
     pub fn set_glows(&mut self, glows: Vec<Glow>) {
         self.particles.set_glows(&self.device, glows);
+    }
+
+    /// Draws code-built effects (additive), batched into one buffer.
+    fn draw_procs(&self, pass: &mut wgpu::RenderPass<'_>, procs: &[ProcFx], label: &str) {
+        let mut vertices = vec![];
+        let mut draws = vec![];
+        for p in procs {
+            if p.tex.0 >= self.effect_textures.len() {
+                continue;
+            }
+            let start = vertices.len() as u32;
+            p.vertices(self.camera.eye(), &mut vertices);
+            draws.push((p.tex.0, start..vertices.len() as u32));
+        }
+        if vertices.is_empty() {
+            return;
+        }
+        let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        pass.set_pipeline(&self.effect_pipeline);
+        pass.set_vertex_buffer(0, buffer.slice(..));
+        for (tex, range) in draws {
+            pass.set_bind_group(1, &self.effect_textures[tex], &[]);
+            pass.draw(range, 0..1);
+        }
     }
 
     pub fn add_effect_texture(&mut self, img: &Rgba) -> TexId {
@@ -1169,6 +1201,8 @@ impl Renderer {
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..verts.len() as u32, 0..1);
             }
+            // Level auras, under their owners.
+            self.draw_procs(&mut pass, &self.auras, "auras");
             // Actors back to front (built before the shadow pass, which shares them).
             if let Some(buffer) = &sprite_buffer {
                 pass.set_pipeline(&self.sprite_pipeline);
@@ -1179,30 +1213,8 @@ impl Renderer {
                 }
             }
             // Code-drawn skill effects (additive, world space).
-            if self.show_effects && !self.procs.is_empty() {
-                let mut vertices = vec![];
-                let mut draws = vec![];
-                for p in &self.procs {
-                    if p.tex.0 >= self.effect_textures.len() {
-                        continue;
-                    }
-                    let start = vertices.len() as u32;
-                    p.vertices(self.camera.eye(), &mut vertices);
-                    draws.push((p.tex.0, start..vertices.len() as u32));
-                }
-                if !vertices.is_empty() {
-                    let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("skill effects"),
-                        contents: bytemuck::cast_slice(&vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
-                    pass.set_pipeline(&self.effect_pipeline);
-                    pass.set_vertex_buffer(0, buffer.slice(..));
-                    for (tex, range) in draws {
-                        pass.set_bind_group(1, &self.effect_textures[tex], &[]);
-                        pass.draw(range, 0..1);
-                    }
-                }
+            if self.show_effects {
+                self.draw_procs(&mut pass, &self.procs, "skill effects");
             }
             // Map particle emitters (smoke, sparks, dust...), each with its map-given blend
             // (RO_PARTICLES_OFF hides them, for comparing).
