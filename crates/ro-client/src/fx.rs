@@ -778,20 +778,26 @@ fn ef_str(effect: u32) -> Option<&'static str> {
 }
 
 /// Hat effects (ZC_EQUIPMENT_EFFECT ids) -> STR under data\texture\effect, from
-/// hateffectinfo\hateffectids.lub (id per name) and hateffectinfo.lub (file per name).
+/// hateffectinfo.lub's hatEffectTable. Its entries are keyed by id (`[HatEFID.X]`, as the
+/// English translation's copy has them, defining HatEFID itself) or by name, looked up in
+/// hateffectids.lub.
 pub fn hat_effects(vfs: &ro_vfs::Vfs) -> HashMap<u16, &'static str> {
     const DIR: &str = r"data\luafiles514\lua files\hateffectinfo";
     let load = |f: &str| vfs.read(&format!(r"{DIR}\{f}.lub")).ok().flatten().and_then(|d| ro_formats::lub::eval(&d).ok());
-    let (Some(ids), Some(info)) = (load("hateffectids"), load("hateffectinfo")) else { return HashMap::new() };
-    let (Some(id_tbl), Some(info_tbl)) = (ids.globals.get("HatEFID"), info.globals.get("hatEffectTable")) else { return HashMap::new() };
+    let Some(info) = load("hateffectinfo") else { return HashMap::new() };
+    let Some(info_tbl) = info.globals.get("hatEffectTable") else { return HashMap::new() };
+    let ids = load("hateffectids");
+    let id_of = |name: &str| -> Option<f64> {
+        let ids = ids.as_ref()?;
+        ids.entries(ids.globals.get("HatEFID")?).iter().find(|(k, _)| k.as_str() == Some(name)).and_then(|(_, v)| v.as_number())
+    };
     let mut out = HashMap::new();
-    for (name, id) in ids.entries(id_tbl) {
-        let (Some(name), Some(id)) = (name.as_str(), id.as_number()) else { continue };
-        let file = info.entries(info_tbl).iter().find(|(k, _)| k.as_str() == Some(name)).and_then(|(_, t)| info.field(t, "resourceFileName")).and_then(|v| v.as_str());
-        if let Some(file) = file {
-            let short: &'static str = Box::leak(file.trim_end_matches(".str").trim_end_matches(".STR").to_string().into_boxed_str());
-            out.insert(id as u16, short);
-        }
+    for (key, t) in info.entries(info_tbl) {
+        let Some(id) = key.as_number().or_else(|| key.as_str().and_then(id_of)) else { continue };
+        // Entries with only a hatEffectID are drawn by the original in code.
+        let Some(file) = info.field(t, "resourceFileName").and_then(|v| v.as_str()) else { continue };
+        let short: &'static str = Box::leak(file.trim_end_matches(".str").trim_end_matches(".STR").to_string().into_boxed_str());
+        out.insert(id as u16, short);
     }
     tracing::info!(count = out.len(), "hat effects");
     out
