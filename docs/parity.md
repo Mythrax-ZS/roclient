@@ -83,6 +83,7 @@ epute*.bson)
 - Note: `setnpcdisplay` to a monster class makes rAthena send class 0 (a Novice); the original client shows the same
 - [x] ZC_ACK_REQNAMEALL: party, guild and rank under player names
 - [x] Names on hover: a monster's name shows under it while the cursor is over it (players and NPCs always show theirs), and a floor item's as "Jellopy: 3 ea." (msgstringtable 183; the unidentified name when unidentified)
+- [x] Experience messages: monster EXP shows in chat only with Settings > Game > Chat "Experience messages" (the original's chat option, off by default); quest rewards always show, as "You got N Base EXP." (msgstringtable 487/488)
 - [x] ZC_EQUIPMENT_EFFECT: hat effects (145 from hateffectinfo), following the wearer
 - [x] Equipment switch set (Switch tab: add, remove, swap; ZC_EQUIPSWITCH_LIST/ADD/REMOVE/REPLY)
 - [x] Level aura for players reported at level 99+ (clevel from the spawn packets; EF_LEVEL99 ribbons, EF_LEVEL99_2 ground star, EF_LEVEL99_3 sparkles, code-drawn after roBrowser's reconstruction); /aura simplifies it, /aura2 turns it off. rAthena's `max_lv` / `aura_lv` / `client_limit_unit_lv` choose who gets it

@@ -44,11 +44,14 @@ pub struct Settings {
     pub screenshot_ui: bool,
     /// Borderless full screen (F11).
     pub fullscreen: bool,
+    /// Experience gained from monsters in the chat (the original's "Experience message" chat
+    /// option, off by default). Quest rewards always show.
+    pub exp_messages: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false }
     }
 }
 
@@ -220,6 +223,9 @@ impl Settings {
         ui.end_row();
         ui.label("Minimap");
         ui.checkbox(&mut self.minimap, "Show (Ctrl+Tab)");
+        ui.end_row();
+        ui.label("Chat");
+        ui.checkbox(&mut self.exp_messages, "Experience messages").on_hover_text("Experience gained from monsters; quest rewards always show");
         ui.end_row();
         section(ui, "Screenshots");
         ui.label("Print Screen");

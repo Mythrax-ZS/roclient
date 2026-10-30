@@ -35,7 +35,9 @@ fn line(id: usize, args: &[&str]) -> Option<String> {
     let mut rest = s.as_str();
     while let Some(i) = rest.find('%') {
         out.push_str(&rest[..i]);
-        let spec = rest[i + 1..].chars().next();
+        // Length modifiers (%lld, %ld, %hd) change nothing here.
+        let mods = rest[i + 1..].chars().take_while(|c| matches!(c, 'l' | 'h')).count();
+        let spec = rest[i + 1 + mods..].chars().next();
         match spec {
             Some('%') => out.push('%'),
             Some('d' | 's' | 'u') => out.push_str(args.next().copied().unwrap_or("")),
@@ -45,7 +47,7 @@ fn line(id: usize, args: &[&str]) -> Option<String> {
             }
             None => out.push('%'),
         }
-        rest = &rest[i + 1 + spec.map_or(0, char::len_utf8)..];
+        rest = &rest[i + 1 + mods + spec.map_or(0, char::len_utf8)..];
     }
     out.push_str(rest);
     Some(out)

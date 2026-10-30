@@ -2951,10 +2951,15 @@ impl App {
                     self.hud.push_chat(ro_net::ChatKind::System, text);
                 }
             }
-            ExpGain { amount, kind, .. } => {
-                let what = if kind == 2 { "Job" } else { "Base" };
-                let text = if amount < 0 { format!("{} {what} Experience lost", -amount) } else { format!("{amount} {what} Experience obtained") };
-                self.hud.push_chat(ro_net::ChatKind::System, text);
+            // As the original: only with its "Experience message" chat option, except quest
+            // rewards. Losses (death) aren't shown.
+            ExpGain { amount, kind, quest } => {
+                if amount > 0 && (quest || self.settings.exp_messages) {
+                    let n = amount.to_string();
+                    let (id, what) = if kind == 2 { (488, "Job") } else { (487, "Base") };
+                    let text = msgstr::get(id, &[&n]).unwrap_or_else(|| format!("You got {n} {what} EXP."));
+                    self.hud.push_chat(ro_net::ChatKind::System, text);
+                }
             }
             Recovery { kind, amount } => {
                 // HP in green, SP in blue, rising over our head like the original.
