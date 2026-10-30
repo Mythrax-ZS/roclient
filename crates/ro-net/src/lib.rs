@@ -538,7 +538,8 @@ pub enum Event {
     /// ZC_ACK_DISORGANIZE_GUILD_RESULT: 0 disbanded, 1 wrong name, 2 members remain.
     GuildBroken(u32),
     /// ZC_CHANGE_GUILD: a unit's guild (and emblem) changed.
-    UnitGuild { id: u32, guild: u32 },
+    /// A unit's guild and that guild's emblem version (ZC_CHANGE_GUILD).
+    UnitGuild { id: u32, guild: u32, emblem: u32 },
     AllyRequest { inviter: u32, guild: String },
     RelationNotice(String),
     RelationRemoved { guild: u32, relation: u32 },
@@ -1140,7 +1141,7 @@ impl MapSession {
                             (s(&c[44..68]), s(&c[4..44]))
                         }).collect())),
                         0x015e if data.len() >= 6 => Some(Event::GuildBroken(u32::from_le_bytes([data[2], data[3], data[4], data[5]]))),
-                        0x01b4 if data.len() >= 12 => Some(Event::UnitGuild { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), guild: u32::from_le_bytes([data[6], data[7], data[8], data[9]]) }),
+                        0x01b4 if data.len() >= 12 => Some(Event::UnitGuild { id: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), guild: u32::from_le_bytes([data[6], data[7], data[8], data[9]]), emblem: u16::from_le_bytes([data[10], data[11]]) as u32 }),
                         0x014c => Some(Event::GuildRelations(ro_proto::guild::parse_relations(&data))),
                         0x0171 if data.len() >= 30 => Some(Event::AllyRequest { inviter: u32::from_le_bytes([data[2], data[3], data[4], data[5]]), guild: ro_proto::packets::get_fixed_str(&mut &data[6..30], 24) }),
                         0x0173 if data.len() >= 3 => Some(Event::RelationNotice(match data[2] { 0 => "You are already allied with that guild.", 1 => "The alliance was declined.", 2 => "The alliance was accepted.", 3 => "Their guild has too many alliances.", 4 => "Your guild has too many alliances.", _ => "Alliances are disabled." }.into())),
@@ -1559,7 +1560,7 @@ impl MapSession {
                         0x0a57 if data.len() >= 6 => Some(Event::MacroApplied(l(&data, 2))),
                         0x0adf if data.len() >= 58 => Some(Event::NpcName { id: l(&data, 2), name: ro_proto::packets::get_fixed_str(&mut &data[10..34], 24), title: ro_proto::packets::get_fixed_str(&mut &data[34..58], 24) }),
                         // ZC_CHANGE_GUILD (this version's layout: guild, emblem, unit).
-                        0x0b47 if data.len() >= 14 => Some(Event::UnitGuild { id: l(&data, 10), guild: l(&data, 2) }),
+                        0x0b47 if data.len() >= 14 => Some(Event::UnitGuild { id: l(&data, 10), guild: l(&data, 2), emblem: l(&data, 6) }),
                         0x09da => ro_proto::guild::parse_storage_log(&data).map(|(r, e)| Event::GuildStorageLog(r, e)),
                         0x0a41 if data.len() >= 18 => {
                             let w = |i: usize| u16::from_le_bytes([data[i], data[i + 1]]);

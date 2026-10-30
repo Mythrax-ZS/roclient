@@ -51,6 +51,7 @@ mod buffs;
 mod chatrooms;
 mod classic;
 mod companions;
+mod emblem;
 mod emotes;
 mod settings;
 mod skilltree;
@@ -1099,6 +1100,10 @@ struct App {
     hat_fx: std::collections::HashMap<(u32, u16), u32>,
     /// Guild emblems by guild id (None while being fetched).
     emblems: std::collections::HashMap<u32, Option<egui::TextureHandle>>,
+    /// The emblem version last asked for, by guild id.
+    emblem_versions: std::collections::HashMap<u32, u32>,
+    /// Emblem uploads and downloads on the web server.
+    emblem_web: emblem::Web,
     /// Test hook (--npc-answers): replies to NPC dialog steps, in order.
     npc_answers: std::collections::VecDeque<String>,
     /// `--attack`: attack the nearest monster once one is in view (scripted test).
@@ -1422,10 +1427,7 @@ impl App {
             self.send(ro_net::Command::ReqName(info.id));
         }
         mob.guild = info.guild;
-        if info.guild != 0 && !self.emblems.contains_key(&info.guild) {
-            self.emblems.insert(info.guild, None);
-            self.send(ro_net::Command::Guild(ro_net::GuildRequest::Emblem(info.guild)));
-        }
+        self.want_emblem(info.guild, info.emblem as u32);
         tracing::debug!(id = info.id, job = info.job, name = %info.name, ?cell, "unit");
         self.units.insert(info.id, mob);
     }
@@ -2537,7 +2539,11 @@ impl App {
                 }
             }
             PartyInvite { party, name } => self.social.prompts.push(social::Prompt::Party { party, name }),
-            WebAuth { account_id, token, world } => self.agency.set_login(agency::Login { url: self.web_url.clone(), aid: account_id, token, world }),
+            WebAuth { account_id, token, world } => {
+                let login = agency::Login { url: self.web_url.clone(), aid: account_id, token, world };
+                self.emblem_web.set_login(login.clone());
+                self.agency.set_login(login);
+            }
             AgencyAsk(ask) => self.social.prompts.push(social::Prompt::Agency(ask)),
             AgencyResult { leader, refused, .. } => {
                 let (id, en) = if refused { (3499, "rejected") } else { (3498, "approved") };
@@ -2580,14 +2586,16 @@ impl App {
                 }
                 // Fetch the emblem when it is new or changed.
                 if info.emblem != 0 && self.guild.emblem.as_ref().is_none_or(|e| e.0 != info.emblem) {
-                    self.send(ro_net::Command::Guild(ro_net::GuildRequest::Emblem(info.id)));
+                    // The guild window needs it even if name labels already have it.
+                    self.emblem_versions.remove(&info.id);
+                    self.want_emblem(info.id, info.emblem);
                 }
                 self.guild.info = Some(info);
             }
             GuildEmblem { guild, version, data } => {
-                let ctx = self.egui_ctx.clone();
-                self.emblems.insert(guild, guild::decode_emblem(&ctx, guild, version, &data));
-                self.guild.set_emblem(&ctx, guild, version, &data);
+                if let Some(raw) = guild::inflate_emblem(&data) {
+                    self.show_emblem(guild, version, &raw);
+                }
             }
             GuildMembers(m) => self.guild.members = m,
             GuildRankNames(names) => {
@@ -3255,14 +3263,11 @@ impl App {
                 };
                 self.hud.push_chat(ro_net::ChatKind::Guild, text.into());
             }
-            UnitGuild { id, guild } => {
+            UnitGuild { id, guild, emblem } => {
                 if let Some(m) = self.mob_mut(id) {
                     m.guild = guild;
                 }
-                if guild != 0 && !self.emblems.contains_key(&guild) {
-                    self.emblems.insert(guild, None);
-                    self.send(ro_net::Command::Guild(ro_net::GuildRequest::Emblem(guild)));
-                }
+                self.want_emblem(guild, emblem);
             }
             AllyRequest { inviter, guild } => self.guild.ally_offer = Some((inviter, guild)),
             RelationNotice(text) => self.hud.push_chat(ro_net::ChatKind::Guild, text),
@@ -3652,6 +3657,56 @@ impl App {
     }
 
     /// Turns a window action into a server request.
+    /// Fetches a guild's emblem unless this version was already asked for: from the web
+    /// server, or the map server when there is no web login.
+    fn want_emblem(&mut self, guild: u32, version: u32) {
+        if guild == 0 || (self.emblem_versions.get(&guild) == Some(&version) && self.emblems.contains_key(&guild)) {
+            return;
+        }
+        self.emblem_versions.insert(guild, version);
+        self.emblems.entry(guild).or_insert(None);
+        if !self.emblem_web.download(guild, version) {
+            self.send(ro_net::Command::Guild(ro_net::GuildRequest::Emblem(guild)));
+        }
+    }
+
+    /// An emblem image file arrived: textures for name labels and, for ours, the guild window.
+    fn show_emblem(&mut self, guild: u32, version: u32, raw: &[u8]) {
+        let Some(img) = emblem::decode(raw) else {
+            tracing::debug!(guild, version, "undecodable emblem");
+            return;
+        };
+        let ctx = self.egui_ctx.clone();
+        // Labels draw it at 18 points; twice that keeps it sharp on high-DPI screens.
+        self.emblems.insert(guild, Some(emblem::texture(&ctx, format!("emblem label {guild} {version}"), &img, 36)));
+        self.guild.set_emblem(&ctx, guild, version, &img);
+    }
+
+    /// Web emblem results, and the guild master's queued upload.
+    fn update_emblems(&mut self) {
+        for done in self.emblem_web.poll() {
+            match done {
+                emblem::Done::Downloaded { guild, version, data } => self.show_emblem(guild, version, &data),
+                // Emblems from before the web server, or no web server: the map server has them.
+                emblem::Done::Missing { guild } => self.send(ro_net::Command::Guild(ro_net::GuildRequest::Emblem(guild))),
+                // The map server tells everyone nearby the new version (ZC_CHANGE_GUILD).
+                emblem::Done::Uploaded { guild, version } => {
+                    self.guild.emblem_status = "Emblem uploaded.".into();
+                    self.send(ro_net::Command::Guild(ro_net::GuildRequest::NewEmblem { guild, version }));
+                }
+                emblem::Done::UploadFailed(e) => self.guild.emblem_status = e,
+            }
+        }
+        if let Some((data, kind)) = self.guild.pending_upload.take() {
+            if !self.emblem_web.upload(self.guild.id, data.clone(), kind) {
+                match guild::packet_emblem(&data) {
+                    Some(c) => self.send(c),
+                    None => self.guild.emblem_status = "Without the web server, the emblem must be a 24x24 BMP.".into(),
+                }
+            }
+        }
+    }
+
     fn ui_action(&mut self, a: windows::UiAction) {
         use ro_net::{Command, ItemRequest, StatRequest};
         use windows::UiAction::*;
@@ -5165,9 +5220,7 @@ impl App {
                         None
                     }
                     Some(("emblem", f)) => {
-                        if let Some(c) = self.guild.upload_emblem(f) {
-                            self.queued_commands.push(c);
-                        }
+                        self.guild.upload_emblem(f);
                         None
                     }
                     Some(("enchant", id)) => {
@@ -5599,6 +5652,7 @@ impl App {
             if args.iter().any(|a| a == "--skills-win") { self.windows.skills = true; self.windows.skill_list = args.iter().any(|a| a == "--skill-list"); self.windows.skill_tab = args.iter().skip_while(|a| *a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()); } else if args.iter().any(|a| a == "--equip-win") { self.windows.equipment = true; } else { self.windows.guild = true; }
             self.guild.start_tab = std::env::args().skip_while(|a| a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()).unwrap_or(0);
         }
+        self.update_emblems();
         for text in std::mem::take(&mut self.queued_chat) {
             self.submit_chat(text);
         }
@@ -7066,6 +7120,8 @@ fn main() -> anyhow::Result<()> {
         hat_files: Default::default(),
         hat_fx: Default::default(),
         emblems: Default::default(),
+        emblem_versions: Default::default(),
+        emblem_web: Default::default(),
         npc_answers: arg("--npc-answers").map(|s| s.split(',').map(str::to_string).collect()).unwrap_or_default(),
         auto_attack: args.iter().any(|a| a == "--attack"),
         units: Default::default(),

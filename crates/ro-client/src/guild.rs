@@ -49,6 +49,8 @@ pub struct Guild {
     pub client_dir: Option<std::path::PathBuf>,
     emblem_files: Option<Vec<String>>,
     pub emblem_status: String,
+    /// A checked emblem file and its type (BMP, GIF or PNG), waiting to be uploaded.
+    pub pending_upload: Option<(Vec<u8>, &'static str)>,
     /// Allied (0) and enemy (1) guilds: (relation, guild id, name).
     pub relations: Vec<(u32, u32, String)>,
     /// An alliance offer waiting for an answer: (inviter, their guild).
@@ -176,7 +178,7 @@ impl Guild {
             ui.label(RichText::new(&i.name).strong().size(17.0));
         });
         if self.master {
-            self.emblem_picker(ui, out);
+            self.emblem_picker(ui);
         }
         ui.separator();
         let i = &i;
@@ -425,13 +427,13 @@ fn guild_skill_name(internal: &str) -> String {
 }
 
 impl Guild {
-    /// The leader's emblem change: 24x24 BMPs from the client's Emblem folder, as the
-    /// original client lists them.
-    fn emblem_picker(&mut self, ui: &mut egui::Ui, out: &mut Vec<Command>) {
+    /// The leader's emblem change: BMP, GIF or PNG images of up to 256x256 pixels from the
+    /// client's Emblem folder, which the original client lists.
+    fn emblem_picker(&mut self, ui: &mut egui::Ui) {
         let Some(dir) = self.client_dir.as_ref().map(|d| d.join("Emblem")) else { return };
         let files = self.emblem_files.get_or_insert_with(|| {
             let mut v: Vec<String> = std::fs::read_dir(&dir)
-                .map(|r| r.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.to_lowercase().ends_with(".bmp")).collect())
+                .map(|r| r.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| [".bmp", ".gif", ".png"].iter().any(|x| n.to_lowercase().ends_with(x))).collect())
                 .unwrap_or_default();
             v.sort();
             v
@@ -441,7 +443,7 @@ impl Guild {
         ui.horizontal(|ui| {
             egui::ComboBox::from_id_salt("emblem_pick").selected_text("Change emblem...").show_ui(ui, |ui| {
                 if files.is_empty() {
-                    ui.label(format!("Put 24x24 .bmp files in {}", dir.display()));
+                    ui.label(format!("Put BMP, GIF or PNG images of up to {0}x{0} pixels in {1}", crate::emblem::MAX_SIDE, dir.display()));
                 }
                 for f in files.iter() {
                     if ui.selectable_label(false, f).clicked() {
@@ -455,64 +457,57 @@ impl Guild {
             self.emblem_files = None;
         }
         if let Some(f) = pick {
-            out.extend(self.upload_emblem(&f));
+            self.upload_emblem(&f);
         }
         if !self.emblem_status.is_empty() {
             ui.label(RichText::new(&self.emblem_status).size(11.0).color(crate::classic::ink(Color32::GRAY)));
         }
     }
 
-    /// Reads Emblem<f> and makes the upload request (checks it is a 24x24 BMP).
-    pub fn upload_emblem(&mut self, f: &str) -> Option<Command> {
-        let dir = self.client_dir.as_ref()?.join("Emblem");
-        {
-            match std::fs::read(dir.join(f)) {
-                Ok(bmp) if bmp.len() > 26 && &bmp[..2] == b"BM" && u32::from_le_bytes([bmp[18], bmp[19], bmp[20], bmp[21]]) == 24 && i32::from_le_bytes([bmp[22], bmp[23], bmp[24], bmp[25]]).unsigned_abs() == 24 => {
-                    use std::io::Write;
-                    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-                    let _ = z.write_all(&bmp);
-                    let data = z.finish().ok()?;
+    /// Reads Emblem<f>, checks it and queues it for upload.
+    pub fn upload_emblem(&mut self, f: &str) {
+        let Some(dir) = self.client_dir.as_ref().map(|d| d.join("Emblem")) else { return };
+        match std::fs::read(dir.join(f)) {
+            Ok(data) => match crate::emblem::check(&data) {
+                Ok(kind) => {
                     self.emblem_status = format!("Uploading {f}...");
-                    Some(Command::Guild(GuildRequest::SetEmblem(data)))
+                    self.pending_upload = Some((data, kind));
                 }
-                Ok(_) => {
-                    self.emblem_status = "The emblem must be a 24x24 BMP.".into();
-                    None
-                }
-                Err(e) => {
-                    self.emblem_status = format!("Can't read {f}: {e}");
-                    None
-                }
-            }
+                Err(e) => self.emblem_status = e,
+            },
+            Err(e) => self.emblem_status = format!("Can't read {f}: {e}"),
         }
     }
 
-    /// An emblem arrived (zlib-compressed BMP or GIF).
-    pub fn set_emblem(&mut self, ctx: &egui::Context, guild: u32, version: u32, data: &[u8]) {
+    /// Our guild's emblem arrived.
+    pub fn set_emblem(&mut self, ctx: &egui::Context, guild: u32, version: u32, img: &ro_formats::image::Rgba) {
         if guild != self.id {
             return;
         }
-        use std::io::Read;
-        let mut raw = vec![];
-        if flate2::read::ZlibDecoder::new(data).read_to_end(&mut raw).is_err() {
-            return;
-        }
-        let Ok(img) = ro_formats::image::decode(&raw, "emblem.bmp") else { return };
-        // Magenta is transparent, as in other client art.
-        let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
-        self.emblem = Some((version, ctx.load_texture(format!("emblem {guild} {version}"), color, egui::TextureOptions::NEAREST)));
+        self.emblem = Some((version, crate::emblem::texture(ctx, format!("emblem {guild} {version}"), img, 96)));
         self.emblem_status.clear();
     }
 }
 
-/// Decodes an emblem (zlib-compressed BMP) into a texture.
-pub fn decode_emblem(ctx: &egui::Context, guild: u32, version: u32, data: &[u8]) -> Option<egui::TextureHandle> {
+/// The original upload over the game connection, which takes only a 24x24 BMP: the fallback
+/// when the web server is unavailable.
+pub fn packet_emblem(bmp: &[u8]) -> Option<Command> {
+    use std::io::Write;
+    let is_24 = bmp.len() > 26 && &bmp[..2] == b"BM" && u32::from_le_bytes([bmp[18], bmp[19], bmp[20], bmp[21]]) == 24 && i32::from_le_bytes([bmp[22], bmp[23], bmp[24], bmp[25]]).unsigned_abs() == 24;
+    if !is_24 {
+        return None;
+    }
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    z.write_all(bmp).ok()?;
+    Some(Command::Guild(GuildRequest::SetEmblem(z.finish().ok()?)))
+}
+
+/// An emblem from the map server (ZC_GUILD_EMBLEM_IMG): the zlib-compressed image file.
+pub fn inflate_emblem(data: &[u8]) -> Option<Vec<u8>> {
     use std::io::Read;
     let mut raw = vec![];
-    flate2::read::ZlibDecoder::new(data).read_to_end(&mut raw).ok()?;
-    let img = ro_formats::image::decode(&raw, "emblem.bmp").ok()?;
-    let color = egui::ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.pixels);
-    Some(ctx.load_texture(format!("emblem {guild} {version}"), color, egui::TextureOptions::NEAREST))
+    flate2::read::ZlibDecoder::new(data).take(crate::emblem::MAX_BYTES as u64).read_to_end(&mut raw).ok()?;
+    (!raw.is_empty()).then_some(raw)
 }
 
 impl Guild {

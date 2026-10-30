@@ -22,7 +22,8 @@ Ticked items are handled and tested in game against the local server.
 - [x] Random enchant (ZC_UI_OPEN_V3 + ZC_RESPONSE_ENCHANT) from the official enchantlist.lub (32-bit bytecode widened and run)
 - [x] Item reform (ZC_OPEN_REFORM_UI / ITEM_REFORM_ACK) from itemreformsystem.lub
 - [x] Failed item adds (full inventory, overweight) now say why
-- [x] Reputation window (ZC_REPUTE_INFO / OPEN, names from contentdataepute*.bson)
+- [x] Reputation window (ZC_REPUTE_INFO / OPEN, names from contentdata
+epute*.bson)
 - [~] Item merge window (mergeitem): built; no mergeable stacks could be produced to test
 - [x] ZC_RANDOM_COMBINE / RANDOM_UPGRADE_ITEM (Laphine synthesis + upgrade windows, recipes from lapine*.lub merged across iRO/kRO; ZC_CHANGE_ITEM_OPTION 0x0b43)
 
@@ -62,7 +63,7 @@ Ticked items are handled and tested in game against the local server.
 - [x] Elementals (ZC_EL_INIT, ZC_EL_PAR_CHANGE): companion window tab + HP bar
 
 ## Social
-- [x] Guild emblems in the guild window (download, upload from Emblem*.bmp)
+- [x] Guild emblems in the guild window: BMP, GIF or PNG (with alpha) up to 256x256 from the Emblem folder, uploaded to and downloaded from the web server (/emblem/*, CZ_REQ_ADD_NEW_EMBLEM) as 2019+ clients do; 24x24 BMPs over the game connection when there is no web server
 - [x] Guild emblems beside player names (guild id from spawn packets, fetched per guild)
 - [x] ZC_CHANGE_GUILD
 - [x] ZC_GUILD_POSITION (rank title under names updates live)

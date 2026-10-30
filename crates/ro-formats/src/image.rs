@@ -9,7 +9,7 @@ pub struct Rgba {
     pub pixels: Vec<u8>,
 }
 
-/// Decodes BMP/TGA/PNG/JPG. Near-magenta pixels (the RO color key) become transparent.
+/// Decodes BMP/TGA/PNG/JPG/GIF. Near-magenta pixels (the RO color key) become transparent.
 /// `name` supplies the extension, which TGA needs since it has no signature.
 pub fn decode(data: &[u8], name: &str) -> Result<Rgba> {
     let img = match image::ImageFormat::from_path(name) {

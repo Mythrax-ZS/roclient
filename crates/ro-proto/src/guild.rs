@@ -29,6 +29,8 @@ pub enum GuildRequest {
     Emblem(u32),
     /// CZ_REGISTER_GUILD_EMBLEM_IMG: upload a zlib-compressed 24x24 BMP.
     SetEmblem(Vec<u8>),
+    /// CZ_REQ_ADD_NEW_EMBLEM: the emblem was uploaded to the web server as this version.
+    NewEmblem { guild: u32, version: u32 },
 }
 
 impl Encode for GuildRequest {
@@ -81,6 +83,11 @@ impl Encode for GuildRequest {
             GuildRequest::Emblem(guild) => {
                 d.put_u16_le(0x0151);
                 d.put_u32_le(*guild);
+            }
+            GuildRequest::NewEmblem { guild, version } => {
+                d.put_u16_le(0x0b46);
+                d.put_u32_le(*guild);
+                d.put_u32_le(*version);
             }
             GuildRequest::SetEmblem(data) => {
                 d.put_u16_le(0x0153);
@@ -265,6 +272,9 @@ mod tests {
         let mut b = BytesMut::new();
         GuildRequest::Invite { name: "Buddy".into() }.encode(&mut b);
         assert_eq!(b.len(), 26);
+        let mut b = BytesMut::new();
+        GuildRequest::NewEmblem { guild: 3, version: 2 }.encode(&mut b);
+        assert_eq!(&b[..], &[0x46, 0x0b, 3, 0, 0, 0, 2, 0, 0, 0]);
     }
 }
 
