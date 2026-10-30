@@ -81,9 +81,14 @@ locations. The artwork was generated with the built-in image-generation tool.
 Source images retain their generated alpha; nearest-neighbor sampling and ACT
 placement are reproducible from the metadata.
 
-The eight skills have their own 24x24 icons (`data/texture/유저인터페이스/item/sam_*.bmp`),
+All fourteen skills have their own 24x24 icons (`data/texture/유저인터페이스/item/sam_*.bmp`),
 pixel art in the manner of the Guillotine Cross icons, drawn by
-[skill_icons.py](../../tools/samurai_assets/skill_icons.py).
+[skill_icons.py](../../tools/samurai_assets/skill_icons.py). The six skills of the
+Mortal Flame line (Tenseiga's techniques, 7009-7014) are drawn from shapes in Tenseiga's
+colours (crimson hilt, magenta runes, violet body, cyan edge), on an indigo field. Their two
+buffs (`efst_sam_unchained_will.tga`, `efst_sam_forge_of_ten_souls.tga`) use a matching
+theme in [buff_icons.py](../../tools/samurai_assets/buff_icons.py). The line sits in the
+skill tree's middle columns, between the Kusanagi and Muramasa branches.
 
 `System/samurai_iteminfo.lua` supplies item 900000, **Samurai Initiate's Katana**.
 It references the installed game's stock Katana item/collection icons; those

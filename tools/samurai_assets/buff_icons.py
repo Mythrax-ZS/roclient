@@ -22,6 +22,9 @@ THEMES = {
              (2, (31, 81, 150, 145)), (3, (0, 24, 83, 105))],
     "crimson": [(0, (255, 226, 214, 255)), (1, (235, 46, 62, 205)), (1.5, (232, 44, 60, 202)),
                 (2, (150, 24, 40, 150)), (3, (64, 6, 16, 110))],
+    # Tenseiga (Mortal Flame line): cyan-white lines glowing magenta into an indigo fill.
+    "tenseiga": [(0, (220, 250, 255, 255)), (1, (240, 82, 180, 210)), (1.5, (190, 70, 220, 200)),
+                 (2, (100, 50, 190, 150)), (3, (26, 14, 70, 115))],
 }
 
 
@@ -114,12 +117,32 @@ def muramasas_curse(d):
     d.line([(17, 21), (17, 24)], fill=1)
 
 
+def unchained_will(d):
+    # Two links of a chain, snapped apart, with the break between them.
+    d.ellipse([3, 15, 14, 24], outline=1)
+    d.ellipse([18, 7, 29, 16], outline=1)
+    d.line([(14, 12), (16, 10)], fill=1)
+    d.line([(14, 18), (18, 18)], fill=1)
+    d.line([(16, 20), (17, 23)], fill=1)
+    d.line([(15, 8), (15, 5)], fill=1)
+
+
+def forge_of_ten_souls(d):
+    # An anvil with a flame on it.
+    d.polygon([(5, 19), (27, 19), (27, 21), (21, 23), (21, 25), (24, 27), (8, 27), (11, 25), (11, 23), (5, 21)], outline=1)
+    d.polygon([(16, 4), (20, 10), (19, 15), (16, 17), (13, 15), (12, 10)], outline=1)
+    for x, y in ((6, 9), (9, 5), (23, 5), (26, 9)):
+        d.point((x, y), fill=1)
+
+
 ICONS = {
     "efst_sam_kusanagi_guard": ("blue", kusanagi_guard),
     "efst_sam_moonlit_reflection": ("blue", moonlit_reflection),
     "efst_sam_blade_harmony": ("blue", blade_harmony),
     "efst_sam_blood_covenant": ("crimson", blood_covenant),
     "efst_sam_muramasas_curse": ("crimson", muramasas_curse),
+    "efst_sam_unchained_will": ("tenseiga", unchained_will),
+    "efst_sam_forge_of_ten_souls": ("tenseiga", forge_of_ten_souls),
 }
 
 

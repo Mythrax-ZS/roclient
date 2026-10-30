@@ -24,6 +24,12 @@ pub fn skill_visual(skill: u16) -> Option<Visual> {
         7005 | 7006 => Visual::Column("alpha_down.tga", [1.0, 0.2, 0.25]),
         7007 => Visual::Str("brandish"),
         7008 => Visual::Str("bowling"),
+        // The Mortal Flame line, in Tenseiga's colours where they are tinted.
+        7010 => Visual::Str("eraser_cutter"),
+        7011 => Visual::Str("holy_cross"),
+        7012 => Visual::Column("alpha_down.tga", [0.25, 0.85, 1.0]),
+        7013 => Visual::Column("alpha_down.tga", [1.0, 0.3, 0.72]),
+        7014 => Visual::Str("asum"),
         28 => Visual::Column("alpha_down.tga", [0.3, 0.55, 0.3]),
         29 => Visual::Column("agi_up.bmp", [0.7, 1.0, 0.8]),
         30 => Visual::Column("alpha_down.tga", [0.25, 0.25, 0.55]),

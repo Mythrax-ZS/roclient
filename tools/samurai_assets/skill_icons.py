@@ -11,6 +11,7 @@ the names the client looks up before falling back to a stock icon.
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 from PIL import Image
@@ -27,6 +28,11 @@ PALETTE = {
     "r": (0x8F, 0x22, 0x18), "R": (0xBD, 0x64, 0x55), "o": (0xED, 0x64, 0x47),
     "A": (0xEA, 0xA1, 0x71), "a": (0xF7, 0xA5, 0x72), "f": (0xFF, 0xC0, 0x8C),
     "e": (0xFE, 0xDE, 0xAC), "y": (0xFF, 0xE5, 0xA3), "Y": (0xFF, 0xFF, 0xCB),
+    # Tenseiga (Mortal Flame line): indigo field, crimson hilt, magenta runes, violet body,
+    # cyan edge.
+    "d": (0x1A, 0x12, 0x3A), "D": (0x2A, 0x1C, 0x55), "z": (0x7A, 0x0E, 0x26), "K": (0xE0, 0x22, 0x44),
+    "p": (0xF0, 0x52, 0xB4), "v": (0x7A, 0x46, 0xE6), "V": (0xA8, 0x86, 0xFF),
+    "q": (0x2C, 0xB8, 0xF0), "Q": (0xA6, 0xEE, 0xFF), "W": (0xFF, 0xFF, 0xFF),
 }
 
 # Interior: 18 columns x 16 rows, placed at (3, 4). The first character of each icon's
@@ -185,6 +191,167 @@ ICONS = {
         ",oaeyYwwwwwwwYyeao",
     ],
 }
+
+
+class Canvas:
+    """An 18x16 interior on an indigo field, drawn with shapes rather than typed out: the
+    Mortal Flame (Tenseiga) icons."""
+
+    def __init__(self, field="d"):
+        self.px = [[field] * 18 for _ in range(16)]
+
+    def put(self, x, y, c):
+        x, y = round(x), round(y)
+        if 0 <= x < 18 and 0 <= y < 16:
+            self.px[y][x] = c
+
+    def line(self, x0, y0, x1, y1, c):
+        n = max(abs(x1 - x0), abs(y1 - y0), 1) * 2
+        for i in range(int(n) + 1):
+            t = i / n
+            self.put(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, c)
+
+    def where(self, test, c):
+        for y in range(16):
+            for x in range(18):
+                if test(x, y):
+                    self.px[y][x] = c
+
+    def rows(self):
+        return ["".join(row) for row in self.px]
+
+
+def dist_to_line(x, y, x0, y0, x1, y1):
+    dx, dy = x1 - x0, y1 - y0
+    t = max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / (dx * dx + dy * dy)))
+    return math.hypot(x - (x0 + dx * t), y - (y0 + dy * t))
+
+
+def mortal_flame():
+    """A flame of mortal will: crimson outside, magenta and violet within, a cyan-white core
+    (Tenseiga's colours, hilt to edge)."""
+    c = Canvas()
+    for y in range(16):
+        for x in range(18):
+            v = (15.5 - y) / 15  # 0 at the foot, 1 at the tip
+            half = 7.2 * math.sin(math.pi * min(1.0, v * 0.9 + 0.08)) ** 0.8 * (1 - 0.55 * v)
+            # Tongues licking upward.
+            half += 1.2 * math.sin(x * 1.3 + v * 9) * v
+            r = abs(x - 8.5) / max(half, 0.01)
+            if r > 1:
+                continue
+            core = r + v * 0.9
+            c.put(x, y, "W" if core < 0.45 else "Q" if core < 0.7 else "v" if core < 0.95 else "p" if core < 1.25 else "K" if r < 0.85 else "z")
+    return c.rows()
+
+
+def sever_heavens_lies():
+    """A golden halo, the goddess's lie, cut through by a cyan slash and falling apart."""
+    c = Canvas()
+    slash = (16.5, 0.5, 1.5, 15.0)
+    for y in range(16):
+        for x in range(18):
+            ring = math.hypot((x - 8.5) / 1.0, (y - 7.0) / 0.62)
+            if 4.4 <= ring <= 5.9 and dist_to_line(x, y, *slash) > 1.6:
+                # The far side of the halo sits a pixel lower: the cut has shifted it.
+                c.put(x, y + (1 if x > 9 else 0), "Y" if y < 6 else "y" if y < 9 else "e")
+    c.where(lambda x, y: dist_to_line(x, y, *slash) < 0.75, "Q")
+    c.where(lambda x, y: 0.75 <= dist_to_line(x, y, *slash) < 1.2 and (x + y) % 2 == 0, "q")
+    for x, y in ((14, 3), (3, 12), (12, 1), (5, 14)):
+        c.put(x, y, "W")
+    return c.rows()
+
+
+def light_and_shadow():
+    """Two crossing cuts: one of light (white and gold), one of shadow (violet), meeting in a
+    magenta spark."""
+    c = Canvas()
+    light, shadow = (2, 1, 15.5, 14.5), (15.5, 1, 2, 14.5)
+    c.where(lambda x, y: dist_to_line(x, y, *shadow) < 1.3, "D")
+    c.where(lambda x, y: dist_to_line(x, y, *shadow) < 0.8, "v")
+    c.where(lambda x, y: dist_to_line(x, y, *shadow) < 0.35, "V")
+    c.where(lambda x, y: dist_to_line(x, y, *light) < 1.2 and (x + y) % 2 == 0, "e")
+    c.where(lambda x, y: dist_to_line(x, y, *light) < 0.75, "Y")
+    c.where(lambda x, y: dist_to_line(x, y, *light) < 0.35, "W")
+    c.where(lambda x, y: math.hypot(x - 8.7, y - 7.8) < 1.6, "p")
+    c.where(lambda x, y: math.hypot(x - 8.7, y - 7.8) < 0.8, "W")
+    return c.rows()
+
+
+def unchained_will():
+    """A chain snapped apart, the broken links flying off around a burst of cyan."""
+    c = Canvas()
+    for cx, cy, tilt in ((4.5, 10.0, -0.5), (13.5, 5.0, -0.5)):
+        def ring(x, y, cx=cx, cy=cy, tilt=tilt):
+            dx, dy = x - cx, y - cy
+            u, w = dx * math.cos(tilt) - dy * math.sin(tilt), dx * math.sin(tilt) + dy * math.cos(tilt)
+            return math.hypot(u / 3.6, w / 2.2)
+        c.where(lambda x, y, ring=ring: 0.62 <= ring(x, y) <= 1.05, "4")
+        c.where(lambda x, y, ring=ring: 0.62 <= ring(x, y) <= 0.8 and y < 9, "6")
+    # The broken ends, and the burst between them.
+    c.where(lambda x, y: math.hypot(x - 9, y - 7.5) < 2.2, "D")
+    for a in range(8):
+        ang = a * math.pi / 4 + 0.3
+        c.line(9 + math.cos(ang) * 1.2, 7.5 + math.sin(ang) * 1.2, 9 + math.cos(ang) * 3.2, 7.5 + math.sin(ang) * 3.2, "q")
+    c.where(lambda x, y: math.hypot(x - 9, y - 7.5) < 1.3, "Q")
+    c.put(9, 7, "W")
+    c.put(9, 8, "W")
+    return c.rows()
+
+
+def forge_of_ten_souls():
+    """An anvil at the First Forge, a flame on it and ten souls circling above."""
+    c = Canvas()
+    # Anvil: face, waist and foot.
+    c.where(lambda x, y: 11 <= y <= 12 and 3 <= x <= 15, "4")
+    c.where(lambda x, y: y == 11 and 3 <= x <= 15, "6")
+    c.where(lambda x, y: y == 11 and 1 <= x <= 2, "4")
+    c.where(lambda x, y: y == 13 and 6 <= x <= 12, "3")
+    c.where(lambda x, y: y == 14 and 5 <= x <= 13, "2")
+    c.where(lambda x, y: y == 15 and 4 <= x <= 14, "1")
+    # The flame on the anvil.
+    for y in range(6, 11):
+        for x in range(6, 13):
+            v = (10.5 - y) / 5
+            r = abs(x - 9) / max(2.6 * (1 - v) + 0.3, 0.1)
+            if r <= 1:
+                c.put(x, y, "W" if r < 0.3 and v < 0.6 else "p" if r < 0.6 else "K")
+    # Ten souls in an arc, in the blade's colours.
+    colours = "KpvqQKpvqQ"
+    for i in range(10):
+        ang = math.pi * (1.05 + 0.9 * i / 9)
+        c.put(9 + math.cos(ang) * 7.6, 7.2 + math.sin(ang) * 6.0, colours[i])
+    return c.rows()
+
+
+def destinys_severance():
+    """The sun-moon disc of the Weaver split in two by one stroke, crimson at the hilt end
+    and cyan at the tip."""
+    c = Canvas()
+    for y in range(16):
+        for x in range(18):
+            r = math.hypot(x - 8.5, y - 7.5)
+            if r <= 6.2:
+                left = x < 8.5 + (y - 7.5) * 0.25
+                # The halves drift apart.
+                shift = -1 if left else 1
+                c.put(x + shift, y, ("y" if r < 4.5 else "e") if left else ("V" if r < 4.5 else "v"))
+    for y in range(16):
+        x = 8.5 + (y - 7.5) * 0.25
+        colour = "K" if y > 10 else "p" if y > 5 else "Q"
+        c.put(x, y, "W" if 4 <= y <= 11 else colour)
+        c.put(x - 1, y, colour)
+    return c.rows()
+
+
+ICONS.update({
+    "sam_mortal_flame": mortal_flame(),
+    "sam_sever_heavens_lies": sever_heavens_lies(),
+    "sam_light_and_shadow": light_and_shadow(),
+    "sam_unchained_will": unchained_will(),
+    "sam_forge_of_ten_souls": forge_of_ten_souls(),
+    "sam_destinys_severance": destinys_severance(),
+})
 
 
 def frame():

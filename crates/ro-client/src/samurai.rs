@@ -70,30 +70,66 @@ pub const SKILLS: &[Skill] = &[
     Skill { id: 7006, internal: "SAM_MURAMASAS_CURSE", name: "Muramasa's Curse", description: "Cursed / Muramasa. Gain 15/20/25/30/35% attack for 20 seconds. Drains 1% of maximum HP each second and ends before the drain would kill you.", icon: "bs_overthrust", slot: 11 },
     Skill { id: 7007, internal: "SAM_ASHEN_WIND_SLASH", name: "Ashen Wind Slash", description: "Cursed / Muramasa. Strike enemies within 3 cells for 300/400/500/600/700% ATK. Has a 15/20/25/30/35% chance to inflict Bleeding for 10 seconds.", icon: "asc_meteorassault", slot: 18 },
     Skill { id: 7008, internal: "SAM_WRATH_UNBOUND", name: "Wrath Unbound", description: "Cursed / Muramasa. Strike for 800/1000/1200/1400/1600% ATK. Requires HP strictly below 30% of maximum. Cooldown: 15 seconds.", icon: "as_sonicblow", slot: 25 },
+    // The Mortal Flame line, Tenseiga's own techniques, in the middle columns between the two
+    // branches. Mortal Flame is granted by the Tenseiga questline, not learned with points.
+    Skill { id: 7009, internal: "SAM_MORTAL_FLAME", name: "Mortal Flame", description: "Mortal Flame / Tenseiga. Quest skill: granted by the Tenseiga questline (for now, Masaru in Prontera grants it to whoever forged Tenseiga). Tenseiga burns with mortal will, not a god's flame. While wielding Tenseiga: ATK +5%, and 10% less damage from Holy and Shadow attacks. Opens Tenseiga's techniques.", icon: "mo_explosionspirits", slot: 2 },
+    Skill { id: 7010, internal: "SAM_SEVER_HEAVENS_LIES", name: "Severing Heaven's Lies", description: "Mortal Flame / Tenseiga. Its edge cuts through illusions and divine lies. Strike one enemy for 500/600/700/800/900% ATK, with a 30/40/50/60/70% chance to strip its buffs.", icon: "lk_spiralpierce", slot: 8 },
+    Skill { id: 7011, internal: "SAM_LIGHT_AND_SHADOW", name: "Light and Shadow", description: "Mortal Flame / Tenseiga. A cut through both light and shadow: strike one enemy twice for 300/350/400/450/500% ATK each, as Holy or Shadow, whichever it takes more damage from.", icon: "kn_bowlingbash", slot: 15 },
+    Skill { id: 7012, internal: "SAM_UNCHAINED_WILL", name: "Unchained Will", description: "Mortal Flame / Tenseiga. Balance is not obedience; balance is freedom. Cure Stun, Freeze, Stone, Sleep, Silence, Curse, Blind and Confusion, and ward them off for 15/20/25/30/35 seconds.", icon: "mo_steelbody", slot: 10 },
+    Skill { id: 7013, internal: "SAM_FORGE_OF_TEN_SOULS", name: "Forge of Ten Souls", description: "Mortal Flame / Tenseiga. The will of every companion lit the First Forge. For 60 seconds, every party member within 7 cells gains 1/2/3/4/5% ATK and MATK for each party member there, counting at most 10.", icon: "pr_gloria", slot: 17 },
+    Skill { id: 7014, internal: "SAM_DESTINYS_SEVERANCE", name: "Destiny's Severance", description: "Mortal Flame / Tenseiga. The strike that severed the bond between divinity and mortal destiny. Strike one enemy for 1000/1250/1500/1750/2000% ATK, ignoring DEF, and 50% more against boss monsters.", icon: "asc_breaker", slot: 23 },
 ];
+
+/// What the skill window says about each skill's use. Matches db/custom/samurai/skill_db.yml
+/// and skill_tree.yml on the server.
+struct Use {
+    max_level: u8,
+    /// SP cost, cooldown and after-cast delay (seconds); None for a passive.
+    cost: Option<(u32, u32, f32)>,
+    target: &'static str,
+    weapon: &'static str,
+    prerequisite: Option<&'static str>,
+    /// Cast time, seconds.
+    cast: Option<f32>,
+}
+
+const ANY_BLADE: &str = "Requires an equipped dagger, one-handed sword, two-handed sword or katar.";
+const TENSEIGA_ONLY: &str = "Requires Tenseiga-no-Hayate to be wielded.";
+
+fn usage(id: u16) -> Use {
+    let (cost, target, prerequisite) = match id {
+        7001 => ((25, 2, 0.3), "One enemy, range 2 cells", None),
+        7002 => ((30, 20, 0.3), "Self", Some("Heaven's Severance Lv 3")),
+        7003 => ((35, 18, 0.3), "Self", Some("Kusanagi Guard Lv 3")),
+        7004 => ((30, 25, 0.3), "Self", Some("Moonlit Reflection Lv 3")),
+        7005 => ((20, 12, 0.3), "Self", None),
+        7006 => ((35, 25, 0.3), "Self", Some("Blood Covenant Lv 3")),
+        7007 => ((30, 4, 0.3), "Self-centered attack, radius 3 cells", Some("Muramasa's Curse Lv 3")),
+        7008 => ((50, 15, 0.3), "One enemy, range 2 cells", Some("Ashen Wind Slash Lv 3")),
+        7009 => return Use { max_level: 1, cost: None, target: "Passive", weapon: "", prerequisite: None, cast: None },
+        7010 => ((40, 3, 0.3), "One enemy, range 2 cells", Some("Mortal Flame Lv 1")),
+        7011 => ((50, 5, 0.5), "One enemy, range 2 cells", Some("Severing Heaven's Lies Lv 3")),
+        7012 => ((40, 60, 0.3), "Self", Some("Mortal Flame Lv 1")),
+        7013 => ((80, 120, 1.0), "Party members within 7 cells", Some("Unchained Will Lv 3")),
+        7014 => ((100, 30, 1.0), "One enemy, range 2 cells", Some("Light and Shadow Lv 5, Forge of Ten Souls Lv 3")),
+        _ => unreachable!("Samurai skill metadata"),
+    };
+    let weapon = if id >= 7010 { TENSEIGA_ONLY } else { ANY_BLADE };
+    Use { max_level: 5, cost: Some(cost), target, weapon, prerequisite, cast: (id == 7014).then_some(1.0) }
+}
 
 pub fn register(names: &mut ro_game::skills::SkillNames, tree: &mut crate::skilltree::SkillTree) {
     for s in SKILLS {
-        // Matches db/custom/samurai/skill_db.yml and skill_tree.yml on the server.
-        let (sp, cooldown, target, prerequisite) = match s.id {
-            7001 => (25, 2, "One enemy, range 2 cells", None),
-            7002 => (30, 20, "Self", Some("Heaven's Severance Lv 3")),
-            7003 => (35, 18, "Self", Some("Kusanagi Guard Lv 3")),
-            7004 => (30, 25, "Self", Some("Moonlit Reflection Lv 3")),
-            7005 => (20, 12, "Self", None),
-            7006 => (35, 25, "Self", Some("Blood Covenant Lv 3")),
-            7007 => (30, 4, "Self-centered attack, radius 3 cells", Some("Muramasa's Curse Lv 3")),
-            7008 => (50, 15, "One enemy, range 2 cells", Some("Ashen Wind Slash Lv 3")),
-            _ => unreachable!("Samurai skill metadata"),
-        };
-        let mut description = vec![
-            s.description.into(),
-            "Maximum level: 5".into(),
-            format!("Target: {target}"),
-            format!("SP cost: {sp}. Cooldown: {cooldown} seconds. After-cast delay: 0.3 seconds."),
-            "Requires an equipped dagger, one-handed sword, two-handed sword or katar.".into(),
-        ];
-        if let Some(prerequisite) = prerequisite {
+        let u = usage(s.id);
+        let mut description = vec![s.description.into(), format!("Maximum level: {}", u.max_level), format!("Target: {}", u.target)];
+        if let Some((sp, cooldown, delay)) = u.cost {
+            let cast = u.cast.map(|c| format!("Cast time: {c} second. ")).unwrap_or_default();
+            description.push(format!("SP cost: {sp}. {cast}Cooldown: {cooldown} seconds. After-cast delay: {delay} seconds."));
+        }
+        if !u.weapon.is_empty() {
+            description.push(u.weapon.into());
+        }
+        if let Some(prerequisite) = u.prerequisite {
             description.push(format!("Prerequisite: {prerequisite}"));
         }
         names.insert(s.id, s.internal, s.name, description);
@@ -105,8 +141,8 @@ pub fn icon(id: u16) -> Option<&'static str> {
     SKILLS.iter().find(|s| s.id == id).map(|s| s.icon)
 }
 
-/// (EFST id, skill id): the server's five temporary Samurai effects.
-pub const BUFFS: &[(u16, u16)] = &[(2000, 7002), (2001, 7003), (2002, 7004), (2003, 7005), (2004, 7006)];
+/// (EFST id, skill id): the server's temporary Samurai effects.
+pub const BUFFS: &[(u16, u16)] = &[(2000, 7002), (2001, 7003), (2002, 7004), (2003, 7005), (2004, 7006), (2005, 7012), (2006, 7013)];
 
 pub fn buff_skill(id: u16) -> Option<&'static Skill> {
     let skill = BUFFS.iter().find(|(efst, _)| *efst == id)?.1;
@@ -125,9 +161,14 @@ mod tests {
         register(&mut names, &mut tree);
         let tabs = tree.tabs(JOB);
         assert_eq!(tabs.iter().map(|t| t.0).collect::<Vec<_>>(), [4013, JOB]);
-        assert_eq!(tabs[1].1.len(), 8);
+        assert_eq!(tabs[1].1.len(), 14);
+        let mut slots: Vec<_> = tabs[1].1.iter().map(|(slot, _)| *slot).collect();
+        slots.sort();
+        slots.dedup();
+        assert_eq!(slots.len(), 14, "no two skills share a slot");
         for (slot, name) in tabs[1].1 {
-            assert!(matches!(slot % crate::skilltree::COLUMNS, 0 | 4));
+            // Kusanagi in column 0, Muramasa in column 4, the Mortal Flame line between them.
+            assert!(slot % crate::skilltree::COLUMNS <= 4);
             let id = names.id_of(name).expect("tree skill has a network ID");
             assert_eq!(names.internal(id), Some(name.as_str()));
             assert!(names.description(name).is_some());
