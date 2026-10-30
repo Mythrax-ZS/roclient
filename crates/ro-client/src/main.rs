@@ -4984,15 +4984,18 @@ impl App {
     /// pad: as audio to a USB DualSense's actuators, as HID reports to a Sony or Nintendo
     /// pad, else through gilrs.
     fn feedback_tick(&mut self, dt: f32) {
-        if self.hid.as_ref().is_some_and(|h| !h.alive()) {
+        // Follow the pad in use: another one picked up closes this one.
+        let want = self.pad.active_ids();
+        if self.hid.as_ref().is_some_and(|h| !h.alive() || want.is_some_and(|w| w != h.ids)) {
             self.hid = None;
             self.audio_haptics = None;
+            self.hid_retry_ms = 0.0;
         }
         if self.hid.is_none() && self.pad.connected() {
             self.hid_retry_ms -= dt;
             if self.hid_retry_ms <= 0.0 {
                 self.hid_retry_ms = 3000.0;
-                self.hid = hidpad::HidPad::open();
+                self.hid = hidpad::HidPad::open(want, self.pad.detected);
                 if self.hid.as_ref().is_some_and(|h| h.kind == hidpad::Kind::DualSense) {
                     self.audio_haptics = haptics::AudioHaptics::open();
                 }

@@ -66,6 +66,8 @@ pub struct Touch {
 /// A connected Sony or Nintendo controller, worked by its own thread.
 pub struct HidPad {
     pub kind: Kind,
+    /// Its USB vendor and product ids.
+    pub ids: (u16, u16),
     touch: Arc<Mutex<Touch>>,
     out: Sender<Output>,
     alive: Arc<AtomicBool>,
@@ -73,8 +75,12 @@ pub struct HidPad {
 }
 
 impl HidPad {
-    /// Opens the first supported controller, if any.
-    pub fn open() -> Option<HidPad> {
+    /// Opens the supported controller with these ids (the pad in use); without ids, the first
+    /// of the family the pad in use belongs to.
+    pub fn open(want: Option<(u16, u16)>, family: crate::padglyph::Style) -> Option<HidPad> {
+        if want.is_some_and(|(v, p)| kind_of(v, p).is_none()) {
+            return None;
+        }
         let api = match hidapi::HidApi::new() {
             Ok(a) => a,
             Err(e) => {
@@ -82,7 +88,19 @@ impl HidPad {
                 return None;
             }
         };
-        let info = api.device_list().find(|d| kind_of(d.vendor_id(), d.product_id()).is_some())?;
+        let fits = |k: Kind| match family {
+            crate::padglyph::Style::PlayStation => k != Kind::SwitchPro,
+            crate::padglyph::Style::Nintendo => k == Kind::SwitchPro,
+            crate::padglyph::Style::Xbox => true,
+        };
+        let info = api.device_list().find(|d| {
+            let ids = (d.vendor_id(), d.product_id());
+            kind_of(ids.0, ids.1).is_some_and(|k| match want {
+                Some(w) => w == ids,
+                None => fits(k),
+            })
+        })?;
+        let ids = (info.vendor_id(), info.product_id());
         let kind = kind_of(info.vendor_id(), info.product_id())?;
         let bt_hint = matches!(info.bus_type(), hidapi::BusType::Bluetooth);
         let dev = match api.open_path(info.path()) {
@@ -93,7 +111,7 @@ impl HidPad {
                 return None;
             }
         };
-        tracing::info!(?kind, bluetooth = bt_hint, "hid: controller opened for touchpad, rumble and light");
+        tracing::info!(?kind, bluetooth = bt_hint, vendor = format!("{:04x}", ids.0), product = format!("{:04x}", ids.1), "hid: controller opened for touchpad, rumble and light");
         let touch = Arc::new(Mutex::new(Touch::default()));
         let alive = Arc::new(AtomicBool::new(true));
         let bluetooth = Arc::new(AtomicBool::new(bt_hint));
@@ -106,7 +124,7 @@ impl HidPad {
                 a.store(false, Ordering::Relaxed);
             })
             .ok()?;
-        Some(HidPad { kind, touch, out: tx, alive, last: Output::default() })
+        Some(HidPad { kind, ids, touch, out: tx, alive, last: Output::default() })
     }
 
     pub fn alive(&self) -> bool {

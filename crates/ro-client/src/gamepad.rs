@@ -53,7 +53,7 @@ impl Pad {
             tracing::info!(name = pad.name(), "controller connected");
             id
         }));
-        let detected = gilrs.as_ref().map_or(crate::padglyph::Style::Xbox, family);
+        let detected = gilrs.as_ref().map_or(crate::padglyph::Style::Xbox, |g| family(g, active));
         Self { gilrs, active, used: false, detected, rumble: None, rumble_now: (0.0, 0.0) }
     }
 
@@ -90,6 +90,12 @@ impl Pad {
         self.active.is_some()
     }
 
+    /// The USB vendor and product ids of the pad in use, when the system reports them.
+    pub fn active_ids(&self) -> Option<(u16, u16)> {
+        let p = self.gilrs.as_ref()?.gamepad(self.active?);
+        Some((p.vendor_id()?, p.product_id()?))
+    }
+
     /// True once a controller has been used (the UI then shows button hints).
     pub fn in_use(&self) -> bool {
         self.used && self.active.is_some()
@@ -101,10 +107,8 @@ impl Pad {
         while let Some(ev) = g.next_event() {
             match ev.event {
                 EventType::ButtonPressed(b, _) => {
-                    // Steam Input can put a virtual Xbox pad in front of a PlayStation or
-                    // Nintendo one; label for the physical controller if one is connected.
-                    self.detected = family(g);
                     self.active = Some(ev.id);
+                    self.detected = family(g, self.active);
                     self.used = true;
                     frame.pressed.push(b);
                 }
@@ -127,7 +131,20 @@ impl Pad {
     }
 }
 
-/// The family of the connected controllers: PlayStation or Nintendo if any is one, else Xbox.
-fn family(g: &Gilrs) -> crate::padglyph::Style {
-    g.gamepads().find_map(|(_, p)| crate::padglyph::detect(p.name())).unwrap_or(crate::padglyph::Style::Xbox)
+/// A pad's family, by its maker's USB id, else its name.
+fn pad_family(p: &gilrs::Gamepad) -> Option<crate::padglyph::Style> {
+    match p.vendor_id() {
+        Some(0x054c) => Some(crate::padglyph::Style::PlayStation),
+        Some(0x057e) => Some(crate::padglyph::Style::Nintendo),
+        _ => crate::padglyph::detect(p.name()),
+    }
+}
+
+/// The family to label buttons for: the pad in use. Steam Input can put a virtual Xbox pad in
+/// front of a PlayStation or Nintendo one, so failing that, any connected pad that is one.
+fn family(g: &Gilrs, active: Option<gilrs::GamepadId>) -> crate::padglyph::Style {
+    active
+        .and_then(|id| pad_family(&g.gamepad(id)))
+        .or_else(|| g.gamepads().find_map(|(_, p)| pad_family(&p)))
+        .unwrap_or(crate::padglyph::Style::Xbox)
 }
