@@ -86,6 +86,7 @@ epute*.bson)
 - [x] Equipment switch set (Switch tab: add, remove, swap; ZC_EQUIPSWITCH_LIST/ADD/REMOVE/REPLY)
 - [x] Level aura for players reported at level 99+ (clevel from the spawn packets; EF_LEVEL99 ribbons, EF_LEVEL99_2 ground star, EF_LEVEL99_3 sparkles, code-drawn after roBrowser's reconstruction); /aura simplifies it, /aura2 turns it off. rAthena's `max_lv` / `aura_lv` / `client_limit_unit_lv` choose who gets it
 - [ ] The higher auras (EF_LEVEL99_150, the 4th-job orbs EF_LEVEL99_ORB1/2): when the original shows them is unknown
+- Deliberate difference: Prontera's south avenue paving (`src/mapfix.rs`). The map mirrors its cobble rosettes across the avenue's centre line but sets the mirrored tiles half a rosette lower, so the original shows a seam down the middle; this client aligns them (307 tiles, ground drawing only)
 
 ## Packet audit (2026-10-30)
 Server packets for PACKETVER 20250402 were taken from rAthena's preprocessed packet

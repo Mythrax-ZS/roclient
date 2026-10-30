@@ -46,7 +46,7 @@ pub struct Gnd {
 }
 
 /// Baked per-surface lighting: an 8x8 shadow (brightness) map plus an RGB color map.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Lightmaps {
     pub width: u32,
     pub height: u32,

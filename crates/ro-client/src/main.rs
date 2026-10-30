@@ -41,6 +41,7 @@ mod ranking;
 mod storesearch;
 mod stylist;
 mod lapine;
+mod mapfix;
 mod reform;
 mod enchant;
 mod market;
@@ -268,7 +269,11 @@ fn load_map(vfs: &ro_vfs::Vfs, name: &str, up: &ro_render::Upscaler) -> anyhow::
     let read = |path: String| vfs.read(&path)?.with_context(|| format!("{path} not found"));
     let rsw = ro_formats::rsw::Rsw::parse(&read(format!("data\\{name}.rsw"))?)?;
     let gnd_name = if rsw.gnd.is_empty() { format!("{name}.gnd") } else { rsw.gnd.clone() };
-    let gnd = ro_formats::gnd::Gnd::parse(&read(format!("data\\{gnd_name}"))?)?;
+    let mut gnd = ro_formats::gnd::Gnd::parse(&read(format!("data\\{gnd_name}"))?)?;
+    let fixed = mapfix::ground(name, &mut gnd);
+    if fixed > 0 {
+        tracing::info!(map = name, tiles = fixed, "ground fixes");
+    }
 
     // Each model file is parsed once and shared by all its placements.
     let mut models: std::collections::HashMap<String, Option<ro_formats::rsm::Rsm>> = Default::default();
