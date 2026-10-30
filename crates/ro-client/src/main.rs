@@ -2903,6 +2903,9 @@ impl App {
                         m.set_pose(Pose::Cast, c.ms as f32);
                     }
                 }
+                if c.ms > 0 && c.src == self.account_id {
+                    self.feel(haptics::Cue::Charge(c.ms));
+                }
                 if c.ms > 0 {
                     self.casts.insert(c.src, (0.0, c.ms as f32));
                     // The magic circle under the caster while chanting.
@@ -3046,6 +3049,9 @@ impl App {
                 self.hud.push_chat(ro_net::ChatKind::Broadcast, text);
             }
             CastCancel(id) => {
+                if id == self.account_id {
+                    self.haptics.end_charge();
+                }
                 self.casts.remove(&id);
                 if let Some(m) = self.mob_mut(id) {
                     if matches!(m.pose, Some((Pose::Cast, _))) {
@@ -3054,6 +3060,8 @@ impl App {
                 }
             }
             SkillFailed { skill, cause, amount, item } => {
+                self.haptics.end_charge();
+                self.feel(haptics::Cue::Fail);
                 let name = self.skills.iter().find(|s| s.id == skill).map(|s| self.skill_names.display(&s.name)).unwrap_or_else(|| "Skill".into());
                 let why = match cause {
                     1 => "not enough SP",
@@ -3116,6 +3124,7 @@ impl App {
                 self.hud.push_chat(ro_net::ChatKind::System, basic.unwrap_or_else(|| format!("{name}: {why}.")));
             }
             SkillUsed { skill, src, target } => {
+                self.feel_skill_used(src, target);
                 self.casts.remove(&src);
                 let target_cell = self.mob_mut(target).map(|m| m.walker.cell);
                 if let Some(m) = self.mob_mut(src) {
@@ -3131,6 +3140,13 @@ impl App {
             }
             SkillHit { skill, act } => {
                 self.feel_act(&act);
+                // Our skill landed: a pulse per hit.
+                if act.src == self.account_id {
+                    self.haptics.end_charge();
+                    if act.damage > 0 && act.target != self.account_id {
+                        self.feel(haptics::Cue::Strike(act.hits.max(1) as u16));
+                    }
+                }
                 let target = act.target;
                 // Grimtooth: a line of spikes erupting from the caster to the target.
                 if skill == 137 {
@@ -3152,6 +3168,10 @@ impl App {
                 self.skill_fx(skill, self.unit_pos(target), true);
             }
             SkillAt { skill, src, cell } => {
+                if src == self.account_id {
+                    self.haptics.end_charge();
+                    self.feel(haptics::Cue::Ground);
+                }
                 self.casts.remove(&src);
                 if let Some(m) = self.mob_mut(src) {
                     m.face((cell.0 as i32, cell.1 as i32));
@@ -4986,6 +5006,20 @@ impl App {
             self.feel(haptics::Cue::Hit((act.damage as f32 + act.left_damage.max(0) as f32) / max));
         } else if act.src == me && act.target != me && act.kind == 10 && act.damage > 0 {
             self.feel(haptics::Cue::Crit);
+        }
+    }
+
+    /// Feedback for a non-damaging skill: ours on ourselves or a player swells, on a monster
+    /// zaps; another player's on us swells gently.
+    fn feel_skill_used(&mut self, src: u32, target: u32) {
+        let me = self.account_id;
+        let kind = |app: &Self, id: u32| app.units.get(&id).map(|m| m.kind);
+        if src == me {
+            self.haptics.end_charge();
+            let cue = if target == me || target == 0 || kind(self, target) == Some(0) { haptics::Cue::Support } else { haptics::Cue::Hex };
+            self.feel(cue);
+        } else if target == me && kind(self, src) == Some(0) {
+            self.feel(haptics::Cue::Blessed);
         }
     }
 
