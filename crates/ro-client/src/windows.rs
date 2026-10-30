@@ -58,8 +58,29 @@ pub enum UiAction {
 pub const HOTKEY_ROWS: u8 = 4;
 pub const HOTKEYS_PER_ROW: usize = 9;
 
+/// An inventory item being dragged: onto the shortcut bar (usable items and equipment), into
+/// storage, or out onto the world to drop it.
+#[derive(Clone, Copy)]
+pub struct ItemDrag {
+    pub index: u16,
+    pub id: u32,
+    pub amount: u16,
+    /// Usable or equipment: it can go on the shortcut bar.
+    pub shortcut: bool,
+    /// Not worn: it can be dropped or stored.
+    pub loose: bool,
+}
+
+impl ItemDrag {
+    fn hotkey(&self) -> Option<Hotkey> {
+        self.shortcut.then_some(Hotkey { skill: false, id: self.id, count: 0 })
+    }
+}
+
 #[derive(Default)]
 pub struct Windows {
+    /// An inventory stack dragged onto the world, waiting for "how many": (index, amount, typed).
+    drop_asking: Option<(u16, u16, String)>,
     /// The cash shop is open (it lives in `stores`), and its menu button was clicked.
     pub cash_shown: bool,
     pub cash_toggle: bool,
@@ -189,7 +210,7 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                     let key = v.hotkeys.get(index).copied().unwrap_or_default();
                     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(SIZE), egui::Sense::click_and_drag());
                     let painter = ui.painter_at(rect);
-                    let hovering_drop = resp.dnd_hover_payload::<Hotkey>().is_some();
+                    let hovering_drop = resp.dnd_hover_payload::<Hotkey>().is_some() || resp.dnd_hover_payload::<ItemDrag>().is_some_and(|d| d.shortcut);
                     let bg = if hovering_drop { Color32::from_rgba_unmultiplied(255, 220, 120, 60) } else if resp.hovered() { Color32::from_white_alpha(30) } else { Color32::from_white_alpha(12) };
                     if let Some(t) = v.skin.and_then(|s| s.texture("itemwin_mid")) {
                         painter.image(t.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
@@ -230,8 +251,8 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                         outlined(&painter, rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, &key_label, 10.0, Color32::from_gray(200));
                     }
 
-                    if let Some(dropped) = resp.dnd_release_payload::<Hotkey>() {
-                        action = Some(UiAction::SetHotkey { index: index as u16, key: *dropped });
+                    if let Some(dropped) = resp.dnd_release_payload::<Hotkey>().map(|k| *k).or_else(|| resp.dnd_release_payload::<ItemDrag>().and_then(|d| d.hotkey())) {
+                        action = Some(UiAction::SetHotkey { index: index as u16, key: dropped });
                     } else if key.id != 0 {
                         resp.dnd_set_drag_payload(key);
                         if resp.clicked() {
@@ -268,7 +289,8 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
         });
     });
     // Show what is being dragged under the pointer.
-    if let (Some(key), Some(pos)) = (egui::DragAndDrop::payload::<Hotkey>(ctx), ctx.pointer_interact_pos()) {
+    let dragged = egui::DragAndDrop::payload::<Hotkey>(ctx).map(|k| *k).or_else(|| egui::DragAndDrop::payload::<ItemDrag>(ctx).map(|d| Hotkey { skill: false, id: d.id, count: 0 }));
+    if let (Some(key), Some(pos)) = (dragged, ctx.pointer_interact_pos()) {
         let tex = if key.skill { v.skill_icons.get(&(key.id as u16)) } else { v.icons.get(&key.id) };
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("drag icon")));
         paint_icon(&painter, egui::Rect::from_center_size(pos, Vec2::splat(SIZE)), tex, Color32::from_white_alpha(200));
@@ -476,15 +498,12 @@ impl Windows {
     }
 }
 
-/// What an inventory slot does: tooltip, drag to the shortcut bar, double-click to use or
-/// equip, and the right-click menu. Shared by both interface styles.
+/// What an inventory slot does: tooltip, drag (to the shortcut bar, storage or the world),
+/// double-click to use or equip, and the right-click menu. Shared by both interface styles.
 fn inventory_item_actions(resp: egui::Response, it: &InvItem, v: &View) -> Option<UiAction> {
     let mut action = None;
     let resp = resp.on_hover_ui(|ui| compare_tooltip(ui, v.db, it, v.items));
-    // Usable items and equipment can go on the shortcut bar.
-    if it.is_usable() || it.is_equipment() {
-        resp.dnd_set_drag_payload(Hotkey { skill: false, id: it.id, count: 0 });
-    }
+    resp.dnd_set_drag_payload(ItemDrag { index: it.index, id: it.id, amount: it.amount, shortcut: it.is_usable() || it.is_equipment(), loose: it.equipped == 0 });
     if resp.double_clicked() {
         action = Some(if it.kind == ro_game::items::kind::CARD {
             UiAction::CardTargets(it.index)
@@ -1533,7 +1552,45 @@ impl Windows {
             });
             self.skills = open;
         }
+        if let Some(a) = self.drop_to_world(ctx) {
+            action = Some(a);
+        }
         action
+    }
+
+    /// An item dragged out of the windows and released over the world is dropped, as in the
+    /// original client; a stack first asks how many.
+    fn drop_to_world(&mut self, ctx: &egui::Context) -> Option<UiAction> {
+        if let Some(d) = egui::DragAndDrop::payload::<ItemDrag>(ctx).filter(|d| d.loose) {
+            if ctx.input(|i| i.pointer.any_released()) && !ctx.is_pointer_over_egui() {
+                egui::DragAndDrop::clear_payload(ctx);
+                if d.amount <= 1 {
+                    return Some(UiAction::Drop { index: d.index, amount: 1 });
+                }
+                self.drop_asking = Some((d.index, d.amount, d.amount.to_string()));
+            }
+        }
+        let (index, max, typed) = self.drop_asking.as_mut()?;
+        let (index, max) = (*index, *max);
+        let mut done = None;
+        egui::Window::new("Drop how many?").id(egui::Id::unique("drop_amount")).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO).show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(typed).desired_width(80.0)).request_focus();
+                ui.label(format!("/ {max}"));
+            });
+            let n = typed.trim().parse::<u16>().unwrap_or(0).min(max);
+            ui.horizontal(|ui| {
+                if ui.add_enabled(n > 0, egui::Button::new("OK")).clicked() || (n > 0 && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                    done = Some(Some(n));
+                }
+                if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    done = Some(None);
+                }
+            });
+        });
+        let choice = done?;
+        self.drop_asking = None;
+        choice.map(|amount| UiAction::Drop { index, amount })
     }
 }
 
@@ -1567,5 +1624,46 @@ fn skill_tooltip(ui: &mut egui::Ui, v: &View, internal: &str, skill: Option<&Ski
     if skill.is_some_and(|s| s.level > 0 && s.target != 0) {
         ui.separator();
         ui.label(RichText::new("Double-click to use, or drag to the shortcut bar").color(crate::classic::ink(Color32::GRAY)).size(11.5));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The left button released at `at` while `drag` is being carried, after a frame that lets
+    /// egui learn where its windows end (as every frame but the first has).
+    fn release(w: &mut Windows, drag: ItemDrag, at: egui::Pos2) -> Option<UiAction> {
+        let ctx = egui::Context::default();
+        let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 800.0)));
+        let frame = |events| egui::RawInput { events, screen_rect: screen, ..Default::default() };
+        ctx.run_ui(frame(vec![egui::Event::PointerMoved(at)]), |_| {}).textures_delta.clear();
+        let up = egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() };
+        let mut action = None;
+        ctx.run_ui(frame(vec![up]), |ui| {
+            egui::DragAndDrop::set_payload(ui.ctx(), drag);
+            action = w.drop_to_world(ui.ctx());
+        })
+        .textures_delta
+        .clear();
+        action
+    }
+
+    #[test]
+    fn an_item_released_over_the_world_is_dropped_and_a_stack_asks_how_many() {
+        let mut w = Windows::default();
+        let single = ItemDrag { index: 4, id: 501, amount: 1, shortcut: true, loose: true };
+        assert!(matches!(release(&mut w, single, egui::pos2(300.0, 300.0)), Some(UiAction::Drop { index: 4, amount: 1 })));
+        let stack = ItemDrag { index: 9, id: 909, amount: 25, shortcut: false, loose: true };
+        assert!(release(&mut w, stack, egui::pos2(300.0, 300.0)).is_none());
+        assert_eq!(w.drop_asking.as_ref().map(|(i, n, typed)| (*i, *n, typed.as_str())), Some((9, 25, "25")));
+    }
+
+    #[test]
+    fn worn_items_are_not_dropped() {
+        let mut w = Windows::default();
+        let worn = ItemDrag { index: 2, id: 1201, amount: 1, shortcut: true, loose: false };
+        assert!(release(&mut w, worn, egui::pos2(300.0, 300.0)).is_none());
+        assert!(w.drop_asking.is_none());
     }
 }

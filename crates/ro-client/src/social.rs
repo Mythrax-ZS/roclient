@@ -342,12 +342,10 @@ impl Social {
                 });
                 // An item dragged in from the inventory window carries its item id.
                 let window = ui.min_rect();
-                if let Some(key) = egui::DragAndDrop::payload::<ro_net::Hotkey>(ui.ctx()).filter(|k| !k.skill) {
+                if let Some(d) = egui::DragAndDrop::payload::<crate::windows::ItemDrag>(ui.ctx()).filter(|d| d.loose) {
                     let over = ui.ctx().pointer_hover_pos().is_some_and(|p| window.contains(p));
                     if over && ui.input(|i| i.pointer.any_released()) {
-                        if let Some(it) = c.inventory.iter().find(|i| i.id == key.id && i.equipped == 0) {
-                            moved.push(StorageDrag::Put(it.index, it.amount));
-                        }
+                        moved.push(StorageDrag::Put(d.index, d.amount));
                         egui::DragAndDrop::clear_payload(ui.ctx());
                     }
                 }
