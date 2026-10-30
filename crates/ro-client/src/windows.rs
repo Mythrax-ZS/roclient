@@ -61,8 +61,8 @@ pub enum UiAction {
 /// The shortcut bar: rows of F1..F9 slots, saved on the server (38 slots per tab).
 pub const HOTKEY_ROWS: u8 = 4;
 pub const HOTKEYS_PER_ROW: usize = 9;
-/// Battle mode keys for the second, third and fourth shortcut rows (counted from the one
-/// on show), as the original: Q ~ O, A ~ L and Z ~ >.
+/// The default battle mode keys for the second, third and fourth shortcut rows (counted from
+/// the one on show), as the original: Q ~ O, A ~ L and Z ~ >. Settings can change them.
 pub const BATTLE_KEYS: [&str; 3] = ["qwertyuio", "asdfghjkl", "zxcvbnm,."];
 
 /// An inventory item being dragged: onto the shortcut bar (usable items and equipment), into
@@ -173,6 +173,8 @@ pub struct View<'a> {
     pub hotkey_rows: u8,
     /// Battle mode (/bm): the rows above the first answer to letter keys.
     pub battle_mode: bool,
+    /// Those keys, a string of slot keys per row above the first.
+    pub battle_keys: &'a [String],
     /// Skills cooling down: id -> when they are ready again.
     pub cooldowns: &'a HashMap<u16, std::time::Instant>,
     /// We have a pushcart (inventory items can go into it).
@@ -209,7 +211,7 @@ fn slot_key_label(v: &View, offset: u8, col: usize) -> String {
         // Controller: hold RT for this row (LT for the next), then the button shown.
         0 if v.pad_hints => (if v.playstation { PS } else { XBOX })[col].to_string(),
         0 => format!("F{}", col + 1),
-        n if v.battle_mode => BATTLE_KEYS.get(n as usize - 1).and_then(|k| k.chars().nth(col)).map_or(String::new(), |c| c.to_ascii_uppercase().to_string()),
+        n if v.battle_mode => v.battle_keys.get(n as usize - 1).and_then(|k| k.chars().nth(col)).map_or(String::new(), |c| c.to_uppercase().to_string()),
         _ => String::new(),
     }
 }

@@ -32,6 +32,10 @@ pub struct Settings {
     pub aura_simple: bool,
     /// /bm: letter keys use the shortcut bar (Q..O, A..L, Z..>) and Enter or Space opens chat.
     pub battle_mode: bool,
+    /// Battle mode keys for the second, third and fourth shortcut rows, one per slot.
+    pub battle_keys: Vec<String>,
+    /// Battle mode: Space opens the chat (as the original); off, Space is free for a slot.
+    pub battle_space_chat: bool,
     /// Shortcut bar rows on show (F12 cycles 1..4 and hidden).
     pub hotkey_rows: u8,
     /// What Alt+1..Alt+0 say (the macro window, Alt+M).
@@ -42,7 +46,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true }
     }
 }
 
@@ -180,6 +184,43 @@ impl Settings {
                 ui.end_row();
                 ui.label("Minimap");
                 ui.checkbox(&mut self.minimap, "Show (Ctrl+Tab)");
+                ui.end_row();
+                ui.label(egui::RichText::new("Battle mode").strong());
+                ui.checkbox(&mut self.battle_mode, "On (/bm)").on_hover_text("Letter keys use the shortcut rows; Enter opens the chat");
+                ui.end_row();
+                ui.label("");
+                ui.checkbox(&mut self.battle_space_chat, "Space opens the chat");
+                ui.end_row();
+                ui.label("Shortcut rows");
+                egui::ComboBox::from_id_salt("hotkey rows")
+                    .selected_text(match self.hotkey_rows { 0 => "Hidden".to_string(), n => n.to_string() })
+                    .show_ui(ui, |ui| {
+                        for n in [1, 2, 3, 4, 0] {
+                            ui.selectable_value(&mut self.hotkey_rows, n, if n == 0 { "Hidden".to_string() } else { n.to_string() });
+                        }
+                    })
+                    .response
+                    .on_hover_text("F12 cycles these too");
+                ui.end_row();
+                self.battle_keys.resize(3, String::new());
+                for (i, keys) in self.battle_keys.iter_mut().enumerate() {
+                    ui.label(format!("Row {} keys", i + 2)).on_hover_text("One key per slot, left to right (nine). Counted from the row on show.");
+                    ui.horizontal(|ui| {
+                        let mut text = keys.to_uppercase();
+                        if ui.add(egui::TextEdit::singleline(&mut text).char_limit(9).desired_width(110.0).font(egui::TextStyle::Monospace)).changed() {
+                            *keys = text.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
+                        }
+                        if keys.chars().count() < 9 {
+                            ui.label(egui::RichText::new(format!("{} of 9", keys.chars().count())).size(11.0).color(egui::Color32::from_rgb(220, 140, 60)));
+                        }
+                    });
+                    ui.end_row();
+                }
+                ui.label("");
+                if ui.button("Default keys").clicked() {
+                    self.battle_keys = crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect();
+                    self.battle_space_chat = true;
+                }
                 ui.end_row();
                 ui.label("Screenshots");
                 ui.checkbox(&mut self.screenshot_ui, "Include the interface").on_hover_text("Print Screen or Scroll Lock saves a lossless PNG in the ScreenShot folder");

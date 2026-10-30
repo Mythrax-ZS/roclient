@@ -634,9 +634,9 @@ fn screenshot_path() -> PathBuf {
     (0..).map(|n| dir.join(format!("screen{n:04}.png"))).find(|p| !p.exists()).unwrap_or_default()
 }
 
-/// Battle mode: the shortcut slot a letter key uses. Q ~ O is the row after the one on show,
-/// A ~ L the next and Z ~ > the one after (rows wrap around).
-fn battle_slot(key: &str, page: u8) -> Option<usize> {
+/// Battle mode: the shortcut slot a key uses. `rows` holds the keys of the row after the one
+/// on show, the next and the one after (Q ~ O, A ~ L, Z ~ > by default); rows wrap around.
+fn battle_slot(key: &str, page: u8, rows: &[String]) -> Option<usize> {
     let mut chars = key.chars().map(|c| c.to_ascii_lowercase());
     let c = match (chars.next()?, chars.next()) {
         // Shift held: < and > are still the , and . keys.
@@ -645,8 +645,8 @@ fn battle_slot(key: &str, page: u8) -> Option<usize> {
         (c, None) => c,
         _ => return None,
     };
-    windows::BATTLE_KEYS.iter().enumerate().find_map(|(i, row)| {
-        let col = row.chars().position(|k| k == c)?;
+    rows.iter().take(HOTKEY_ROWS as usize - 1).enumerate().find_map(|(i, row)| {
+        let col = row.chars().take(HOTKEYS_PER_ROW).position(|k| k.to_ascii_lowercase() == c)?;
         Some((page as usize + i + 1) % HOTKEY_ROWS as usize * HOTKEYS_PER_ROW + col)
     })
 }
@@ -3049,13 +3049,21 @@ impl App {
                 if let Some(p) = self.player.as_mut() {
                     p.pose = None;
                 }
+                // Basic Skill refusals name what was refused (trade, emotions, sit, chat room,
+                // party, shout, PK, aligning); rAthena also sends "emotions" when emotes come
+                // faster than one a second or two.
+                let basic = match (skill, cause, amount) {
+                    (1, 0, n @ 0..=6) => msgstr::get(159 + n as usize, &[]),
+                    (1, 0, 7) => msgstr::get(383, &[]),
+                    _ => None,
+                };
                 let why = if cause == 71 && item != 0 {
                     let item_name = self.item_db.as_ref().map_or_else(|| format!("Item #{item}"), |d| d.name(item, true));
                     format!("requires {amount} {item_name}")
                 } else {
                     why.to_string()
                 };
-                self.hud.push_chat(ro_net::ChatKind::System, format!("{name}: {why}."));
+                self.hud.push_chat(ro_net::ChatKind::System, basic.unwrap_or_else(|| format!("{name}: {why}.")));
             }
             SkillUsed { skill, src, target } => {
                 self.casts.remove(&src);
@@ -3799,9 +3807,14 @@ impl App {
             }
             Key::Character(_) if self.ctrl => {}
             // Battle mode: Space opens the chat, letters use the shortcut rows.
-            Key::Named(NamedKey::Space) if self.settings.battle_mode => self.hud.focus_chat(),
+            Key::Named(NamedKey::Space) if self.settings.battle_mode && self.settings.battle_space_chat => self.hud.focus_chat(),
+            Key::Named(NamedKey::Space) if self.settings.battle_mode => {
+                if let Some(slot) = battle_slot(" ", self.hotkey_row, &self.settings.battle_keys) {
+                    self.press_hotkey(slot, logical_key.clone());
+                }
+            }
             Key::Character(c) if self.settings.battle_mode => {
-                if let Some(slot) = battle_slot(c, self.hotkey_row) {
+                if let Some(slot) = battle_slot(c, self.hotkey_row, &self.settings.battle_keys) {
                     self.press_hotkey(slot, logical_key.clone());
                 }
             }
@@ -6439,6 +6452,8 @@ impl App {
             let guild_name = self.guild.name.clone();
             let items: Vec<&ro_game::items::InvItem> = self.inventory.items.values().collect();
             let skill_names = |n: &str| self.skill_names.display(n);
+            // A copy: the UI below may change the settings while the view is held.
+            let battle_keys = self.settings.battle_keys.clone();
             let view = windows::View {
                 portrait: self.portrait.as_ref().and_then(|p| p.1.as_ref()),
                 skin: self.skin.as_ref().filter(|_| self.settings.classic_ui),
@@ -6462,6 +6477,7 @@ impl App {
                 hotkey_row: self.hotkey_row,
                 hotkey_rows: self.settings.hotkey_rows,
                 battle_mode: self.settings.battle_mode,
+                battle_keys: &battle_keys,
                 cooldowns: &self.cooldowns,
                 has_cart: self.merchant.has_cart(),
                 show_equip: self.show_equip,
@@ -7664,7 +7680,18 @@ fn attack_group(r: &ro_render::Renderer, a: &ro_render::Actor) -> usize {
 
 #[cfg(test)]
 mod battle_mode_tests {
-    use super::battle_slot;
+    fn battle_slot(key: &str, page: u8) -> Option<usize> {
+        let rows: Vec<String> = crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect();
+        super::battle_slot(key, page, &rows)
+    }
+
+    #[test]
+    fn rebound_keys_are_used() {
+        let rows = vec!["12345".to_string(), String::new(), "zx".to_string()];
+        assert_eq!(super::battle_slot("3", 0, &rows), Some(11));
+        assert_eq!(super::battle_slot("x", 0, &rows), Some(28));
+        assert_eq!(super::battle_slot("q", 0, &rows), None);
+    }
 
     #[test]
     fn letter_rows_follow_the_page_on_show() {
