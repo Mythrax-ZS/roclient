@@ -49,11 +49,17 @@ pub struct Settings {
     pub exp_messages: bool,
     /// Controller button icons: the connected pad's family, or one chosen.
     pub pad_style: crate::padglyph::Choice,
+    /// Controller rumble strength (0 off, 1 full).
+    pub vibration: f32,
+    /// A PlayStation pad's touchpad moves the pointer.
+    pub touchpad: bool,
+    /// A PlayStation pad's light bar shows our HP.
+    pub light_bar: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false, pad_style: Default::default() }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false, pad_style: Default::default(), vibration: 1.0, touchpad: true, light_bar: true }
     }
 }
 
@@ -252,6 +258,16 @@ impl Settings {
                 }
             });
         }
+        ui.end_row();
+        ui.label("Vibration");
+        ui.add(egui::Slider::new(&mut self.vibration, 0.0..=1.0).custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{:.0}%", v * 100.0) }))
+            .on_hover_text("Rumble when you are hit, land a critical, level up or run low on HP. HD rumble on Switch Pro Controllers; a wired DualSense uses its haptic motors.");
+        ui.end_row();
+        ui.label("PlayStation");
+        ui.vertical(|ui| {
+            ui.checkbox(&mut self.touchpad, "Touchpad moves the pointer").on_hover_text("Press to click, two fingers to right-click; swipe two fingers across to change the shortcut row, up or down to zoom");
+            ui.checkbox(&mut self.light_bar, "Light bar shows HP");
+        });
         ui.end_row();
         section(ui, "Shortcut bar");
         ui.label("Rows shown");

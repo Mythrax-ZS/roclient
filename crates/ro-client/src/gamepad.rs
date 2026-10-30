@@ -32,6 +32,10 @@ pub struct Pad {
     used: bool,
     /// The connected controller's family, for its button glyphs.
     pub detected: crate::padglyph::Style,
+    /// Rumble: a constant strong and weak effect on the active pad, their gains set to the
+    /// strength wanted, and the strengths last set.
+    rumble: Option<(gilrs::GamepadId, gilrs::ff::Effect, gilrs::ff::Effect)>,
+    rumble_now: (f32, f32),
 }
 
 fn deadzone(v: Vec2) -> Vec2 {
@@ -50,7 +54,40 @@ impl Pad {
             id
         }));
         let detected = gilrs.as_ref().map_or(crate::padglyph::Style::Xbox, family);
-        Self { gilrs, active, used: false, detected }
+        Self { gilrs, active, used: false, detected, rumble: None, rumble_now: (0.0, 0.0) }
+    }
+
+    /// Runs the active pad's motors at these strengths (0..1): the heavy one and the light one.
+    pub fn set_rumble(&mut self, strong: f32, weak: f32) {
+        let want = ((strong * 50.0).round() / 50.0, (weak * 50.0).round() / 50.0);
+        let (Some(g), Some(id)) = (self.gilrs.as_mut(), self.active) else { return };
+        if self.rumble.as_ref().is_some_and(|r| r.0 == id) && want == self.rumble_now {
+            return;
+        }
+        if self.rumble.as_ref().is_none_or(|r| r.0 != id) {
+            self.rumble = None;
+            if want == (0.0, 0.0) || !g.gamepad(id).is_ff_supported() {
+                return;
+            }
+            use gilrs::ff::{BaseEffect, BaseEffectType, EffectBuilder};
+            let make = |g: &mut Gilrs, kind| EffectBuilder::new().add_effect(BaseEffect { kind, ..Default::default() }).gamepads(&[id]).finish(g).ok();
+            let (Some(s), Some(w)) = (make(g, BaseEffectType::Strong { magnitude: u16::MAX }), make(g, BaseEffectType::Weak { magnitude: u16::MAX })) else {
+                tracing::info!("controller rumble unavailable");
+                return;
+            };
+            let _ = (s.set_gain(0.0), w.set_gain(0.0), s.play(), w.play());
+            self.rumble = Some((id, s, w));
+            self.rumble_now = (0.0, 0.0);
+        }
+        if let Some((_, s, w)) = &self.rumble {
+            let _ = (s.set_gain(want.0), w.set_gain(want.1));
+            self.rumble_now = want;
+        }
+    }
+
+    /// A controller is connected.
+    pub fn connected(&self) -> bool {
+        self.active.is_some()
     }
 
     /// True once a controller has been used (the UI then shows button hints).

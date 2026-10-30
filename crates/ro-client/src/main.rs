@@ -58,6 +58,8 @@ mod emblem;
 mod emotes;
 mod settings;
 mod padglyph;
+mod haptics;
+mod hidpad;
 mod shortcuts;
 mod skilltree;
 mod status_icons;
@@ -1095,6 +1097,20 @@ struct App {
     /// Test runs: draw the controller UI in this style (and as if this row's trigger were
     /// held) without a controller (`pad:style[:row]`).
     pad_preview: Option<(padglyph::Style, Option<u8>)>,
+    /// A Sony or Nintendo controller opened directly (touchpad, rumble, light bar), and when
+    /// to look for one again.
+    hid: Option<hidpad::HidPad>,
+    hid_retry_ms: f32,
+    /// A DualSense on USB: its haptic actuators played as audio.
+    audio_haptics: Option<haptics::AudioHaptics>,
+    haptics: haptics::Haptics,
+    heartbeat_ms: f32,
+    /// The touchpad as last read, where it is steering the pointer (window pixels), the
+    /// two-finger slide so far, and the mouse button a touchpad press is holding.
+    touch_prev: hidpad::Touch,
+    touch_pos: Option<(f64, f64)>,
+    touch_slide: glam::Vec2,
+    touch_button: Option<MouseButton>,
     /// The unit the controller acts on (highlighted), the walk direction being held and
     /// time until the walk is re-aimed.
     pad_target: Option<u32>,
@@ -2393,6 +2409,7 @@ impl App {
                             p.set_pose(Pose::Dead, f32::MAX);
                         }
                         self.hud.push_chat(ro_net::ChatKind::System, "You have died.".into());
+                        self.feel(haptics::Cue::Death);
                         self.dead = true;
                         self.attack = None;
                         self.walk_goal = None;
@@ -2412,6 +2429,7 @@ impl App {
                 if act.target != 0 && act.src != act.target {
                     self.aggro.insert(act.src, act.target);
                 }
+                self.feel_act(&act);
                 self.act(act)
             }
             OutOfRange { target, target_cell, range } => {
@@ -2767,6 +2785,7 @@ impl App {
                 tracing::debug!(id = it.id, amount = it.amount, "item added");
                 let name = self.item_db.as_ref().map_or_else(|| format!("Item #{}", it.id), |d| d.name(it.id, it.identified));
                 self.hud.push_chat(ro_net::ChatKind::System, format!("You got {name} ({}).", it.amount));
+                self.feel(haptics::Cue::Pickup);
                 self.inventory.add(inv_item(it));
                 self.load_icons();
             }
@@ -3102,6 +3121,7 @@ impl App {
                 self.skill_fx(skill, self.unit_pos(target), false);
             }
             SkillHit { skill, act } => {
+                self.feel_act(&act);
                 let target = act.target;
                 // Grimtooth: a line of spikes erupting from the caster to the target.
                 if skill == 137 {
@@ -3730,6 +3750,10 @@ impl App {
                 }
             }
             UnitEffect { id, effect } => {
+                // Base or job level up.
+                if id == self.account_id && effect <= 1 {
+                    self.feel(haptics::Cue::LevelUp);
+                }
                 if let (Some(name), Some(pos)) = (fx::misc_effect(effect), self.unit_pos(id)) {
                     self.play_fx(name, pos);
                 }
@@ -4936,6 +4960,147 @@ impl App {
         v.into_iter().map(|(_, id)| id).collect()
     }
 
+    /// Plays a controller feedback cue, when a controller is being played with.
+    fn feel(&mut self, c: haptics::Cue) {
+        if self.pad.in_use() && self.settings.vibration > 0.0 {
+            self.haptics.play(c);
+        }
+    }
+
+    /// Feedback for an attack: a thud when we are hit, as hard as the share of our HP it
+    /// took; a sharp tick when we land a critical.
+    fn feel_act(&mut self, act: &ro_net::Act) {
+        let me = self.account_id;
+        if act.target == me && act.src != me && act.damage > 0 {
+            let max = self.hud.status.max_hp.max(1) as f32;
+            self.feel(haptics::Cue::Hit((act.damage as f32 + act.left_damage.max(0) as f32) / max));
+        } else if act.src == me && act.target != me && act.kind == 10 && act.damage > 0 {
+            self.feel(haptics::Cue::Crit);
+        }
+    }
+
+    /// Controller feedback each frame: finds a Sony or Nintendo pad to open directly, beats
+    /// the heart at low HP, and sends the mixed rumble (and the light bar's HP colour) to the
+    /// pad: as audio to a USB DualSense's actuators, as HID reports to a Sony or Nintendo
+    /// pad, else through gilrs.
+    fn feedback_tick(&mut self, dt: f32) {
+        if self.hid.as_ref().is_some_and(|h| !h.alive()) {
+            self.hid = None;
+            self.audio_haptics = None;
+        }
+        if self.hid.is_none() && self.pad.connected() {
+            self.hid_retry_ms -= dt;
+            if self.hid_retry_ms <= 0.0 {
+                self.hid_retry_ms = 3000.0;
+                self.hid = hidpad::HidPad::open();
+                if self.hid.as_ref().is_some_and(|h| h.kind == hidpad::Kind::DualSense) {
+                    self.audio_haptics = haptics::AudioHaptics::open();
+                }
+            }
+        }
+        let (hp, max) = (self.hud.status.hp, self.hud.status.max_hp);
+        let share = if max > 0 { hp as f32 / max as f32 } else { 1.0 };
+        if !self.dead && share < 0.25 {
+            self.heartbeat_ms -= dt;
+            if self.heartbeat_ms <= 0.0 {
+                self.heartbeat_ms = if share < 0.1 { 650.0 } else { 1000.0 };
+                self.feel(haptics::Cue::Heartbeat);
+            }
+        } else {
+            self.heartbeat_ms = 0.0;
+        }
+        let (mut low, mut high) = self.haptics.frame(dt, self.settings.vibration);
+        if !self.pad.in_use() {
+            (low.amp, high.amp) = (0.0, 0.0);
+        }
+        // The light bar shows HP: green, amber below half, red below a quarter, pulsing near death.
+        let light = (self.settings.light_bar && max > 0).then(|| {
+            let base: [f32; 3] = if self.dead {
+                [0.35, 0.0, 0.0]
+            } else if share > 0.5 {
+                [0.15, 0.85, 0.3]
+            } else if share > 0.25 {
+                [0.95, 0.6, 0.1]
+            } else {
+                [0.95, 0.12, 0.12]
+            };
+            let secs = std::time::UNIX_EPOCH.elapsed().map_or(0.0, |d| (d.as_millis() % 100_000) as f32 / 1000.0);
+            let pulse = if !self.dead && share < 0.1 { 0.35 + 0.65 * (secs * 3.0).sin().abs() } else { 1.0 };
+            base.map(|c| (c * pulse * 255.0) as u8)
+        });
+        if let Some(a) = &self.audio_haptics {
+            a.set(low, high);
+            (low.amp, high.amp) = (0.0, 0.0);
+        }
+        match self.hid.as_mut() {
+            Some(h) => h.set(hidpad::Output { low, high, light }),
+            None => self.pad.set_rumble(low.amp, high.amp),
+        }
+    }
+
+    /// The PlayStation touchpad: one finger moves the pointer, pressing clicks (with two
+    /// fingers, right-clicks), a two-finger swipe across turns the shortcut row on show and a
+    /// two-finger slide up or down zooms.
+    fn touchpad_tick(&mut self, el: &ActiveEventLoop) {
+        let Some(t) = self.hid.as_ref().filter(|_| self.settings.touchpad).map(|h| h.touch()) else { return };
+        let prev = std::mem::replace(&mut self.touch_prev, t);
+        let Some(window) = self.window.clone() else { return };
+        let size = window.inner_size();
+        let down: Vec<hidpad::Finger> = t.fingers.iter().flatten().copied().collect();
+        let held = |f: &hidpad::Finger| prev.fingers.iter().flatten().find(|p| p.id == f.id).copied();
+        match down.as_slice() {
+            [f] => {
+                self.touch_slide = glam::Vec2::ZERO;
+                if let Some(p) = held(f) {
+                    let d = glam::Vec2::new(f.x - p.x, f.y - p.y);
+                    // A full stroke crosses the window; faster strokes go further.
+                    let gain = 0.9 + 6.0 * d.length().min(0.05);
+                    let (x, y) = self.touch_pos.or(self.cursor).unwrap_or((size.width as f64 / 2.0, size.height as f64 / 2.0));
+                    let pos = ((x + (d.x * gain * size.width as f32) as f64).clamp(0.0, size.width as f64 - 1.0), (y + (d.y * gain * size.width as f32 * 0.6) as f64).clamp(0.0, size.height as f64 - 1.0));
+                    if pos != (x, y) {
+                        self.touch_pos = Some(pos);
+                        if window.set_cursor_position(winit::dpi::PhysicalPosition::new(pos.0, pos.1)).is_err() {
+                            // Where the pointer can't be moved (Wayland), move ours alone.
+                            self.window_event(el, window.id(), WindowEvent::CursorMoved { device_id: winit::event::DeviceId::dummy(), position: winit::dpi::PhysicalPosition::new(pos.0, pos.1) });
+                        }
+                    }
+                }
+            }
+            [a, b] => {
+                if let (Some(pa), Some(pb)) = (held(a), held(b)) {
+                    self.touch_slide += glam::Vec2::new((a.x + b.x - pa.x - pb.x) / 2.0, (a.y + b.y - pa.y - pb.y) / 2.0);
+                    if self.touch_slide.x.abs() > 0.3 {
+                        let n = HOTKEY_ROWS;
+                        let row = if self.touch_slide.x > 0.0 { (self.hotkey_row + 1) % n } else { (self.hotkey_row + n - 1) % n };
+                        self.queued_action = Some(windows::UiAction::HotkeyRow(row));
+                        self.touch_slide = glam::Vec2::ZERO;
+                    } else if self.touch_slide.y.abs() > 0.06 {
+                        if let Some(r) = self.renderer.as_mut() {
+                            r.camera.zoom(-self.touch_slide.y * 12.0);
+                        }
+                        self.touch_slide.y = 0.0;
+                    }
+                }
+            }
+            _ => {
+                self.touch_slide = glam::Vec2::ZERO;
+                self.touch_pos = None;
+            }
+        }
+        let press = |app: &mut Self, button: MouseButton, state: ElementState| {
+            app.window_event(el, window.id(), WindowEvent::MouseInput { device_id: winit::event::DeviceId::dummy(), state, button });
+        };
+        if t.click && !prev.click {
+            let button = if down.len() >= 2 { MouseButton::Right } else { MouseButton::Left };
+            self.touch_button = Some(button);
+            press(self, button, ElementState::Pressed);
+        } else if !t.click && prev.click {
+            if let Some(button) = self.touch_button.take() {
+                press(self, button, ElementState::Released);
+            }
+        }
+    }
+
     /// Battle mode on a controller: a shortcut slot fires at once, without aiming. Attacks go
     /// on the target (the nearest monster when there is none), support skills on the targeted
     /// player or ourselves, ground skills under the target or at our feet.
@@ -5396,6 +5561,8 @@ impl App {
         self.last_tick = now;
         if self.front.is_none() {
             self.pad_tick(dt);
+            self.feedback_tick(dt);
+            self.touchpad_tick(el);
         } else if let (Some(r), false) = (self.renderer.as_mut(), self.still) {
             // Behind the login screens the backdrop slowly turns.
             r.camera.rotate(dt * 0.00004, 0.0);
@@ -7628,6 +7795,15 @@ fn main() -> anyhow::Result<()> {
         pad: gamepad::Pad::new(),
         pad_row: None,
         pad_preview: None,
+        hid: None,
+        hid_retry_ms: 0.0,
+        audio_haptics: None,
+        haptics: Default::default(),
+        heartbeat_ms: 0.0,
+        touch_prev: Default::default(),
+        touch_pos: None,
+        touch_slide: glam::Vec2::ZERO,
+        touch_button: None,
         pad_target: None,
         pad_dir: None,
         pad_walk_ms: 0.0,

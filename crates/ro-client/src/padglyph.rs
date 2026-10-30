@@ -84,6 +84,8 @@ pub enum Btn {
     RStick,
     Start,
     Select,
+    /// A PlayStation pad's touchpad.
+    Touchpad,
 }
 
 /// The slot each button fires on a shortcut row while a trigger is held (column order).
@@ -133,6 +135,7 @@ pub fn name(b: Btn, s: Style) -> &'static str {
         (Select, PlayStation) => "Create",
         (Start, Nintendo) => "+",
         (Select, Nintendo) => "-",
+        (Touchpad, _) => "Touchpad",
     }
 }
 
@@ -147,6 +150,7 @@ pub fn width(b: Btn, size: f32) -> f32 {
         Btn::LB | Btn::RB => size * 1.55,
         Btn::LT | Btn::RT => size * 1.4,
         Btn::Start | Btn::Select => size * 1.3,
+        Btn::Touchpad => size * 1.8,
         _ => size,
     }
 }
@@ -255,6 +259,13 @@ pub fn paint(p: &Painter, rect: Rect, b: Btn, s: Style) {
                     p.add(egui::Shape::convex_polygon(vec![tip, tip + back + side, tip + back - side], INK, Stroke::NONE));
                 }
             }
+        }
+        Btn::Touchpad => {
+            // The pad seen from above: wide, its lower corners rounded more.
+            let pad = rect.shrink2(Vec2::new(0.5, size * 0.12));
+            let round = egui::CornerRadius { nw: (size * 0.12) as u8, ne: (size * 0.12) as u8, sw: (size * 0.3) as u8, se: (size * 0.3) as u8 };
+            p.rect(pad, round, BASE, rim, egui::StrokeKind::Inside);
+            p.circle_filled(pad.center() + Vec2::new(size * 0.18, -size * 0.04), size * 0.09, INK);
         }
         Btn::Start | Btn::Select => match s {
             Style::Nintendo => {

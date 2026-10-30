@@ -150,6 +150,19 @@ fn gamepad(ui: &mut egui::Ui, s: &Ctx<'_>) {
         "While a trigger is held, its row shows around the buttons. Battle mode (/bm) fires skills at once, without aiming, and adds a third row on both triggers."
     };
     note(ui, text);
+    if style == Style::PlayStation {
+        pad_section(
+            ui,
+            "Touchpad",
+            vec![
+                (vec![B(Btn::Touchpad), T("slide")], "Move the pointer"),
+                (vec![B(Btn::Touchpad), T("press")], "Click; with two fingers, right-click"),
+                (vec![T("Two fingers across")], "Change the shortcut row on show"),
+                (vec![T("Two fingers up / down")], "Zoom"),
+            ],
+            style,
+        );
+    }
     pad_section(
         ui,
         "Menus",
