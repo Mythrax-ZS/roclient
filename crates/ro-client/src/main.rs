@@ -624,6 +624,23 @@ fn hotkey_slot(k: winit::keyboard::NamedKey) -> Option<usize> {
     [F1, F2, F3, F4, F5, F6, F7, F8, F9].iter().position(|&f| f == k)
 }
 
+/// Battle mode: the shortcut slot a letter key uses. Q ~ O is the row after the one on show,
+/// A ~ L the next and Z ~ > the one after (rows wrap around).
+fn battle_slot(key: &str, page: u8) -> Option<usize> {
+    let mut chars = key.chars().map(|c| c.to_ascii_lowercase());
+    let c = match (chars.next()?, chars.next()) {
+        // Shift held: < and > are still the , and . keys.
+        ('<', None) => ',',
+        ('>', None) => '.',
+        (c, None) => c,
+        _ => return None,
+    };
+    windows::BATTLE_KEYS.iter().enumerate().find_map(|(i, row)| {
+        let col = row.chars().position(|k| k == c)?;
+        Some((page as usize + i + 1) % HOTKEY_ROWS as usize * HOTKEYS_PER_ROW + col)
+    })
+}
+
 /// A clicked destination being reached through one or more server walks.
 struct WalkGoal {
     cell: (u16, u16),
@@ -881,7 +898,7 @@ struct App {
     /// few seconds without one.
     quit_asked: Option<std::time::Instant>,
     /// A skill kept going while its shortcut key is held (CZ_USE_SKILL_START), and that key.
-    held_skill: Option<(u16, winit::keyboard::NamedKey)>,
+    held_skill: Option<(u16, winit::keyboard::Key)>,
     /// The Esc game menu (Character Select, Options, Exit).
     esc_menu: bool,
     /// Start-up splash, title art and loading screens (made once the window exists).
@@ -1070,6 +1087,9 @@ struct App {
     /// `--fx skill:<id>`: when the effect plays next.
     fx_test_next: Option<std::time::Instant>,
     alt: bool,
+    ctrl: bool,
+    /// The Emotion List (Alt+L) and the macro window (Alt+M).
+    emote_win: emotes::EmoteWindow,
     queued_action: Option<windows::UiAction>,
     /// A pointer move the test script queued (UI points); egui keeps the position.
     fake_pointer: Option<egui::Pos2>,
@@ -3737,6 +3757,61 @@ impl App {
     }
 
     /// Turns a window action into a server request.
+    /// A key pressed over the game (not taken by the UI).
+    fn key_pressed(&mut self, logical_key: winit::keyboard::Key) {
+        use winit::keyboard::{Key, NamedKey};
+        match &logical_key {
+            // Esc cancels aiming; otherwise it opens the game menu, as in the original.
+            Key::Named(NamedKey::Escape) => {
+                if self.aiming.take().is_none() && self.dialog.is_none() && !self.dead {
+                    self.esc_menu = !self.esc_menu;
+                }
+            }
+            // Shortcut bar: F1-F9 use the first row on show; F12 shows one to four
+            // rows or hides the bar.
+            Key::Named(NamedKey::F12) => {
+                self.settings.hotkey_rows = (self.settings.hotkey_rows + 1) % (HOTKEY_ROWS + 1);
+                self.settings.save();
+            }
+            Key::Named(k) if hotkey_slot(*k).is_some() => {
+                let slot = self.hotkey_row as usize * HOTKEYS_PER_ROW + hotkey_slot(*k).unwrap_or(0);
+                self.press_hotkey(slot, logical_key.clone());
+            }
+            Key::Character(c) if self.alt => self.alt_key(&c.to_ascii_lowercase()),
+            // Ctrl+Tab: the minimap on or off.
+            Key::Named(NamedKey::Tab) if self.ctrl => {
+                self.settings.minimap = !self.settings.minimap;
+                self.settings.save();
+            }
+            Key::Character(_) if self.ctrl => {}
+            // Battle mode: Space opens the chat, letters use the shortcut rows.
+            Key::Named(NamedKey::Space) if self.settings.battle_mode => self.hud.focus_chat(),
+            Key::Character(c) if self.settings.battle_mode => {
+                if let Some(slot) = battle_slot(c, self.hotkey_row) {
+                    self.press_hotkey(slot, logical_key.clone());
+                }
+            }
+            // Otherwise typing goes to the chat, as in the original.
+            Key::Character(c) => self.hud.type_into_chat(c),
+            _ => {}
+        }
+    }
+
+    /// A shortcut key pressed: uses its slot. Rolling Cutter repeats for as long as the key
+    /// is held, as in the original.
+    fn press_hotkey(&mut self, slot: usize, held: winit::keyboard::Key) {
+        let key = self.hotkeys.get(slot).copied().filter(|h| h.skill && h.id as u16 == HOLD_SKILL);
+        let learned = key.and_then(|h| self.skills.iter().find(|s| s.id == HOLD_SKILL).map(|s| (h.count.max(1) as u16).min(s.level.max(1))));
+        match learned {
+            Some(level) if self.held_skill.is_none() => {
+                self.send(ro_net::Command::Stat(ro_net::StatRequest::HoldSkill { skill: HOLD_SKILL, level, target: self.account_id }));
+                self.held_skill = Some((HOLD_SKILL, held));
+            }
+            Some(_) => {}
+            None => self.queued_action = Some(windows::UiAction::UseHotkey(slot)),
+        }
+    }
+
     /// Lets go of a held skill (CZ_USE_SKILL_END).
     fn release_held_skill(&mut self) {
         if let Some((skill, _)) = self.held_skill.take() {
@@ -4256,10 +4331,8 @@ impl App {
             "z" => self.windows.party = !self.windows.party,
             "h" => self.windows.friends = !self.windows.friends,
             "g" => self.windows.guild = !self.windows.guild,
-            "m" => {
-                self.settings.minimap = !self.settings.minimap;
-                self.settings.save();
-            }
+            "l" => self.emote_win.open = !self.emote_win.open,
+            "m" => self.emote_win.macros_open = !self.emote_win.macros_open,
             "o" => self.windows.settings = !self.windows.settings,
             "u" => self.quests.open = !self.quests.open,
             "w" => self.merchant.cart_open = !self.merchant.cart_open,
@@ -4311,10 +4384,11 @@ impl App {
                     self.queued_commands.push(ro_net::Command::Progress(ro_net::ProgressRequest::OpenAttendance));
                 }
             }
-            // Alt+1..Alt+0: the emote shortcuts.
+            // Alt+1..Alt+0 say the macros (emotes by default), as in the original.
             d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => {
-                if let Some((tx, _)) = self.net.as_ref() {
-                    let _ = tx.send(ro_net::Command::Emotion(emotes::shortcut(d.as_bytes()[0] - b'0')));
+                let line = self.settings.macros.get(emotes::macro_slot(d.as_bytes()[0] - b'0')).map(|m| m.trim().to_string()).unwrap_or_default();
+                if !line.is_empty() {
+                    self.queued_chat.push(line);
                 }
             }
             _ => {}
@@ -4605,6 +4679,14 @@ impl App {
                 self.settings.aura_simple = !self.settings.aura_simple;
                 notes.push(if self.settings.aura_simple { say(712, "Simplified Aura [ON]") } else { say(711, "Simplified Aura [OFF]") });
             }
+            "/bm" | "/battlemode" => {
+                self.settings.battle_mode = !self.settings.battle_mode;
+                notes.push(if self.settings.battle_mode { say(785, "Skills assigned to shortcut windows 1, 2, 3 are Enabled. [/bm ON]") } else { say(786, "Skills assigned to shortcut windows 1, 2, 3 are Disabled. [/bm OFF]") });
+                if self.settings.battle_mode {
+                    notes.push(say(796, "Press the space bar to Chat when in Battle mode [/battlemode | /bm]."));
+                }
+            }
+            "/emo" | "/emotion" => self.emote_win.open = !self.emote_win.open,
             "/aura2" => {
                 self.settings.aura_off = !self.settings.aura_off;
                 notes.push(if self.settings.aura_off { say(2995, "Aura effect is OFF") } else { say(2994, "Aura effect is ON") });
@@ -4620,7 +4702,7 @@ impl App {
             }
             _ => return false,
         }
-        if matches!(head, "/bgm" | "/music" | "/sound" | "/effect" | "/aura" | "/aura2" | "/v" | "/bv") {
+        if matches!(head, "/bgm" | "/music" | "/sound" | "/effect" | "/aura" | "/aura2" | "/v" | "/bv" | "/bm" | "/battlemode") {
             self.apply_sound_and_effects();
             self.settings.save();
         }
@@ -5545,6 +5627,22 @@ impl App {
                         self.alt_key(k);
                         None
                     }
+                    // press:k presses a key over the game: a letter, F1..F12, Space or Enter.
+                    Some(("press", k)) => {
+                        use winit::keyboard::{Key, NamedKey};
+                        let named = match k {
+                            "Space" => Some(NamedKey::Space),
+                            "Enter" => Some(NamedKey::Enter),
+                            "F12" => Some(NamedKey::F12),
+                            f => f.strip_prefix('F').and_then(|n| n.parse::<usize>().ok()).and_then(|n| [NamedKey::F1, NamedKey::F2, NamedKey::F3, NamedKey::F4, NamedKey::F5, NamedKey::F6, NamedKey::F7, NamedKey::F8, NamedKey::F9].get(n.wrapping_sub(1)).copied()),
+                        };
+                        match named {
+                            Some(NamedKey::Enter) => self.hud.focus_chat(),
+                            Some(n) => self.key_pressed(Key::Named(n)),
+                            None => self.key_pressed(Key::Character(k.into())),
+                        }
+                        None
+                    }
                     // hover:x:y holds the UI pointer there (UI points), for tooltips.
                     Some(("hover", at)) => {
                         let f: Vec<f32> = at.split(':').filter_map(|v| v.parse().ok()).collect();
@@ -6154,7 +6252,8 @@ impl App {
                     for (id, (kind, t)) in &mut self.emotes {
                         *t += dt;
                         let m = if *id == self.account_id { self.player.as_ref() } else { self.units.get(id) };
-                        let Some(m) = m.filter(|_| *t < r.action_ms(sheet, *kind as usize).max(1500.0)) else {
+                        let action = emotes::action(*kind);
+                        let Some((m, action)) = m.zip(action).filter(|&(_, a)| *t < r.action_ms(sheet, a).max(1500.0)) else {
                             *t = f32::MAX;
                             continue;
                         };
@@ -6165,8 +6264,8 @@ impl App {
                             headgear: vec![],
                             weapon: vec![],
                             shadow: None,
-                            action: *kind as usize / 8,
-                            dir: ro_render::Dir::from_index(*kind as usize),
+                            action: action / 8,
+                            dir: ro_render::Dir::from_index(action),
                             time_ms: *t,
                             once: true,
                             alpha: 1.0,
@@ -6342,6 +6441,8 @@ impl App {
                 screen_width: size.0 as f32 / (window.scale_factor() as f32 * self.ui_scale),
                 hotkeys: &self.hotkeys,
                 hotkey_row: self.hotkey_row,
+                hotkey_rows: self.settings.hotkey_rows,
+                battle_mode: self.settings.battle_mode,
                 cooldowns: &self.cooldowns,
                 has_cart: self.merchant.has_cart(),
                 show_equip: self.show_equip,
@@ -6562,6 +6663,13 @@ impl App {
                     let have = |id: u32| inv.items.values().filter(|i| i.id == id && i.equipped == 0).map(|i| i.amount as u32).sum::<u32>();
                     let reqs = self.market.show(ui.ctx(), self.item_db.as_ref(), &self.icons, self.hud.status.zeny, &have);
                     self.queued_commands.extend(reqs.into_iter().map(ro_net::Command::Market));
+                }
+                let mut macros_changed = false;
+                if let Some(line) = self.emote_win.show(ui.ctx(), self.vfs.as_ref(), &mut self.settings.macros, &mut macros_changed) {
+                    self.queued_chat.push(line);
+                }
+                if macros_changed {
+                    self.settings.save();
                 }
                 let (bg_reqs, castle_reqs) = self.battle.show(ui.ctx(), self.hud.status.base_level.max(0) as u32);
                 self.queued_commands.extend(bg_reqs.into_iter().map(ro_net::Command::Bg).chain(castle_reqs.into_iter().map(ro_net::Command::Castle)));
@@ -6862,6 +6970,9 @@ ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(i
             r.set_ui(ro_render::UiFrame { primitives, textures: out.textures_delta, pixels_per_point: out.pixels_per_point });
             if let Some(text) = sent {
                 self.queued_chat.push(text);
+                if !self.settings.battle_mode {
+                    self.hud.focus_chat();
+                }
             }
         }
 
@@ -7015,8 +7126,11 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
+        // Alt+letter shortcuts go straight to the game, even while the chat has the keyboard
+        // (AltGr, which is Ctrl+Alt, still types into the UI).
+        let alt_shortcut = self.alt && !self.ctrl && matches!(&event, WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key: winit::keyboard::Key::Character(_), .. }, .. });
         // The UI sees input first; clicks and keys it uses don't reach the game.
-        let ui_used = self.egui_state.as_mut().is_some_and(|s| s.on_window_event(window, &event).consumed);
+        let ui_used = !alt_shortcut && self.egui_state.as_mut().is_some_and(|s| s.on_window_event(window, &event).consumed);
         // Track the left button ourselves (hold-to-walk), whatever the UI did with the event.
         if let WindowEvent::MouseInput { state, button: MouseButton::Left, .. } = &event {
             self.left_down = *state == ElementState::Pressed;
@@ -7029,6 +7143,8 @@ impl ApplicationHandler for App {
         }
         // Login / character screens: the world takes no input.
         let front_blocks = self.front.is_some() && matches!(event, WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::KeyboardInput { .. });
+        let function_key = matches!(&event, WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key: winit::keyboard::Key::Named(k), .. }, .. } if hotkey_slot(*k).is_some() || *k == winit::keyboard::NamedKey::F12);
+        let ui_used = ui_used && !function_key;
         if (ui_used || front_blocks) && !matches!(event, WindowEvent::Resized(_) | WindowEvent::CloseRequested | WindowEvent::ScaleFactorChanged { .. }) {
             return;
         }
@@ -7040,42 +7156,17 @@ impl ApplicationHandler for App {
             {
                 self.hud.focus_chat();
             }
-            WindowEvent::ModifiersChanged(m) => self.alt = m.state().alt_key(),
-            WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key: winit::keyboard::Key::Named(k), state: ElementState::Released, .. }, .. }
-                if self.held_skill.is_some_and(|(_, held)| held == k) =>
+            WindowEvent::ModifiersChanged(m) => {
+                self.alt = m.state().alt_key();
+                self.ctrl = m.state().control_key();
+            }
+            WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key, state: ElementState::Released, .. }, .. }
+                if self.held_skill.as_ref().is_some_and(|(_, held)| *held == logical_key) =>
             {
                 self.release_held_skill();
             }
             WindowEvent::Focused(false) if self.held_skill.is_some() => self.release_held_skill(),
-            WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key, state: ElementState::Pressed, repeat: false, .. }, .. } => {
-                use winit::keyboard::{Key, NamedKey};
-                match logical_key {
-                    // Esc cancels aiming; otherwise it opens the game menu, as in the original.
-                    Key::Named(NamedKey::Escape) => {
-                        if self.aiming.take().is_none() && self.dialog.is_none() && !self.dead {
-                            self.esc_menu = !self.esc_menu;
-                        }
-                    }
-                    // Shortcut bar: F1-F9 use the visible row's slots, F12 shows the next row.
-                    Key::Named(NamedKey::F12) => self.queued_action = Some(windows::UiAction::HotkeyRow((self.hotkey_row + 1) % HOTKEY_ROWS)),
-                    Key::Named(k) if hotkey_slot(k).is_some() => {
-                        let slot = self.hotkey_row as usize * HOTKEYS_PER_ROW + hotkey_slot(k).unwrap_or(0);
-                        // Rolling Cutter repeats for as long as its key is held, as in the original.
-                        let key = self.hotkeys.get(slot).copied().filter(|h| h.skill && h.id as u16 == HOLD_SKILL);
-                        let learned = key.and_then(|h| self.skills.iter().find(|s| s.id == HOLD_SKILL).map(|s| (h.count.max(1) as u16).min(s.level.max(1))));
-                        match learned {
-                            Some(level) if self.held_skill.is_none() => {
-                                self.send(ro_net::Command::Stat(ro_net::StatRequest::HoldSkill { skill: HOLD_SKILL, level, target: self.account_id }));
-                                self.held_skill = Some((HOLD_SKILL, k));
-                            }
-                            Some(_) => {}
-                            None => self.queued_action = Some(windows::UiAction::UseHotkey(slot)),
-                        }
-                    }
-                    Key::Character(c) if self.alt => self.alt_key(&c.to_ascii_lowercase()),
-                    _ => {}
-                }
-            }
+            WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key, state: ElementState::Pressed, repeat: false, .. }, .. } => self.key_pressed(logical_key),
             WindowEvent::Resized(s) => {
                 r.resize(s.width, s.height);
                 window.request_redraw();
@@ -7337,6 +7428,8 @@ fn main() -> anyhow::Result<()> {
         fx_test: arg("--fx").map(|s| &*s.leak()),
         fx_test_next: None,
         alt: false,
+        ctrl: false,
+        emote_win: Default::default(),
         queued_action: None,
         fake_pointer: None,
         fake_click: None,
@@ -7525,6 +7618,27 @@ fn attack_group(r: &ro_render::Renderer, a: &ro_render::Actor) -> usize {
     match a.weapon.first() {
         Some(&w) if !r.action_visible(w, 10) && r.action_visible(w, 11) => 11,
         _ => 10,
+    }
+}
+
+#[cfg(test)]
+mod battle_mode_tests {
+    use super::battle_slot;
+
+    #[test]
+    fn letter_rows_follow_the_page_on_show() {
+        // Page 1 on show: Q ~ O is page 2, A ~ L page 3, Z ~ > page 4.
+        assert_eq!(battle_slot("q", 0), Some(9));
+        assert_eq!(battle_slot("O", 0), Some(17));
+        assert_eq!(battle_slot("a", 0), Some(18));
+        assert_eq!(battle_slot("z", 0), Some(27));
+        assert_eq!(battle_slot(".", 0), Some(35));
+        assert_eq!(battle_slot(">", 0), Some(35));
+        // They wrap around past the fourth page.
+        assert_eq!(battle_slot("q", 3), Some(0));
+        assert_eq!(battle_slot("z", 2), Some(9));
+        assert_eq!(battle_slot("p", 0), None);
+        assert_eq!(battle_slot("1", 0), None);
     }
 }
 

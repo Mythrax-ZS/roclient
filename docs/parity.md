@@ -86,6 +86,11 @@ epute*.bson)
 - [x] Equipment switch set (Switch tab: add, remove, swap; ZC_EQUIPSWITCH_LIST/ADD/REMOVE/REPLY)
 - [x] Level aura for players reported at level 99+ (clevel from the spawn packets; EF_LEVEL99 ribbons, EF_LEVEL99_2 ground star, EF_LEVEL99_3 sparkles, code-drawn after roBrowser's reconstruction); /aura simplifies it, /aura2 turns it off. rAthena's `max_lv` / `aura_lv` / `client_limit_unit_lv` choose who gets it
 - [ ] The higher auras (EF_LEVEL99_150, the 4th-job orbs EF_LEVEL99_ORB1/2): when the original shows them is unknown
+- [x] Emotion List (Alt+L, /emo): every emote with its picture and command, click to show it. The emotion sprite's actions are not in ET_* order (`emotes::action`, as roBrowser's table), which also fixed the emotes drawn over heads
+- [x] Macro window (Alt+M, "Shortcut List"): what Alt+1..Alt+0 say, the first ten emotes by default; any emote, phrase or / command. The minimap toggle moved to Ctrl+Tab, as in the original
+- [x] Battle mode (/bm, /battlemode, msgstringtable 785-796): Q ~ O, A ~ L and Z ~ > use the second, third and fourth shortcut rows; Enter or Space opens the chat and sending a line gives the keys back. Outside it, typing over the game goes to the chat and the chat keeps the keyboard, while F1..F12 and Alt shortcuts still work
+- [x] Shortcut bar rows: F12 shows one to four rows or hides the bar (the original's extend); the page button turns which row comes first. Rows above the first are labelled with their battle mode keys
+- Unverified: the original's strings say Z ~ > is shortcut window 1 (the 3-row era); with four rows this client uses it for the fourth. The original's later key-binding window (Shortcut Settings, MSI_HOTKEYWND) is not done
 - Deliberate difference: Prontera's south avenue paving (`src/mapfix.rs`). The map mirrors its cobble rosettes across the avenue's centre line but sets the mirrored tiles half a rosette lower, so the original shows a seam down the middle; this client aligns them (307 tiles, ground drawing only)
 
 ## Packet audit (2026-10-30)

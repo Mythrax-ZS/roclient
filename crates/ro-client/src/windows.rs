@@ -61,6 +61,9 @@ pub enum UiAction {
 /// The shortcut bar: rows of F1..F9 slots, saved on the server (38 slots per tab).
 pub const HOTKEY_ROWS: u8 = 4;
 pub const HOTKEYS_PER_ROW: usize = 9;
+/// Battle mode keys for the second, third and fourth shortcut rows (counted from the one
+/// on show), as the original: Q ~ O, A ~ L and Z ~ >.
+pub const BATTLE_KEYS: [&str; 3] = ["qwertyuio", "asdfghjkl", "zxcvbnm,."];
 
 /// An inventory item being dragged: onto the shortcut bar (usable items and equipment), into
 /// storage, or out onto the world to drop it.
@@ -166,6 +169,10 @@ pub struct View<'a> {
     pub screen_width: f32,
     pub hotkeys: &'a [Hotkey],
     pub hotkey_row: u8,
+    /// Shortcut bar rows on show (0: hidden), stacked up from `hotkey_row`.
+    pub hotkey_rows: u8,
+    /// Battle mode (/bm): the rows above the first answer to letter keys.
+    pub battle_mode: bool,
     /// Skills cooling down: id -> when they are ready again.
     pub cooldowns: &'a HashMap<u16, std::time::Instant>,
     /// We have a pushcart (inventory items can go into it).
@@ -193,107 +200,143 @@ fn outlined(painter: &egui::Painter, pos: egui::Pos2, align: egui::Align2, text:
     painter.text(pos, align, text, font, color);
 }
 
+/// The key shown on a shortcut slot: F1..F9 on the first row, the battle mode letters on
+/// the rows above it, or the controller buttons.
+fn slot_key_label(v: &View, offset: u8, col: usize) -> String {
+    const XBOX: [&str; HOTKEYS_PER_ROW] = ["A", "B", "X", "Y", "Up", "Rt", "Dn", "Lt", ""];
+    const PS: [&str; HOTKEYS_PER_ROW] = ["Cr", "Ci", "Sq", "Tr", "Up", "Rt", "Dn", "Lt", ""];
+    match offset {
+        // Controller: hold RT for this row (LT for the next), then the button shown.
+        0 if v.pad_hints => (if v.playstation { PS } else { XBOX })[col].to_string(),
+        0 => format!("F{}", col + 1),
+        n if v.battle_mode => BATTLE_KEYS.get(n as usize - 1).and_then(|k| k.chars().nth(col)).map_or(String::new(), |c| c.to_ascii_uppercase().to_string()),
+        _ => String::new(),
+    }
+}
+
+/// One shortcut slot: draws it and returns what the player did with it.
+fn hotkey_slot_ui(ui: &mut egui::Ui, v: &View, index: usize, key_label: &str, size: f32) -> Option<UiAction> {
+    let mut action = None;
+    let key = v.hotkeys.get(index).copied().unwrap_or_default();
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click_and_drag());
+    let painter = ui.painter_at(rect);
+    let hovering_drop = resp.dnd_hover_payload::<Hotkey>().is_some() || resp.dnd_hover_payload::<ItemDrag>().is_some_and(|d| d.shortcut);
+    let bg = if hovering_drop { Color32::from_rgba_unmultiplied(255, 220, 120, 60) } else if resp.hovered() { Color32::from_white_alpha(30) } else { Color32::from_white_alpha(12) };
+    if let Some(t) = v.skin.and_then(|s| s.texture("itemwin_mid")) {
+        painter.image(t.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+        if hovering_drop || resp.hovered() {
+            painter.rect_filled(rect.shrink(1.0), 3.0, Color32::from_rgba_unmultiplied(120, 150, 230, 50));
+        }
+    } else {
+        painter.rect_filled(rect, 4.0, bg);
+    }
+    let skill = key.skill.then(|| v.skills.iter().find(|s| s.id as u32 == key.id)).flatten();
+    if key.id != 0 {
+        if key.skill {
+            paint_icon(&painter, rect, v.skill_icons.get(&(key.id as u16)), Color32::WHITE);
+            if skill.is_some_and(|s| s.level > 1) {
+                outlined(&painter, rect.right_bottom() - Vec2::new(3.0, 1.0), egui::Align2::RIGHT_BOTTOM, &format!("{}", key.count), 11.0, Color32::from_rgb(255, 220, 120));
+            }
+            // Cooldown: a dark sweep with the seconds left, as in the original.
+            if let Some(left) = v.cooldowns.get(&(key.id as u16)).map(|e| e.saturating_duration_since(std::time::Instant::now()).as_secs_f32()).filter(|s| *s > 0.0) {
+                painter.rect_filled(rect.shrink(2.0), 4.0, Color32::from_black_alpha(150));
+                let text = if left >= 60.0 { format!("{}m", (left / 60.0).ceil()) } else { format!("{left:.1}") };
+                outlined(&painter, rect.center(), egui::Align2::CENTER_CENTER, &text, 12.0, Color32::WHITE);
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+            }
+        } else {
+            let count: u32 = v.items.iter().filter(|it| it.id == key.id && it.equipped == 0).map(|it| it.amount as u32).sum();
+            let tint = if count == 0 { Color32::from_white_alpha(70) } else { Color32::WHITE };
+            paint_icon(&painter, rect, v.icons.get(&key.id), tint);
+            outlined(&painter, rect.right_bottom() - Vec2::new(3.0, 1.0), egui::Align2::RIGHT_BOTTOM, &count.to_string(), 11.0, Color32::WHITE);
+        }
+    }
+    if v.skin.is_some() {
+        painter.text(rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, key_label, egui::FontId::proportional(9.5), Color32::from_rgb(90, 100, 140));
+    } else {
+        outlined(&painter, rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, key_label, 10.0, Color32::from_gray(200));
+    }
+
+    if let Some(dropped) = resp.dnd_release_payload::<Hotkey>().map(|k| *k).or_else(|| resp.dnd_release_payload::<ItemDrag>().and_then(|d| d.hotkey())) {
+        action = Some(UiAction::SetHotkey { index: index as u16, key: dropped });
+    } else if key.id != 0 {
+        resp.dnd_set_drag_payload(key);
+        if resp.clicked() {
+            action = Some(UiAction::UseHotkey(index));
+        } else if resp.secondary_clicked() {
+            action = Some(UiAction::SetHotkey { index: index as u16, key: Hotkey::default() });
+        } else if let (true, Some(s)) = (resp.hovered(), skill) {
+            let scroll: f32 = ui.input(|i| i.events.iter().map(|e| if let egui::Event::MouseWheel { delta, .. } = e { delta.y } else { 0.0 }).sum());
+            if scroll != 0.0 {
+                let count = (key.count + scroll.signum() as i16).clamp(1, s.level.max(1) as i16);
+                if count != key.count {
+                    action = Some(UiAction::SetHotkey { index: index as u16, key: Hotkey { count, ..key } });
+                }
+            }
+        }
+        let name = match skill {
+            Some(s) => format!("{} Lv {}", (v.skill_names)(&s.name), key.count),
+            None if key.skill => format!("Skill {}", key.id),
+            None => v.db.map_or_else(|| format!("Item {}", key.id), |db| db.name(key.id, true)),
+        };
+        resp.on_hover_text(if key_label.is_empty() { name } else { format!("[ {key_label} ] {name}") });
+    }
+    action
+}
+
 /// The shortcut bar along the bottom: drag skills and items in, click or press F1..F9 to
-/// use, right-click to clear, scroll over a skill to change its level, F12 for the next row.
+/// use, right-click to clear, scroll over a skill to change its level. F12 shows one to four
+/// rows or hides the bar, as in the original; the page button turns which row is first. In
+/// battle mode the rows above the first answer to Q ~ O, A ~ L and Z ~ >.
 fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
     const SIZE: f32 = 40.0;
     let mut action = None;
-    egui::Area::new(egui::Id::unique("hotkeys")).anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -12.0)).show(ctx, |ui| {
-        let frame = if v.skin.is_some() {
-            egui::Frame::new().fill(Color32::WHITE).stroke(egui::Stroke::new(1.0, Color32::from_rgb(150, 160, 190))).inner_margin(4)
-        } else {
-            egui::Frame::new().fill(Color32::from_rgba_unmultiplied(16, 20, 28, 210)).corner_radius(8).inner_margin(6)
-        };
-        frame.show(ui, |ui| {
-            if v.skin.is_none() {
-                ui.style_mut().visuals = egui::Visuals::dark();
-            }
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                let base = v.hotkey_row as usize * HOTKEYS_PER_ROW;
-                for col in 0..HOTKEYS_PER_ROW {
-                    let index = base + col;
-                    let key = v.hotkeys.get(index).copied().unwrap_or_default();
-                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(SIZE), egui::Sense::click_and_drag());
-                    let painter = ui.painter_at(rect);
-                    let hovering_drop = resp.dnd_hover_payload::<Hotkey>().is_some() || resp.dnd_hover_payload::<ItemDrag>().is_some_and(|d| d.shortcut);
-                    let bg = if hovering_drop { Color32::from_rgba_unmultiplied(255, 220, 120, 60) } else if resp.hovered() { Color32::from_white_alpha(30) } else { Color32::from_white_alpha(12) };
-                    if let Some(t) = v.skin.and_then(|s| s.texture("itemwin_mid")) {
-                        painter.image(t.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
-                        if hovering_drop || resp.hovered() {
-                            painter.rect_filled(rect.shrink(1.0), 3.0, Color32::from_rgba_unmultiplied(120, 150, 230, 50));
-                        }
-                    } else {
-                        painter.rect_filled(rect, 4.0, bg);
-                    }
-                    let skill = key.skill.then(|| v.skills.iter().find(|s| s.id as u32 == key.id)).flatten();
-                    if key.id != 0 {
-                        if key.skill {
-                            paint_icon(&painter, rect, v.skill_icons.get(&(key.id as u16)), Color32::WHITE);
-                            if skill.is_some_and(|s| s.level > 1) {
-                                outlined(&painter, rect.right_bottom() - Vec2::new(3.0, 1.0), egui::Align2::RIGHT_BOTTOM, &format!("{}", key.count), 11.0, Color32::from_rgb(255, 220, 120));
-                            }
-                            // Cooldown: a dark sweep with the seconds left, as in the original.
-                            if let Some(left) = v.cooldowns.get(&(key.id as u16)).map(|e| e.saturating_duration_since(std::time::Instant::now()).as_secs_f32()).filter(|s| *s > 0.0) {
-                                painter.rect_filled(rect.shrink(2.0), 4.0, Color32::from_black_alpha(150));
-                                let text = if left >= 60.0 { format!("{}m", (left / 60.0).ceil()) } else { format!("{left:.1}") };
-                                outlined(&painter, rect.center(), egui::Align2::CENTER_CENTER, &text, 12.0, Color32::WHITE);
-                                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
-                            }
-                        } else {
-                            let count: u32 = v.items.iter().filter(|it| it.id == key.id && it.equipped == 0).map(|it| it.amount as u32).sum();
-                            let tint = if count == 0 { Color32::from_white_alpha(70) } else { Color32::WHITE };
-                            paint_icon(&painter, rect, v.icons.get(&key.id), tint);
-                            outlined(&painter, rect.right_bottom() - Vec2::new(3.0, 1.0), egui::Align2::RIGHT_BOTTOM, &count.to_string(), 11.0, Color32::WHITE);
-                        }
-                    }
-                    // Controller: hold RT for this row (LT for the next), then the button shown.
-                    const XBOX: [&str; HOTKEYS_PER_ROW] = ["A", "B", "X", "Y", "Up", "Rt", "Dn", "Lt", ""];
-                    const PS: [&str; HOTKEYS_PER_ROW] = ["Cr", "Ci", "Sq", "Tr", "Up", "Rt", "Dn", "Lt", ""];
-                    let key_label = if v.pad_hints { (if v.playstation { PS } else { XBOX })[col].to_string() } else { format!("F{}", col + 1) };
-                    if v.skin.is_some() {
-                        painter.text(rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, &key_label, egui::FontId::proportional(9.5), Color32::from_rgb(90, 100, 140));
-                    } else {
-                        outlined(&painter, rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, &key_label, 10.0, Color32::from_gray(200));
-                    }
-
-                    if let Some(dropped) = resp.dnd_release_payload::<Hotkey>().map(|k| *k).or_else(|| resp.dnd_release_payload::<ItemDrag>().and_then(|d| d.hotkey())) {
-                        action = Some(UiAction::SetHotkey { index: index as u16, key: dropped });
-                    } else if key.id != 0 {
-                        resp.dnd_set_drag_payload(key);
-                        if resp.clicked() {
-                            action = Some(UiAction::UseHotkey(index));
-                        } else if resp.secondary_clicked() {
-                            action = Some(UiAction::SetHotkey { index: index as u16, key: Hotkey::default() });
-                        } else if let (true, Some(s)) = (resp.hovered(), skill) {
-                            let scroll: f32 = ui.input(|i| i.events.iter().map(|e| if let egui::Event::MouseWheel { delta, .. } = e { delta.y } else { 0.0 }).sum());
-                            if scroll != 0.0 {
-                                let count = (key.count + scroll.signum() as i16).clamp(1, s.level.max(1) as i16);
-                                if count != key.count {
-                                    action = Some(UiAction::SetHotkey { index: index as u16, key: Hotkey { count, ..key } });
+    if v.hotkey_rows > 0 {
+        egui::Area::new(egui::Id::unique("hotkeys")).anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -12.0)).show(ctx, |ui| {
+            let frame = if v.skin.is_some() {
+                egui::Frame::new().fill(Color32::WHITE).stroke(egui::Stroke::new(1.0, Color32::from_rgb(150, 160, 190))).inner_margin(4)
+            } else {
+                egui::Frame::new().fill(Color32::from_rgba_unmultiplied(16, 20, 28, 210)).corner_radius(8).inner_margin(6)
+            };
+            frame.show(ui, |ui| {
+                if v.skin.is_none() {
+                    ui.style_mut().visuals = egui::Visuals::dark();
+                }
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        // The first row is at the bottom, the next ones stacked above it.
+                        for offset in (0..v.hotkey_rows.min(HOTKEY_ROWS)).rev() {
+                            let row = (v.hotkey_row + offset) % HOTKEY_ROWS;
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                for col in 0..HOTKEYS_PER_ROW {
+                                    let label = slot_key_label(v, offset, col);
+                                    if let Some(a) = hotkey_slot_ui(ui, v, row as usize * HOTKEYS_PER_ROW + col, &label, SIZE) {
+                                        action = Some(a);
+                                    }
                                 }
-                            }
+                            });
                         }
-                        let tip = match skill {
-                            Some(s) => format!("{} Lv {}", (v.skill_names)(&s.name), key.count),
-                            None if key.skill => format!("Skill {}", key.id),
-                            None => v.db.map_or_else(|| format!("Item {}", key.id), |db| db.name(key.id, true)),
-                        };
-                        resp.on_hover_text(tip);
+                    });
+                    ui.separator();
+                    ui.vertical(|ui| {
+                        let page = ui.add(egui::Button::new(RichText::new(format!("{}", v.hotkey_row + 1)).size(13.0)).min_size(Vec2::new(22.0, SIZE)));
+                        if page.on_hover_text("Next row").clicked() {
+                            action = Some(UiAction::HotkeyRow((v.hotkey_row + 1) % HOTKEY_ROWS));
+                        }
+                        if v.battle_mode {
+                            ui.label(RichText::new("BM").size(10.0).color(Color32::from_rgb(230, 120, 90))).on_hover_text("Battle mode (/bm): letter keys use the shortcut rows; Enter or Space to chat");
+                        }
+                    });
+                    if v.pad_hints {
+                        let hint = if v.playstation { "hold R2\nL2: next" } else { "hold RT\nLT: next" };
+                        ui.label(RichText::new(hint).size(10.0).color(Color32::from_gray(170)));
                     }
-                }
-                ui.separator();
-                let row = ui.add(egui::Button::new(RichText::new(format!("{}", v.hotkey_row + 1)).size(13.0)).min_size(Vec2::new(22.0, SIZE)));
-                if v.pad_hints {
-                    let hint = if v.playstation { "hold R2\nL2: next" } else { "hold RT\nLT: next" };
-                    ui.label(RichText::new(hint).size(10.0).color(Color32::from_gray(170)));
-                }
-                if row.on_hover_text("Next row (F12)").clicked() {
-                    action = Some(UiAction::HotkeyRow((v.hotkey_row + 1) % HOTKEY_ROWS));
-                }
+                });
             });
         });
-    });
+    }
     // Show what is being dragged under the pointer.
     let dragged = egui::DragAndDrop::payload::<Hotkey>(ctx).map(|k| *k).or_else(|| egui::DragAndDrop::payload::<ItemDrag>(ctx).map(|d| Hotkey { skill: false, id: d.id, count: 0 }));
     if let (Some(key), Some(pos)) = (dragged, ctx.pointer_interact_pos()) {

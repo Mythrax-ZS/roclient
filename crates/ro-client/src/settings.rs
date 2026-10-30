@@ -30,11 +30,17 @@ pub struct Settings {
     /// /aura2: no level aura at all; /aura: the simplified aura (its sparkles alone).
     pub aura_off: bool,
     pub aura_simple: bool,
+    /// /bm: letter keys use the shortcut bar (Q..O, A..L, Z..>) and Enter or Space opens chat.
+    pub battle_mode: bool,
+    /// Shortcut bar rows on show (F12 cycles 1..4 and hidden).
+    pub hotkey_rows: u8,
+    /// What Alt+1..Alt+0 say (the macro window, Alt+M).
+    pub macros: Vec<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect() }
     }
 }
 

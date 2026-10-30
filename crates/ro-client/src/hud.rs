@@ -194,6 +194,12 @@ impl Hud {
         self.want_focus = true;
     }
 
+    /// A key typed over the game outside battle mode: it starts (or continues) a chat line.
+    pub fn type_into_chat(&mut self, text: &str) {
+        self.input.push_str(text);
+        self.want_focus = true;
+    }
+
     /// Draws the HUD; returns a chat line the player submitted.
     /// `floaters`: (screen pos, text, colour, age ms) damage numbers; `bars`: (feet, hp fraction).
     /// `casts`: (feet, progress 0..1) cast bars drawn over the caster's head.
@@ -510,6 +516,10 @@ impl Hud {
                 if self.want_focus {
                     edit.request_focus();
                     self.want_focus = false;
+                    // Caret after what is already typed.
+                    let mut state = egui::TextEdit::load_state(ui.ctx(), edit.id).unwrap_or_default();
+                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(self.input.chars().count()))));
+                    state.store(ui.ctx(), edit.id);
                 }
                 if edit.has_focus() && !self.history.is_empty() {
                     let (up, down) = ui.input(|i| (i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowDown)));
