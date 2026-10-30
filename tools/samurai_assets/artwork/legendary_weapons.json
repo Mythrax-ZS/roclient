@@ -37,6 +37,26 @@
         10
       ],
       "illustration": "source/legendary/muramasa-v4-illustration.png"
+    },
+    {
+      "name": "tenseiga",
+      "item_id": 900003,
+      "view": 9003,
+      "resource": "samurai_tenseiga",
+      "png": "source/legendary/tenseiga-v4.png",
+      "rect": [
+        0,
+        0,
+        2048,
+        384
+      ],
+      "downsample": 32,
+      "source_grip": [
+        10,
+        5
+      ],
+      "illustration": "source/legendary/tenseiga-v4-illustration.png",
+      "offhand": false
     }
   ]
 }

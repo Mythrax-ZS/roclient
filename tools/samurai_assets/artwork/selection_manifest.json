@@ -13,6 +13,8 @@
     "source/legendary/kusanagi-v4.png",
     "source/legendary/muramasa-v4-illustration.png",
     "source/legendary/muramasa-v4.png",
+    "source/legendary/tenseiga-v4-illustration.png",
+    "source/legendary/tenseiga-v4.png",
     "source/utility/utility_N.png",
     "source/utility/utility_NW.png",
     "source/utility/utility_S.png",
@@ -31,10 +33,10 @@
   "exclusion_reason": "Not referenced by build.json; working or superseded artwork remains outside release.",
   "sha256": {
     "build.json": "0bb1abcabb4f538a61cffc4079ed51ed0d30fab9fde606d6d94c04aec4d81eb0",
-    "legendary_weapons.json": "499e24b9fcd1628627dfbf5b3caa515ce6f9903a110cc1fcc1259c513cf0c7a7",
+    "legendary_weapons.json": "3de1eb0087e6414ad3a16021baf75fea6bdfd66c8a0f8579efec7128fa881a4a",
     "master_audit.json": "7b589392b84d7d90bd20c073badad3f1ed3dc458ed5736d17a561face6a36fb4",
     "prompts_root.json": "5534a6cc57e7550837bb0009cce73a6d2b69fd17d4ecbea67b40dd69c0b74581",
-    "README.md": "20c25e9f9ef05a0cb51802017e08eaf4de4a193a8eb2d89a276795bc828ed87c",
+    "README.md": "866ea571b8c119701e114443e87bf2da58ed0f1356e1da118e806627448f7239",
     "source/attack/attack_audit.json": "5426270d8e7c0939a9ba5330f33362f61e034ddfb4cf5e033c847fd280edb43a",
     "source/attack/attack_N.png": "861b2f97c12447b0a5ab42846e5326d19efb6171df5676d56794f4141a199b94",
     "source/attack/attack_N.prompt.json": "0f740bb94100e65a92832709fd4e8246e9defd632e19580ff507e6e7b411444c",
@@ -86,7 +88,9 @@
     "source/legendary/kusanagi-v4.png": "25165a08de9aa676f5f75bd2793e175d7a0a545ed864530d8cd344a0286230b0",
     "source/legendary/kusanagi-v4-illustration.png": "0beaf668a26d20dad6fcb5c70b7399e3f59d5f402b1a16b255e00deaf8bc3d58",
     "source/legendary/muramasa-v4.png": "78745b250f9f5c75fb2fccd5fbbe0e8df57f73b141be106d0322412294a218af",
-    "source/legendary/muramasa-v4-illustration.png": "6479cf5d954e70e4cc22b1f8733950f1719288cf7c24c73d53f476328eda3abd"
+    "source/legendary/muramasa-v4-illustration.png": "6479cf5d954e70e4cc22b1f8733950f1719288cf7c24c73d53f476328eda3abd",
+    "source/legendary/tenseiga-v4-illustration.png": "d44078dba5a196093fda33be1d74f1c1c9c80d2e011cb1064ba7cc8437123936",
+    "source/legendary/tenseiga-v4.png": "5a76e32df9762e52a60e8a1f935ef2f9b915fdb18d1d238450eb1afe9e34b5e3"
   },
   "compiled_runtime_sha256": {
     "ember_ronin.spr": "c5c3ea78995c90bdf4c820d2c6e252814d87313ab1c086dcf55e2686d5577aad",

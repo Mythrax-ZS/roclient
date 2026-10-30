@@ -1,7 +1,8 @@
 # Legendary weapons from the illustrations
 
 Kusanagi and Muramasa v4 are cut from the user's illustrations (`Kusanagi.png`
-and `Muramasa Transformed.png` in art.zip, not stored here). Run from a folder
+and `Muramasa Transformed.png` in art.zip), and Tenseiga from the user's Tenseiga
+illustration (`Tenseiga.png`, 2740x3120); none are stored here. Run from a folder
 holding those two files under `artzip/`:
 
 ```powershell
@@ -13,4 +14,6 @@ Copy `native/<name>-v4.png` to `artwork/source/legendary/`, save the cut-outs
 (scaled to 1024 px) as `<name>-v4-illustration.png` there, set `rect`,
 `downsample` and `source_grip` in `legendary_weapons.json` from the JSON, then
 build with `compile_weapons.py`. `mura_outline.py` is Muramasa's traced outline
-and tassel in illustration pixels; Kusanagi's handle outline is in `cutout.py`.
+and tassel in illustration pixels, `tenseiga_outline.py` Tenseiga's hilt, star guard
+and blade; Kusanagi's handle outline is in `cutout.py`. Pass sword names after the
+folders to build only those (e.g. `py cutout.py cut tenseiga`).

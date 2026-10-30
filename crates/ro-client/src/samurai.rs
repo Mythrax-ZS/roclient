@@ -8,6 +8,8 @@ pub const BODY: &str = r"data\sprite\custom\samurai\ember_ronin";
 pub const KATANA: &str = r"data\sprite\custom\samurai\katana";
 pub const KUSANAGI: &str = r"data\sprite\custom\samurai\kusanagi";
 pub const MURAMASA: &str = r"data\sprite\custom\samurai\muramasa";
+/// Two-handed: Kusanagi and Muramasa forged into one blade, so it has no off-hand pair.
+pub const TENSEIGA: &str = r"data\sprite\custom\samurai\tenseiga";
 pub const KATANA_OFFHAND: &str = r"data\sprite\custom\samurai\katana_offhand";
 pub const KUSANAGI_OFFHAND: &str = r"data\sprite\custom\samurai\kusanagi_offhand";
 pub const MURAMASA_OFFHAND: &str = r"data\sprite\custom\samurai\muramasa_offhand";
@@ -19,6 +21,7 @@ pub fn weapon(view: u32) -> Option<&'static str> {
         2 | 3 | 49 => Some(KATANA),
         9001 => Some(KUSANAGI),
         9002 => Some(MURAMASA),
+        9003 => Some(TENSEIGA),
         _ => None,
     }
 }
@@ -170,12 +173,16 @@ mod tests {
     fn legendary_weapon_views_resolve_to_distinct_body_aligned_sprites() {
         assert_eq!(weapon(9001), Some(KUSANAGI));
         assert_eq!(weapon(9002), Some(MURAMASA));
+        assert_eq!(weapon(9003), Some(TENSEIGA));
         assert_ne!(weapon(9001), weapon(9002));
+        assert_ne!(weapon(9003), weapon(9001));
+        assert_ne!(weapon(9003), weapon(9002));
         assert_ne!(weapon(9001), weapon(2));
         assert_ne!(weapon(9002), weapon(49)); // The stock Muramasa remains the generic katana.
         assert_eq!(weapon(900000), None); // Item IDs must first resolve through itemInfo.
         assert_eq!(weapon(900001), None);
         assert_eq!(weapon(900002), None);
+        assert_eq!(weapon(900003), None);
     }
 
     #[test]
@@ -211,6 +218,7 @@ mod tests {
         assert_eq!(offhand(900000), Some(KATANA_OFFHAND));
         assert_eq!(offhand(900001), Some(KUSANAGI_OFFHAND));
         assert_eq!(offhand(900002), Some(MURAMASA_OFFHAND));
+        assert_eq!(offhand(900003), None); // Tenseiga is two-handed.
         assert_eq!(offhand(0), None); // Empty left hand.
         assert_eq!(offhand(2104), None); // Buckler: a shield, though its view (2) is the katana's.
         assert_eq!(offhand(9001), None); // Views are not item ids.
@@ -224,13 +232,14 @@ mod tests {
         let mut db = ro_game::items::ItemDb::default();
         db.extend(entries);
         assert!(db.get(1164).is_none()); // Do not replace the stock two-handed Muramasa.
-        for (id, name, resource, view, sprite) in [
-            (900001, "Kusanagi", "samurai_kusanagi", 9001, KUSANAGI),
-            (900002, "Muramasa", "samurai_muramasa", 9002, MURAMASA),
+        for (id, name, resource, slots, view, sprite) in [
+            (900001, "Kusanagi", "samurai_kusanagi", 1, 9001, KUSANAGI),
+            (900002, "Muramasa", "samurai_muramasa", 1, 9002, MURAMASA),
+            (900003, "Tenseiga-no-Hayate", "samurai_tenseiga", 2, 9003, TENSEIGA),
         ] {
             let info = db.get(id).expect("legendary weapon metadata");
             assert_eq!((info.name.as_str(), info.resource.as_str()), (name, resource));
-            assert_eq!((info.slots, info.view), (1, view));
+            assert_eq!((info.slots, info.view), (slots, view));
             assert_eq!(weapon(info.view), Some(sprite));
             for (folder, size) in [("item", 32), ("collection", 128)] {
                 let path = format!("data/texture/유저인터페이스/{folder}/{resource}.bmp");
@@ -263,7 +272,7 @@ mod tests {
     fn shipped_body_and_weapon_match_all_player_actions() {
         let root = overlay_path().expect("bundled Samurai overlay");
         let mut parsed = Vec::new();
-        for base in [BODY, KATANA, KUSANAGI, MURAMASA, KATANA_OFFHAND, KUSANAGI_OFFHAND, MURAMASA_OFFHAND] {
+        for base in [BODY, KATANA, KUSANAGI, MURAMASA, TENSEIGA, KATANA_OFFHAND, KUSANAGI_OFFHAND, MURAMASA_OFFHAND] {
             let path = root.join(base.replace('\\', "/"));
             let spr = ro_formats::spr::Spr::parse(&std::fs::read(path.with_extension("spr")).unwrap()).unwrap();
             let act = ro_formats::act::Act::parse(&std::fs::read(path.with_extension("act")).unwrap()).unwrap();

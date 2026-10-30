@@ -106,6 +106,13 @@ the weapons, inventory/collection art and floor sprites together:
 py tools/samurai_assets/compile_weapons.py tools/samurai_assets/artwork/build.json tools/samurai_assets/artwork/legendary_weapons.json --output target/legendary-weapons-v4
 ```
 
+Tenseiga-no-Hayate (`source/legendary/tenseiga-v4.png`) comes from the user's
+Tenseiga illustration the same way: `cutout.py <out> tenseiga` uses the hilt, star
+guard and blade outline in `tenseiga_outline.py`, and `native.py <cut> <out>
+tenseiga` scales pommel to tip to 62 pixels (it is two-handed), thickens it x1.5,
+lifts saturation and brightness x1.5 so the navy blade does not average to murk,
+and gives it a cool navy rim. Its manifest entry sets `"offhand": false`.
+
 The compiler writes a staging overlay and decoded previews under that output
 directory. [Legendary provenance](../../../overlays/samurai/legendary_provenance.json)
 distinguishes current validation from checks performed before this revision.

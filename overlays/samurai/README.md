@@ -18,7 +18,7 @@ The game job is **Samurai** (4500); **Ember Ronin** remains the asset filename.
 - Attack groups 5, 10 and 11 correct the cutting-edge side for SW/W/NW/N and
   their reflected directions, while S keeps its clockwise cutting orientation.
   Five winding/overhead poses also align the blade with the hand axis. The shared
-  metadata applies to the starter katana, Kusanagi and Muramasa.
+  metadata applies to the starter katana, Kusanagi, Muramasa and Tenseiga-no-Hayate.
 - The weapon follows the body's action, frame index and delay. Its offsets are
   relative to the actor's ground origin; do not apply a head-anchor offset.
 - Katana layers are present in ready and attack groups 4, 5, 10 and 11.
@@ -28,7 +28,7 @@ The game job is **Samurai** (4500); **Ember Ronin** remains the asset filename.
   about 5 pixels wide. The blade was shortened and widened for gameplay zoom; do not
   restore the old 0.75 scale, which made the thin blade hard to read in-game.
 - Equipped swords with view 2, 3 or 49 use the starter katana. Custom views 9001
-  and 9002 select Kusanagi and Muramasa. Katar artwork is not supplied.
+  and 9002 select Kusanagi and Muramasa, and 9003 Tenseiga-no-Hayate. Katar artwork is not supplied.
 - Dual wielding draws the left-hand katana from its own `*_offhand` pair. It is the
   same blade on off-hand poses. In the ready stance it is held low behind; when
   attacking, it sweeps opposite to the main blade, a cross slash. The server sends
@@ -132,3 +132,25 @@ runtime hashes and separates prior-revision checks from current validation.
 Restart the client after installing updated sprite files. Item stats are
 unchanged by this visual revision; `@item 900001 1` and `@item 900002 1` create
 the existing weapons for testing.
+
+## Tenseiga-no-Hayate
+
+| Item ID | Name | Client view | Role |
+| --- | --- | --- | --- |
+| 900003 | Tenseiga-no-Hayate | 9003 | The Mortal Flame: Kusanagi and Muramasa reforged as one two-handed blade |
+
+Tenseiga is a Samurai-only two-handed sword: weapon level 4, two slots, 420 ATK,
+required base level 99, refineable, Neutral. In the user's *Twin Flames Saga*,
+Hayate shatters Kusanagi and Muramasa at the First Forge and reforges them into a
+blade that answers to no god; its item script follows the relic each companion
+adds to the forge (see [the server specification](../../../rathena/doc/custom_jobs/samurai.md)).
+Masaru, in Prontera next to the Samurai Mentor, forges it from a dual-wielded
+Kusanagi and Muramasa, 10 Oridecon and 10 Burning Hearts; `@item 900003 1` also
+creates it.
+
+Its art is cut out of the user's Tenseiga illustration by the outline traced in
+`tools/samurai_assets/illustration/tenseiga_outline.py` (the phoenix wings and
+flames behind it share the guard's reds), scaled to 62 game pixels from pommel to
+tip and brightened so the dark blade's cyan edge, red runes and white core read at
+gameplay zoom. Being two-handed, it has no off-hand pair (`"offhand": false` in
+`legendary_weapons.json`). It shares the katana ready and attack poses.

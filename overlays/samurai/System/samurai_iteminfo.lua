@@ -1,4 +1,4 @@
--- Samurai weapons. The starter uses the installed Katana icon; the two custom
+-- Samurai weapons. The starter uses the installed Katana icon; the custom
 -- weapons have their own bundled inventory, collection, floor and equipped art.
 -- CP949 resource names use decimal escapes so this file remains ASCII.
 tbl = {
@@ -76,6 +76,38 @@ tbl = {
         },
         slotCount = 1,
         ClassNum = 9002,
+        costume = false,
+    },
+    [900003] = {
+        unidentifiedDisplayName = "Unidentified Katana",
+        unidentifiedResourceName = "\196\171\197\184\179\170",
+        unidentifiedDescriptionName = { "Identify this weapon with a Magnifier." },
+        identifiedDisplayName = "Tenseiga-no-Hayate",
+        identifiedResourceName = "samurai_tenseiga",
+        identifiedDescriptionName = {
+            "^C04000The Mortal Flame.^000000 ^777777Kusanagi and Muramasa, shattered and reforged at the First Forge into a blade that answers to no god.^000000",
+            "HIT +20, CRIT +15. Max HP +5%, Max SP +5%.",
+            "Heaven's Severance, Ashen Wind Slash and Wrath Unbound damage +20%.",
+            "Kusanagi Guard and Moonlit Reflection SP costs -15%.",
+            "Short-range physical hits have a 3% chance to inflict Bleeding for up to 5 seconds.",
+            "Damage against Angel and Demon monsters +20%; ignore 50% of their DEF.",
+            "Take 15% less damage from Angel and Demon monsters and from Holy attacks;",
+            "10% less from Fire and Water attacks.",
+            "Immune to Curse, Bleeding, Blind and Confusion.",
+            "20% chance for attacks to ignore Flee.",
+            "Physical damage +1% per refine level.",
+            "^C04000Mortal Flame:^000000 5% chance on a weapon hit, for 8 seconds: ASPD +15%, critical damage +30%, ignore 30% of all DEF.",
+            "^0000CCType:^000000 Two-Handed Sword",
+            "^0000CCAttack:^000000 420",
+            "^0000CCElement:^000000 Neutral",
+            "^0000CCWeight:^000000 150",
+            "^0000CCWeapon Level:^000000 4",
+            "^0000CCRequired Base Level:^000000 99",
+            "^0000CCJobs:^000000 Samurai",
+            "Can be refined. Forged by Masaru in Prontera.",
+        },
+        slotCount = 2,
+        ClassNum = 9003,
         costume = false,
     },
 }

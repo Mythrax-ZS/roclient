@@ -1,8 +1,9 @@
-"""Cut Kusanagi and Muramasa out of the illustrations.
+"""Cut Kusanagi, Muramasa and Tenseiga out of the illustrations.
 
 Writes, per sword: <name>-cut.png (RGBA, as painted, cropped) and <name>-flat.png (RGBA, rotated
 so the hilt is left, the tip right and the cutting edge - the convex side of the curve - below),
 plus <name>-flat.json with the pommel, guard and tip positions in the flat image.
+Usage: py cutout.py <out> [name ...] (all swords when no names are given).
 """
 import json
 import math
@@ -14,9 +15,11 @@ from PIL import Image, ImageDraw, ImageFilter
 
 sys.path.insert(0, str(Path(__file__).parent))
 from mura_outline import outline as mura_outline, tassel as mura_tassel  # noqa: E402
+from tenseiga_outline import polygons as tenseiga_polygons  # noqa: E402
 
 out = Path(sys.argv[1])
 out.mkdir(parents=True, exist_ok=True)
+only = set(sys.argv[2:])
 
 
 def band_mask(size, axis, half):
@@ -58,12 +61,25 @@ swords = {
         src="artzip/Muramasa Transformed.png",
         pommel=(1070, 1110), guard=(1300, 1600), tip=(2570, 3450),
     ),
+    # Traced by hand: the phoenix wings and flames behind it share the guard's reds.
+    "tenseiga": dict(
+        src="artzip/Tenseiga.png",
+        pommel=(1722, 158), guard=(1565, 865), tip=(747, 2947),
+    ),
 }
 
 for name, s in swords.items():
+    if only and name not in only:
+        continue
     im = Image.open(s["src"]).convert("RGB")
     rgb = np.asarray(im)
-    if name == "kusanagi":
+    if name == "tenseiga":
+        m = Image.new("L", im.size, 0)
+        draw = ImageDraw.Draw(m)
+        for poly in tenseiga_polygons:
+            draw.polygon(poly, fill=255)
+        mask = np.asarray(m) > 0
+    elif name == "kusanagi":
         v = rgb.max(axis=2) / 255
         band = band_mask(im.size, s["axis"], s["half"])
         mask = band & (v > 0.72)

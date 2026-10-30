@@ -4,7 +4,8 @@ CLI: py compile_weapons.py artwork/build.json artwork/legendary_weapons.json --o
 Manifest: {"weapons": [{"name": "kusanagi", "resource": "samurai_kusanagi",
 "png": "source/kusanagi.png", "rect": [0,0,1728,240], "downsample": 24,
 "source_grip": [14,5]}]}. PNG paths are relative to the manifest. An optional
-"illustration" RGBA PNG becomes the item description (collection) picture as drawn.
+"illustration" RGBA PNG becomes the item description (collection) picture as drawn, and
+"offhand": false skips the dual-wield pair (two-handed weapons).
 Only generated staging configs contain absolute paths. Runtime installation is separate.
 """
 from __future__ import annotations
@@ -90,6 +91,9 @@ def compile_weapons(base_path, manifest_path, output):
         config["weapon"] = {key: entry[key] for key in ("rect", "downsample", "source_grip") if key in entry}
         config["weapon"]["png"] = str(png)
         config["weapon_name"] = name
+        if entry.get("offhand") is False:
+            for group in config["groups"]:
+                group.pop("offhand_poses", None)
         destination = output / name
         destination.mkdir(parents=True, exist_ok=True)
         config_path = destination / "build.json"
