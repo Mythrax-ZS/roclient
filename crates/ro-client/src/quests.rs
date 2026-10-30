@@ -11,6 +11,10 @@ pub struct QuestLog {
     pub quests: BTreeMap<u32, Quest>,
     /// Quest id -> (title, summary, description lines).
     info: HashMap<u32, (String, String, Vec<String>)>,
+    /// Quest id -> where its NPC stands (map, x, y), for navigation.
+    npc: HashMap<u32, (String, u16, u16)>,
+    /// The Navigate button was pressed: (map, cell, label), for the navigation window.
+    pub navigate: Option<(String, Option<(u16, u16)>, String)>,
     /// NPC id -> (mark, colour).
     pub marks: HashMap<u32, (u16, u16)>,
     mark_icons: HashMap<(u16, u16), Option<egui::TextureHandle>>,
@@ -34,12 +38,22 @@ impl QuestLog {
                 let s = |k: &str| c.field(entry, k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
                 let desc = c.field(entry, "Description").map(|d| c.entries(d).iter().filter_map(|(_, l)| l.as_str().map(str::to_string)).collect()).unwrap_or_default();
                 q.info.insert(id as u32, (s("Title"), s("Summary"), desc));
+                let num = |k: &str| c.field(entry, k).and_then(|v| v.as_number()).unwrap_or(0.0) as u16;
+                if let Some(map) = c.field(entry, "NpcNavi").and_then(|v| v.as_str()).filter(|m| !m.is_empty()) {
+                    q.npc.insert(id as u32, (map.to_string(), num("NpcPosX"), num("NpcPosY")));
+                }
             }
         }
         }
         for p in crate::customdata::QUESTINFO_SOURCES {
             if let Some(src) = vfs.read(p).ok().flatten() {
-                q.info.extend(crate::customdata::questinfo(&src, p));
+                for (id, t) in crate::customdata::questinfo(&src, p) {
+                    q.info.insert(id, (t.title, t.summary, t.description));
+                    match t.npc {
+                        Some(npc) => q.npc.insert(id, npc),
+                        None => q.npc.remove(&id),
+                    };
+                }
             }
         }
         tracing::info!(quests = q.info.len(), "quest descriptions");
@@ -67,8 +81,9 @@ impl QuestLog {
             .clone()
     }
 
-    /// The log window. Returns a quest to show or hide in the active list.
-    pub fn show(&mut self, ctx: &egui::Context) -> Option<(u32, bool)> {
+    /// The log window. Returns a quest to show or hide in the active list. `map_name` gives a
+    /// map's display name for the quest's location.
+    pub fn show(&mut self, ctx: &egui::Context, map_name: &dyn Fn(&str) -> Option<String>) -> Option<(u32, bool)> {
         if !self.open {
             return None;
         }
@@ -115,6 +130,21 @@ impl QuestLog {
                         let done = o.total > 0 && o.count >= o.total;
                         let text = if o.total > 0 { format!("{}  {} / {}", o.name, o.count, o.total) } else { format!("{}  {}", o.name, o.count) };
                         ui.label(RichText::new(text).color(crate::classic::ink(if done { Color32::LIGHT_GREEN } else { Color32::WHITE })));
+                    }
+                }
+                // Where its NPC stands, as the original's quest window shows it, with navigation.
+                if let Some((map, x, y)) = self.npc.get(&q.id).cloned() {
+                    ui.separator();
+                    let place = map_name(&map).unwrap_or_else(|| map.clone());
+                    let at = if x > 0 && y > 0 { format!("{place} ({x}, {y})") } else { place };
+                    let title = self.title(q.id);
+                    let mut go = false;
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("Location: {at}")).color(crate::classic::ink(Color32::from_rgb(150, 200, 255))));
+                        go = ui.button("Navigate").on_hover_text("Show the way there").clicked();
+                    });
+                    if go {
+                        self.navigate = Some((map, (x > 0 && y > 0).then_some((x, y)), title));
                     }
                 }
                 if q.end > 0 {

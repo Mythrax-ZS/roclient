@@ -62,11 +62,20 @@ pub fn iteminfo(src: &[u8], name: &str) -> Vec<(u32, ItemInfo)> {
     out
 }
 
+/// A quest's log text, and where its NPC stands (NpcNavi, NpcPosX, NpcPosY), as the
+/// original's quest info files give them.
+pub struct QuestText {
+    pub title: String,
+    pub summary: String,
+    pub description: Vec<String>,
+    pub npc: Option<(String, u16, u16)>,
+}
+
 /// Text quest info files (`QuestInfoList = { [id] = { Title = ..., Summary = ..., Description = {...} } }`).
 pub const QUESTINFO_SOURCES: [&str; 3] = [r"System\OngoingQuestInfoList_True.lua", r"System\samurai_questinfo.lua", r"System\questinfo_custom.lua"];
 
-/// Runs a text quest info file: (id, (title, summary, description lines)).
-pub fn questinfo(src: &[u8], name: &str) -> Vec<(u32, (String, String, Vec<String>))> {
+/// Runs a text quest info file.
+pub fn questinfo(src: &[u8], name: &str) -> Vec<(u32, QuestText)> {
     if src.starts_with(b"\x1bLua") {
         return vec![];
     }
@@ -82,7 +91,16 @@ pub fn questinfo(src: &[u8], name: &str) -> Vec<(u32, (String, String, Vec<Strin
             _ => String::new(),
         }
     };
-    let out: Vec<_> = list.pairs::<i64, Table>().filter_map(Result::ok).map(|(id, t)| (id as u32, (text(&t, "Title"), text(&t, "Summary"), lines(&t, "Description")))).collect();
+    let npc = |t: &Table| {
+        let map = text(t, "NpcNavi");
+        let pos = |k: &str| t.get::<f64>(k).unwrap_or(0.0) as u16;
+        (!map.is_empty()).then(|| (map, pos("NpcPosX"), pos("NpcPosY")))
+    };
+    let out: Vec<_> = list
+        .pairs::<i64, Table>()
+        .filter_map(Result::ok)
+        .map(|(id, t)| (id as u32, QuestText { title: text(&t, "Title"), summary: text(&t, "Summary"), description: lines(&t, "Description"), npc: npc(&t) }))
+        .collect();
     tracing::info!(quests = out.len(), "{name}");
     out
 }

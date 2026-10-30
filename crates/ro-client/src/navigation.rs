@@ -169,6 +169,11 @@ pub enum NaviAction {
 }
 
 impl Navigation {
+    /// A map's display name from the navigation tables (once loaded).
+    pub fn map_name(&self, map: &str) -> Option<&str> {
+        self.tables.as_ref()?.map_name(map)
+    }
+
     pub fn ensure_loaded(&mut self, vfs: Option<&ro_vfs::Vfs>) {
         if self.tables.is_none() {
             if let Some(v) = vfs {

@@ -7267,8 +7267,16 @@ impl App {
                 if let Some(req) = self.progress.show_attendance(ui.ctx()) {
                     self.queued_commands.push(ro_net::Command::Progress(req));
                 }
-                if let Some((quest, active)) = self.quests.show(ui.ctx()) {
+                if self.quests.open {
+                    self.navi.ensure_loaded(self.vfs.as_ref());
+                }
+                let navi_names = &self.navi;
+                if let Some((quest, active)) = self.quests.show(ui.ctx(), &|m| navi_names.map_name(m).map(str::to_string)) {
                     self.queued_commands.push(ro_net::Command::QuestActive { quest, active });
+                }
+                if let Some((map, cell, label)) = self.quests.navigate.take() {
+                    self.navi.ensure_loaded(self.vfs.as_ref());
+                    self.navi.go(&map, cell, label);
                 }
                 if self.esc_menu {
                     match hud::esc_menu(ui.ctx()) {
