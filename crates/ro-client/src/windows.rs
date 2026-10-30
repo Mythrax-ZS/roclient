@@ -33,6 +33,8 @@ pub enum UiAction {
     SwitchRemove(u16),
     SwitchAll,
     Drop { index: u16, amount: u16 },
+    /// Identify an unidentified item with a carried Magnifier (one-click identify).
+    Identify(u16),
     /// Raise a base stat; 0..6 = str, agi, vit, int, dex, luk.
     RaiseStat(usize),
     /// Raise trait stat `i` (pow, sta, wis, spl, con, crt) by one.
@@ -539,7 +541,11 @@ fn inventory_item_actions(resp: egui::Response, it: &InvItem, v: &View) -> Optio
     let mut action = None;
     let resp = resp.on_hover_ui(|ui| compare_tooltip(ui, v.db, it, v.items));
     resp.dnd_set_drag_payload(ItemDrag { index: it.index, id: it.id, amount: it.amount, shortcut: it.is_usable() || it.is_equipment(), loose: it.equipped == 0 });
-    if resp.double_clicked() {
+    // One-click identify: an unidentified item and a Magnifier (or Novice Magnifier) to hand.
+    let identify = !it.identified && v.items.iter().any(|m| matches!(m.id, 611 | 12325) && m.equipped == 0);
+    if identify && resp.double_clicked() {
+        action = Some(UiAction::Identify(it.index));
+    } else if resp.double_clicked() {
         action = Some(if it.kind == ro_game::items::kind::CARD {
             UiAction::CardTargets(it.index)
         } else if it.is_equipment() {
@@ -552,6 +558,10 @@ fn inventory_item_actions(resp: egui::Response, it: &InvItem, v: &View) -> Optio
         let card = it.kind == ro_game::items::kind::CARD;
         if ui.button(if card { "View card" } else { "Info" }).clicked() {
             action = Some(UiAction::ItemInfo { id: it.id, refine: it.refine, cards: it.cards });
+            ui.close();
+        }
+        if identify && ui.button("Identify (uses a Magnifier)").clicked() {
+            action = Some(UiAction::Identify(it.index));
             ui.close();
         }
         if it.is_equipment() && ui.button("Equip").clicked() {

@@ -180,6 +180,8 @@ pub fn parse_takeoff_ack(data: &[u8]) -> (u16, u32, bool) {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemRequest {
     Use { index: u16, account_id: u32 },
+    /// CZ_REQ_ONECLICK_ITEMIDENTIFY (0x0a35): identify this item with a Magnifier we carry.
+    Identify { index: u16 },
     Equip { index: u16, location: u32 },
     Unequip { index: u16 },
     /// CZ_REQ_TAKEOFF_EQUIP_ALL: take off everything worn in these slots.
@@ -221,6 +223,7 @@ impl Encode for ItemRequest {
             }
             ItemRequest::PickUp { floor_id } => put_db_packet(d, "TakeItem", &[&floor_id.to_le_bytes()]),
             ItemRequest::Drop { index, amount } => put_db_packet(d, "DropItem", &[&index.to_le_bytes(), &amount.to_le_bytes()]),
+            ItemRequest::Identify { index } => put_db_packet(d, "Oneclick_Itemidentify", &[&index.to_le_bytes()]),
             ItemRequest::CardTargets { card } => {
                 d.put_u16_le(0x017a);
                 d.put_u16_le(card);

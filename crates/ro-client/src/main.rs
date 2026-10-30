@@ -3761,6 +3761,7 @@ impl App {
             SwitchRemove(index) => self.send(Command::Switch(ro_net::SwitchRequest::Remove(index))),
             SwitchAll => self.send(Command::Switch(ro_net::SwitchRequest::All)),
             Drop { index, amount } => self.send(Command::Item(ItemRequest::Drop { index, amount })),
+            Identify(index) => self.send(Command::Item(ItemRequest::Identify { index })),
             RaiseStat(i) => self.send(Command::Stat(StatRequest::Raise(13 + i as u16))),
             RaiseTrait(i) => self.send(Command::Stat(StatRequest::RaiseTrait(219 + i as u16))),
             CardTargets(card) => {
@@ -5468,6 +5469,7 @@ impl App {
                         None
                     }
                     Some(("trait", i)) => i.parse().ok().filter(|i: &usize| *i < 6).map(windows::UiAction::RaiseTrait),
+                    Some(("identify", id)) => id.parse().ok().and_then(|id: u32| self.inventory.items.values().find(|i| i.id == id && !i.identified)).map(|i| windows::UiAction::Identify(i.index)),
                     Some(("revive", _)) => {
                         self.send(ro_net::Command::AutoRevive);
                         None
