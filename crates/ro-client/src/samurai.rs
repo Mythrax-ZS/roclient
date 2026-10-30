@@ -62,22 +62,22 @@ pub struct Skill {
 }
 
 pub const SKILLS: &[Skill] = &[
-    Skill { id: 7001, internal: "SAM_HEAVENS_SEVERANCE", name: "Heaven's Severance", description: "Divinity / Kusanagi. Strike one enemy for 400/500/600/700/800% ATK, with 25/30/35/40/45 percentage points of additional critical chance.", icon: "kn_bowlingbash", slot: 0 },
-    Skill { id: 7002, internal: "SAM_KUSANAGI_GUARD", name: "Kusanagi Guard", description: "Divinity / Kusanagi. Gain a 25/30/35/40/45% chance to parry physical attacks for 12 seconds.", icon: "lk_parrying", slot: 7 },
-    Skill { id: 7003, internal: "SAM_MOONLIT_REFLECTION", name: "Moonlit Reflection", description: "Divinity / Kusanagi. Within 8 seconds, block the next physical skill, return 50/60/70/80/90% of its damage and recover 2/3/4/5/6% of maximum SP.", icon: "kn_autocounter", slot: 14 },
-    Skill { id: 7004, internal: "SAM_BLADE_HARMONY", name: "Blade Harmony", description: "Divinity / Kusanagi. Gain 10/20/30/40/50 HIT and 1/2/3/4/5 ASPD for 20 seconds.", icon: "kn_twohandquicken", slot: 21 },
-    Skill { id: 7005, internal: "SAM_BLOOD_COVENANT", name: "Blood Covenant", description: "Cursed / Muramasa. Pay 10% of maximum HP. Your next 3 normal attack attempts gain 30/40/50/60/70% damage. Unused charges expire after 30 seconds.", icon: "lk_berserk", slot: 4 },
-    Skill { id: 7006, internal: "SAM_MURAMASAS_CURSE", name: "Muramasa's Curse", description: "Cursed / Muramasa. Gain 15/20/25/30/35% attack for 20 seconds. Drains 1% of maximum HP each second and ends before the drain would kill you.", icon: "bs_overthrust", slot: 11 },
-    Skill { id: 7007, internal: "SAM_ASHEN_WIND_SLASH", name: "Ashen Wind Slash", description: "Cursed / Muramasa. Strike enemies within 3 cells for 300/400/500/600/700% ATK. Has a 15/20/25/30/35% chance to inflict Bleeding for 10 seconds.", icon: "asc_meteorassault", slot: 18 },
-    Skill { id: 7008, internal: "SAM_WRATH_UNBOUND", name: "Wrath Unbound", description: "Cursed / Muramasa. Strike for 800/1000/1200/1400/1600% ATK. Requires HP strictly below 30% of maximum. Cooldown: 15 seconds.", icon: "as_sonicblow", slot: 25 },
+    Skill { id: 7001, internal: "SAM_HEAVENS_SEVERANCE", name: "Heaven's Severance", description: "Divinity / Kusanagi. Strike one enemy for 1700/2600/3500/4400/5300% ATK (x base level / 100), with 25/30/35/40/45 percentage points of additional critical chance.", icon: "kn_bowlingbash", slot: 0 },
+    Skill { id: 7002, internal: "SAM_KUSANAGI_GUARD", name: "Kusanagi Guard", description: "Divinity / Kusanagi. Gain a 30/35/40/45/50% chance to parry physical attacks for 30 seconds.", icon: "lk_parrying", slot: 7 },
+    Skill { id: 7003, internal: "SAM_MOONLIT_REFLECTION", name: "Moonlit Reflection", description: "Divinity / Kusanagi. Within 15 seconds, block the next physical skill, return 100/150/200/250/300% of its damage and recover 5/6/7/8/9% of maximum SP.", icon: "kn_autocounter", slot: 14 },
+    Skill { id: 7004, internal: "SAM_BLADE_HARMONY", name: "Blade Harmony", description: "Divinity / Kusanagi. Gain 20/40/60/80/100 HIT, 1/2/3/4/5 ASPD and 4/8/12/16/20% ATK for 60 seconds.", icon: "kn_twohandquicken", slot: 21 },
+    Skill { id: 7005, internal: "SAM_BLOOD_COVENANT", name: "Blood Covenant", description: "Cursed / Muramasa. Pay 10% of maximum HP. Your next 3 normal attack attempts gain 60/120/180/240/300% damage. Unused charges expire after 30 seconds.", icon: "lk_berserk", slot: 4 },
+    Skill { id: 7006, internal: "SAM_MURAMASAS_CURSE", name: "Muramasa's Curse", description: "Cursed / Muramasa. Gain 12/24/36/48/60% attack for 30 seconds. Drains 1% of maximum HP each second and ends before the drain would kill you.", icon: "bs_overthrust", slot: 11 },
+    Skill { id: 7007, internal: "SAM_ASHEN_WIND_SLASH", name: "Ashen Wind Slash", description: "Cursed / Muramasa. Strike enemies within 3 cells for 1300/2000/2700/3400/4100% ATK (x base level / 100). Has a 15/20/25/30/35% chance to inflict Bleeding for 10 seconds.", icon: "asc_meteorassault", slot: 18 },
+    Skill { id: 7008, internal: "SAM_WRATH_UNBOUND", name: "Wrath Unbound", description: "Cursed / Muramasa. Strike for 7000/11000/15000/19000/23000% ATK (x base level / 100). Requires HP strictly below 30% of maximum.", icon: "as_sonicblow", slot: 25 },
     // The Mortal Flame line, Tenseiga's own techniques, in the middle columns between the two
     // branches. Mortal Flame is granted by the Tenseiga questline, not learned with points.
-    Skill { id: 7009, internal: "SAM_MORTAL_FLAME", name: "Mortal Flame", description: "Mortal Flame / Tenseiga. Quest skill: granted by the Tenseiga questline (for now, Masaru in Prontera grants it to whoever forged Tenseiga). Tenseiga burns with mortal will, not a god's flame. While wielding Tenseiga: ATK +5%, and 10% less damage from Holy and Shadow attacks. Opens Tenseiga's techniques.", icon: "mo_explosionspirits", slot: 2 },
-    Skill { id: 7010, internal: "SAM_SEVER_HEAVENS_LIES", name: "Severing Heaven's Lies", description: "Mortal Flame / Tenseiga. Its edge cuts through illusions and divine lies. Strike one enemy for 500/600/700/800/900% ATK, with a 30/40/50/60/70% chance to strip its buffs.", icon: "lk_spiralpierce", slot: 8 },
-    Skill { id: 7011, internal: "SAM_LIGHT_AND_SHADOW", name: "Light and Shadow", description: "Mortal Flame / Tenseiga. A cut through both light and shadow: strike one enemy twice for 300/350/400/450/500% ATK each, as Holy or Shadow, whichever it takes more damage from.", icon: "kn_bowlingbash", slot: 15 },
-    Skill { id: 7012, internal: "SAM_UNCHAINED_WILL", name: "Unchained Will", description: "Mortal Flame / Tenseiga. Balance is not obedience; balance is freedom. Cure Stun, Freeze, Stone, Sleep, Silence, Curse, Blind and Confusion, and ward them off for 15/20/25/30/35 seconds.", icon: "mo_steelbody", slot: 10 },
-    Skill { id: 7013, internal: "SAM_FORGE_OF_TEN_SOULS", name: "Forge of Ten Souls", description: "Mortal Flame / Tenseiga. The will of every companion lit the First Forge. For 60 seconds, every party member within 7 cells gains 1/2/3/4/5% ATK and MATK for each party member there, counting at most 10.", icon: "pr_gloria", slot: 17 },
-    Skill { id: 7014, internal: "SAM_DESTINYS_SEVERANCE", name: "Destiny's Severance", description: "Mortal Flame / Tenseiga. The strike that severed the bond between divinity and mortal destiny. Strike one enemy for 1000/1250/1500/1750/2000% ATK, ignoring DEF, and 50% more against boss monsters.", icon: "asc_breaker", slot: 23 },
+    Skill { id: 7009, internal: "SAM_MORTAL_FLAME", name: "Mortal Flame", description: "Mortal Flame / Tenseiga. Quest skill: granted by the Tenseiga questline (for now, Masaru in Prontera grants it to whoever forged Tenseiga). Tenseiga burns with mortal will, not a god's flame. While wielding Tenseiga: ATK +10%, and 15% less damage from Holy and Shadow attacks. Opens Tenseiga's techniques.", icon: "mo_explosionspirits", slot: 2 },
+    Skill { id: 7010, internal: "SAM_SEVER_HEAVENS_LIES", name: "Severing Heaven's Lies", description: "Mortal Flame / Tenseiga. Its edge cuts through illusions and divine lies. Strike one enemy for 2000/3000/4000/5000/6000% ATK (x base level / 100), with a 30/40/50/60/70% chance to strip its buffs.", icon: "lk_spiralpierce", slot: 8 },
+    Skill { id: 7011, internal: "SAM_LIGHT_AND_SHADOW", name: "Light and Shadow", description: "Mortal Flame / Tenseiga. A cut through both light and shadow: strike one enemy twice for 1900/2800/3700/4600/5500% ATK each (x base level / 100), as Holy or Shadow, whichever it takes more damage from.", icon: "kn_bowlingbash", slot: 15 },
+    Skill { id: 7012, internal: "SAM_UNCHAINED_WILL", name: "Unchained Will", description: "Mortal Flame / Tenseiga. Balance is not obedience; balance is freedom. Cure Stun, Freeze, Stone, Sleep, Silence, Curse, Blind and Confusion, and ward them off for 40/50/60/70/80 seconds.", icon: "mo_steelbody", slot: 10 },
+    Skill { id: 7013, internal: "SAM_FORGE_OF_TEN_SOULS", name: "Forge of Ten Souls", description: "Mortal Flame / Tenseiga. The will of every companion lit the First Forge. For 90 seconds, every party member within 7 cells gains 5/10/15/20/25% ATK and MATK, and 1/2/3/4/5% more for each party member there (counting at most 10).", icon: "pr_gloria", slot: 17 },
+    Skill { id: 7014, internal: "SAM_DESTINYS_SEVERANCE", name: "Destiny's Severance", description: "Mortal Flame / Tenseiga. The strike that severed the bond between divinity and mortal destiny. Strike one enemy for 8000/12000/16000/20000/24000% ATK (x base level / 100), ignoring DEF, and 50% more against boss monsters.", icon: "asc_breaker", slot: 23 },
 ];
 
 /// What the skill window says about each skill's use. Matches db/custom/samurai/skill_db.yml
@@ -85,7 +85,7 @@ pub const SKILLS: &[Skill] = &[
 struct Use {
     max_level: u8,
     /// SP cost, cooldown and after-cast delay (seconds); None for a passive.
-    cost: Option<(u32, u32, f32)>,
+    cost: Option<(u32, f32, f32)>,
     target: &'static str,
     weapon: &'static str,
     prerequisite: Option<&'static str>,
@@ -98,20 +98,20 @@ const TENSEIGA_ONLY: &str = "Requires Tenseiga-no-Hayate to be wielded.";
 
 fn usage(id: u16) -> Use {
     let (cost, target, prerequisite) = match id {
-        7001 => ((25, 2, 0.3), "One enemy, range 2 cells", None),
-        7002 => ((30, 20, 0.3), "Self", Some("Heaven's Severance Lv 3")),
-        7003 => ((35, 18, 0.3), "Self", Some("Kusanagi Guard Lv 3")),
-        7004 => ((30, 25, 0.3), "Self", Some("Moonlit Reflection Lv 3")),
-        7005 => ((20, 12, 0.3), "Self", None),
-        7006 => ((35, 25, 0.3), "Self", Some("Blood Covenant Lv 3")),
-        7007 => ((30, 4, 0.3), "Self-centered attack, radius 3 cells", Some("Muramasa's Curse Lv 3")),
-        7008 => ((50, 15, 0.3), "One enemy, range 2 cells", Some("Ashen Wind Slash Lv 3")),
+        7001 => ((60, 0.7, 0.3), "One enemy, range 2 cells", None),
+        7002 => ((40, 30.0, 0.3), "Self", Some("Heaven's Severance Lv 3")),
+        7003 => ((45, 15.0, 0.3), "Self", Some("Kusanagi Guard Lv 3")),
+        7004 => ((50, 60.0, 0.3), "Self", Some("Moonlit Reflection Lv 3")),
+        7005 => ((30, 12.0, 0.3), "Self", None),
+        7006 => ((50, 30.0, 0.3), "Self", Some("Blood Covenant Lv 3")),
+        7007 => ((70, 1.0, 0.3), "Self-centered attack, radius 3 cells", Some("Muramasa's Curse Lv 3")),
+        7008 => ((100, 15.0, 0.3), "One enemy, range 2 cells", Some("Ashen Wind Slash Lv 3")),
         7009 => return Use { max_level: 1, cost: None, target: "Passive", weapon: "", prerequisite: None, cast: None },
-        7010 => ((40, 3, 0.3), "One enemy, range 2 cells", Some("Mortal Flame Lv 1")),
-        7011 => ((50, 5, 0.5), "One enemy, range 2 cells", Some("Severing Heaven's Lies Lv 3")),
-        7012 => ((40, 60, 0.3), "Self", Some("Mortal Flame Lv 1")),
-        7013 => ((80, 120, 1.0), "Party members within 7 cells", Some("Unchained Will Lv 3")),
-        7014 => ((100, 30, 1.0), "One enemy, range 2 cells", Some("Light and Shadow Lv 5, Forge of Ten Souls Lv 3")),
+        7010 => ((70, 1.0, 0.3), "One enemy, range 2 cells", Some("Mortal Flame Lv 1")),
+        7011 => ((80, 1.5, 0.5), "One enemy, range 2 cells", Some("Severing Heaven's Lies Lv 3")),
+        7012 => ((60, 60.0, 0.3), "Self", Some("Mortal Flame Lv 1")),
+        7013 => ((100, 120.0, 1.0), "Party members within 7 cells", Some("Unchained Will Lv 3")),
+        7014 => ((150, 20.0, 1.0), "One enemy, range 2 cells", Some("Light and Shadow Lv 5, Forge of Ten Souls Lv 3")),
         _ => unreachable!("Samurai skill metadata"),
     };
     let weapon = if id >= 7010 { TENSEIGA_ONLY } else { ANY_BLADE };
