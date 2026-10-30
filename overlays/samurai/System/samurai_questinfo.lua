@@ -19,7 +19,7 @@ QuestInfoList[900111] = {
 QuestInfoList[900112] = {
     Title = "Twin Flames II: The Captured Raider",
     Summary = "Decide the captured raider's fate.",
-    Description = { "One of the raiders who burned your lord's house has been caught.", "He is bound in Amatsu, near Elder Genzo. His fate is yours." },
+    Description = { "One of the raiders who burned your lord's house has been caught.", "He kneels bound beside Elder Genzo in Amatsu, under guard. His fate is yours." },
 }
 QuestInfoList[900121] = {
     Title = "Twin Flames III: The Trickster's Tail",
