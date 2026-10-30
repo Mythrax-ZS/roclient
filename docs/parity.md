@@ -84,3 +84,20 @@ epute*.bson)
 - [x] ZC_ACK_REQNAMEALL: party, guild and rank under player names
 - [x] ZC_EQUIPMENT_EFFECT: hat effects (145 from hateffectinfo), following the wearer
 - [x] Equipment switch set (Switch tab: add, remove, swap; ZC_EQUIPSWITCH_LIST/ADD/REMOVE/REPLY)
+
+## Packet audit (2026-10-30)
+Server packets for PACKETVER 20250402 were taken from rAthena's preprocessed packet
+headers and clif.cpp, then compared with what this client reads and sends.
+- [x] CZ_REQ_DISCONNECT / ZC_ACK_REQ_DISCONNECT: Exit asks the server; "Please wait 10 seconds before trying to log out." (also for a refused character select)
+- [x] 4th-job trait stats (POW..CRT, P.Atk..C.Rate, trait points; CZ_ADVANCED_STATUS_CHANGE) and the AP gauge
+- [x] CZ_CHANGE_GROUP_MASTER: delegate party leadership from a member's right-click menu
+- [x] CZ_STANDING_RESURRECTION: "Revive" in the death window with a Token of Siegfried or Light of Regene
+- [x] CZ_REQ_ONECLICK_ITEMIDENTIFY: identify with a carried Magnifier
+- [x] CZ_USE_SKILL_START / END: hold Rolling Cutter's shortcut key
+- [x] Inventory items dragged onto the world are dropped (stacks ask how many)
+- [ ] Selectable item packages (CZ_USE_PACKAGEITEM; client table selectpackageitem.lub, box names untranslated)
+- [ ] Super Novice /doridori and the 99% chant (CZ_DORIDORI, CZ_CHOPOKGI)
+- [ ] Pet emotions from the pet window (CZ_PET_ACT)
+- [ ] /changedress (CZ_REQ_CHANGEDRESS), stop-attack (CZ_CANCEL_LOCKON), facing changes (CZ_CHANGE_DIRECTION)
+- [ ] Storage favourites tab (CZ_MOVE_ITEM_FROM_STORE_TO_FAVORITE), skill reset (CZ_RESET_SKILL), private airship
+- Not planned: auction house, pre-RODEX mail and the old party booking (replaced at this client version), GM tool packets
