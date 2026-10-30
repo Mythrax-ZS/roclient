@@ -90,6 +90,12 @@ pub struct Hud {
     /// Floating notice across the upper screen (special popups): lines, colour, when shown.
     pub banner: Option<(Vec<String>, Color32, std::time::Instant)>,
     chat: VecDeque<(ChatKind, String)>,
+    /// Names for item links in chat, by item id: (name, slots), filled in by the game from
+    /// its item table. Ids the chat met without a name are left in `missing_links`.
+    pub link_names: std::collections::HashMap<u32, (String, u8)>,
+    pub missing_links: Vec<u32>,
+    /// An item link the player clicked, for the game to open.
+    pub clicked_link: Option<crate::itemlink::Link>,
     input: String,
     /// Enter focuses the chat box; Enter again sends, Escape leaves.
     want_focus: bool,
@@ -439,7 +445,42 @@ impl Hud {
                     .max_height(if classic.is_some() { 150.0 } else { ui.available_height() - input_h })
                     .show(ui, |ui| {
                         for (kind, text) in &self.chat {
-                            ui.label(RichText::new(text).size(12.5).color(chat_color(*kind)));
+                            let color = chat_color(*kind);
+                            if !text.contains("<ITEM") {
+                                ui.label(RichText::new(text).size(12.5).color(color));
+                                continue;
+                            }
+                            // Item links: the item's name, which opens its description.
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                for piece in crate::itemlink::split(text) {
+                                    match piece {
+                                        crate::itemlink::Piece::Text(t) => {
+                                            ui.label(RichText::new(t).size(12.5).color(color));
+                                        }
+                                        crate::itemlink::Piece::Item(link) => {
+                                            let name = match self.link_names.get(&link.id) {
+                                                Some((name, slots)) => {
+                                                    let refine = if link.refine > 0 { format!("+{} ", link.refine) } else { String::new() };
+                                                    let slots = if link.equip && *slots > 0 { format!(" [{slots}]") } else { String::new() };
+                                                    format!("<{refine}{name}{slots}>")
+                                                }
+                                                None => {
+                                                    if !self.missing_links.contains(&link.id) {
+                                                        self.missing_links.push(link.id);
+                                                    }
+                                                    format!("<Item #{}>", link.id)
+                                                }
+                                            };
+                                            let r = ui.add(egui::Label::new(RichText::new(name).size(12.5).color(Color32::from_rgb(120, 200, 255))).sense(egui::Sense::click()));
+                                            let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
+                                            if r.clicked() {
+                                                self.clicked_link = Some(link);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
                         }
                     });
                 let edit = if let Some(bar) = &classic {

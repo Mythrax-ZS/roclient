@@ -18,6 +18,7 @@ mod gamepad;
 mod guild;
 mod hud;
 mod iteminfo;
+mod itemlink;
 mod jobs;
 mod samurai;
 mod mail;
@@ -2756,12 +2757,15 @@ impl App {
                 }
             }
             CardInserted { equip, card, ok } => {
-                // The server removes the card itself; the equipment's slots are ours to update.
+                // The server takes the card without telling us (pc_insert_card deletes it
+                // silently), as the original client expects: on success, one card leaves the
+                // stack and goes into the equipment's first free slot.
                 let card_id = self.inventory.items.get(&card).map(|c| c.id);
-                if let (true, Some(id), Some(e)) = (ok, card_id, self.inventory.items.get_mut(&equip)) {
-                    if let Some(slot) = e.cards.iter_mut().find(|c| **c == 0) {
+                if let (true, Some(id)) = (ok, card_id) {
+                    if let Some(slot) = self.inventory.items.get_mut(&equip).and_then(|e| e.cards.iter_mut().find(|c| **c == 0)) {
                         *slot = id;
                     }
+                    self.inventory.remove(card, 1);
                 }
                 let msg = if ok { "The card was inserted." } else { "The card could not be inserted." };
                 self.hud.push_chat(ro_net::ChatKind::System, msg.to_string());
@@ -6404,6 +6408,14 @@ impl App {
                     return;
                 }
                 sent = self.hud.show(ui.ctx(), &labels, &floaters, &bars, &cast_bars, &says);
+                // Item links in chat: names for the ones it met, and the one clicked.
+                for id in std::mem::take(&mut self.hud.missing_links) {
+                    let named = self.item_db.as_ref().and_then(|d| d.get(id)).map(|i| (i.name.clone(), i.slots));
+                    self.hud.link_names.insert(id, named.unwrap_or_else(|| (format!("Item #{id}"), 0)));
+                }
+                if let (Some(link), Some(vfs)) = (self.hud.clicked_link.take(), self.vfs.as_ref()) {
+                    self.item_info.show_item(&self.egui_ctx, vfs, self.item_db.as_ref(), link.id, link.refine, link.cards);
+                }
                 if let (true, Some(map), Some(me)) = (self.settings.minimap, self.minimap.as_ref(), me) {
                     {
                         let now = std::time::Instant::now();
