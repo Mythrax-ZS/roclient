@@ -143,6 +143,14 @@ impl Pad {
         self.used && self.active.is_some()
     }
 
+    /// The keyboard and mouse took over: hide the hints until the controller is touched again.
+    pub fn put_down(&mut self) {
+        if self.used {
+            tracing::info!("keyboard and mouse in use");
+        }
+        self.used = false;
+    }
+
     pub fn poll(&mut self) -> PadFrame {
         let mut frame = PadFrame::default();
         let Some(g) = self.gilrs.as_mut() else { return frame };

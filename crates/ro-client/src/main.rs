@@ -1156,6 +1156,10 @@ struct App {
     touch_pos: Option<(f64, f64)>,
     touch_slide: glam::Vec2,
     touch_button: Option<MouseButton>,
+    /// Set while the touchpad's own clicks and pointer moves are fed in, which leave the
+    /// controller in use; and how far the real mouse has moved while the controller was.
+    touch_feeding: bool,
+    mouse_travel: f64,
     /// The unit the controller acts on (highlighted), the walk direction being held and
     /// time until the walk is re-aimed.
     pad_target: Option<u32>,
@@ -5273,7 +5277,9 @@ impl App {
                         self.touch_pos = Some(pos);
                         if window.set_cursor_position(winit::dpi::PhysicalPosition::new(pos.0, pos.1)).is_err() {
                             // Where the pointer can't be moved (Wayland), move ours alone.
+                            self.touch_feeding = true;
                             self.window_event(el, window.id(), WindowEvent::CursorMoved { device_id: winit::event::DeviceId::dummy(), position: winit::dpi::PhysicalPosition::new(pos.0, pos.1) });
+                            self.touch_feeding = false;
                         }
                     }
                 }
@@ -5300,7 +5306,9 @@ impl App {
             }
         }
         let press = |app: &mut Self, button: MouseButton, state: ElementState| {
+            app.touch_feeding = true;
             app.window_event(el, window.id(), WindowEvent::MouseInput { device_id: winit::event::DeviceId::dummy(), state, button });
+            app.touch_feeding = false;
         };
         if t.click && !prev.click {
             let button = if down.len() >= 2 { MouseButton::Right } else { MouseButton::Left };
@@ -5310,6 +5318,32 @@ impl App {
             if let Some(button) = self.touch_button.take() {
                 press(self, button, ElementState::Released);
             }
+        }
+    }
+
+    /// Keys, clicks, the wheel or a real stroke of the mouse put the controller down: its button
+    /// hints give way to the keyboard's until it is touched again. The touchpad steering the
+    /// pointer is the controller's own input, and so is resting mouse jitter.
+    fn note_keyboard_mouse(&mut self, event: &WindowEvent) {
+        if !self.pad.in_use() || self.touch_feeding {
+            self.mouse_travel = 0.0;
+            return;
+        }
+        let put_down = match event {
+            WindowEvent::KeyboardInput { event: winit::event::KeyEvent { state: ElementState::Pressed, .. }, .. }
+            | WindowEvent::MouseInput { state: ElementState::Pressed, .. }
+            | WindowEvent::MouseWheel { .. } => true,
+            WindowEvent::CursorMoved { position, .. } if self.touch_pos.is_none() => {
+                if let Some((x, y)) = self.cursor {
+                    self.mouse_travel += (position.x - x).hypot(position.y - y);
+                }
+                self.mouse_travel > 48.0
+            }
+            _ => false,
+        };
+        if put_down {
+            self.pad.put_down();
+            self.mouse_travel = 0.0;
         }
     }
 
@@ -7766,6 +7800,7 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        self.note_keyboard_mouse(&event);
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         // Alt+letter shortcuts go straight to the game, even while the chat has the keyboard
         // (AltGr, which is Ctrl+Alt, still types into the UI).
@@ -8121,6 +8156,8 @@ fn run() -> anyhow::Result<()> {
         touch_pos: None,
         touch_slide: glam::Vec2::ZERO,
         touch_button: None,
+        touch_feeding: false,
+        mouse_travel: 0.0,
         pad_target: None,
         pad_dir: None,
         pad_line: None,
