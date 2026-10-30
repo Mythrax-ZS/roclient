@@ -100,4 +100,6 @@ headers and clif.cpp, then compared with what this client reads and sends.
 - [ ] Pet emotions from the pet window (CZ_PET_ACT)
 - [ ] /changedress (CZ_REQ_CHANGEDRESS), stop-attack (CZ_CANCEL_LOCKON), facing changes (CZ_CHANGE_DIRECTION)
 - [ ] Storage favourites tab (CZ_MOVE_ITEM_FROM_STORE_TO_FAVORITE), skill reset (CZ_RESET_SKILL), private airship
-- Not planned: auction house, pre-RODEX mail and the old party booking (replaced at this client version), GM tool packets
+- [x] GM tools: /b /nb /lb /nlb /hide /mm /recall /shift /item /monster /rc /check /killall /resetstate /resetcooltime /changemaptype, and GM right-click actions (config `gm`)
+- [ ] GM macro-detector captcha registration and preview (CZ_UPLOAD_MACRO_DETECTOR_CAPTCHA, CZ_REQ_PREVIEW_MACRO_DETECTOR)
+- Not planned: auction house, pre-RODEX mail and the old party booking (replaced at this client version); /resetskill (CZ_RESET type 1 is compiled out of rAthena at this version) and account-name lookup (rAthena always answers with an empty name)
