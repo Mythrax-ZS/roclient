@@ -56,6 +56,8 @@ pub enum UiAction {
     UseHotkey(usize),
     SetHotkey { index: u16, key: Hotkey },
     HotkeyRow(u8),
+    /// Show this many shortcut rows (the bar's top edge dragged).
+    HotkeyRows(u8),
 }
 
 /// The shortcut bar: rows of F1..F9 slots, saved on the server (38 slots per tab).
@@ -289,7 +291,8 @@ fn hotkey_slot_ui(ui: &mut egui::Ui, v: &View, index: usize, key_label: &str, si
 /// The shortcut bar along the bottom: drag skills and items in, click or press F1..F9 to
 /// use, right-click to clear, scroll over a skill to change its level. F12 shows one to four
 /// rows or hides the bar, as in the original; the page button turns which row is first. In
-/// battle mode the rows above the first answer to Q ~ O, A ~ L and Z ~ >.
+/// battle mode the rows above the first answer to Q ~ O, A ~ L and Z ~ >. Dragging the bar's
+/// top edge shows more or fewer rows, as the original's shortcut window resizes.
 fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
     const SIZE: f32 = 40.0;
     let mut action = None;
@@ -300,7 +303,7 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
             } else {
                 egui::Frame::new().fill(Color32::from_rgba_unmultiplied(16, 20, 28, 210)).corner_radius(8).inner_margin(6)
             };
-            frame.show(ui, |ui| {
+            let bar = frame.show(ui, |ui| {
                 if v.skin.is_none() {
                     ui.style_mut().visuals = egui::Visuals::dark();
                 }
@@ -337,6 +340,25 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                     }
                 });
             });
+            // The top edge: drag it up for more rows, down for fewer.
+            let rect = bar.response.rect;
+            let edge = egui::Rect::from_min_max(rect.left_top() - Vec2::new(0.0, 5.0), rect.right_top() + Vec2::new(0.0, 5.0));
+            let grip = ui.interact(edge, egui::Id::unique("hotkey bar resize"), egui::Sense::drag());
+            if grip.hovered() || grip.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                let c = egui::pos2(rect.center().x, rect.top() + 3.0);
+                let color = if v.skin.is_some() { Color32::from_rgb(90, 100, 140) } else { Color32::from_gray(200) };
+                for dx in [-8.0, 0.0, 8.0] {
+                    ui.painter().circle_filled(c + Vec2::new(dx, 0.0), 1.6, color);
+                }
+            }
+            if let (true, Some(p)) = (grip.dragged(), grip.interact_pointer_pos()) {
+                // Rows stack up from the bottom of the bar, one slot plus spacing each.
+                let rows = ((rect.bottom() - p.y) / (SIZE + 4.0)).round().clamp(1.0, HOTKEY_ROWS as f32) as u8;
+                if rows != v.hotkey_rows {
+                    action = Some(UiAction::HotkeyRows(rows));
+                }
+            }
         });
     }
     // Show what is being dragged under the pointer.

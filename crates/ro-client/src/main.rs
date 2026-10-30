@@ -3982,6 +3982,10 @@ impl App {
                 self.hotkey_row = row;
                 self.send(Command::Stat(StatRequest::HotkeyRow(row)));
             }
+            HotkeyRows(rows) => {
+                self.settings.hotkey_rows = rows.min(HOTKEY_ROWS);
+                self.settings.save();
+            }
         }
     }
 
