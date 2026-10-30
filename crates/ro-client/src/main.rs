@@ -619,7 +619,7 @@ const WALK_HOP: usize = 12;
 
 /// Controller: how far (cells) targets are picked up, and how far ahead the stick walks.
 const PAD_REACH: i32 = 14;
-const PAD_STEP: i32 = 4;
+const PAD_STEP: i32 = 8;
 
 use windows::{HOTKEYS_PER_ROW, HOTKEY_ROWS};
 
@@ -1134,6 +1134,8 @@ struct App {
     hold_walk: Option<((i32, i32), f32)>,
     /// Our walk speed as the server last sent it (SP_SPEED), kept for when we respawn.
     walk_speed: Option<f32>,
+    /// Test runs: the left stick held at this position for this many ms (`stick:x:y:ms`).
+    test_stick: Option<(glam::Vec2, f32)>,
     /// A Sony or Nintendo controller opened directly (touchpad, rumble, light bar), and when
     /// to look for one again.
     hid: Option<hidpad::HidPad>,
@@ -1158,6 +1160,8 @@ struct App {
     /// time until the walk is re-aimed.
     pad_target: Option<u32>,
     pad_dir: Option<glam::Vec2>,
+    /// Where the stick's current heading was set: walks follow the line from here.
+    pad_line: Option<glam::Vec2>,
     pad_walk_ms: f32,
     /// We died and wait to return to the save point (or be resurrected).
     dead: bool,
@@ -5301,10 +5305,25 @@ impl App {
     /// battle mode, else aimed first).
     fn pad_tick(&mut self, dt: f32) {
         use gilrs::Button::*;
-        let f = self.pad.poll();
+        let mut f = self.pad.poll();
         self.pad_row = None;
-        if !self.pad.in_use() {
-            return;
+        let mut testing = false;
+        if let Some((v, left)) = self.test_stick.as_mut() {
+            *left -= dt;
+            if *left > 0.0 {
+                f.left = *v;
+                testing = true;
+            } else {
+                self.test_stick = None;
+            }
+        }
+        if !self.pad.in_use() && !testing {
+            if self.pad_dir.is_some() && self.test_stick.is_none() {
+                // A test stick just let go: stop as a released stick does.
+                f.left = glam::Vec2::ZERO;
+            } else {
+                return;
+            }
         }
         self.hud.pad_used = true;
         let secs = dt / 1000.0;
@@ -5463,38 +5482,51 @@ impl App {
             self.windows.toggle_inventory();
         }
 
-        // Left stick walks toward a point a few cells ahead, re-aimed as the stick turns.
+        // Left stick: walk along the line the stick points, from where that heading was set,
+        // toward a goal PAD_STEP cells further along it. Re-aimed only when the walk is
+        // nearly done or the stick turns past ~25 degrees: re-planning on every wobble makes
+        // each path start with the same step, drifting a heading between straight and
+        // diagonal to the diagonal, and costs stutters. Measuring along the line from its
+        // start (not from where we are) keeps the heading true over a long walk.
         let Some(yaw) = self.renderer.as_ref().map(|r| r.camera.yaw) else { return };
         self.pad_walk_ms -= dt;
         if f.left != glam::Vec2::ZERO {
             let (sy, cy) = yaw.sin_cos();
             let (fwd, right) = (glam::Vec2::new(-sy, cy), glam::Vec2::new(cy, sy));
             let dir = (right * f.left.x + fwd * f.left.y).normalize_or_zero();
-            let turned = self.pad_dir.is_none_or(|d| d.dot(dir) < 0.85);
-            if self.pad_walk_ms <= 0.0 || turned {
+            let Some(p) = self.player.as_ref() else { return };
+            let me = p.walker.cell;
+            let here = glam::Vec2::new(me.0 as f32, me.1 as f32);
+            let turned = self.pad_dir.is_none_or(|d| d.dot(dir) < 0.9);
+            if turned {
+                self.pad_dir = Some(dir);
+                self.pad_line = Some(here);
+            }
+            let nearly_done = !p.walker.is_walking() || p.walker.remaining() <= 2;
+            if (turned || nearly_done) && self.pad_walk_ms <= 0.0 {
                 self.attack = None;
                 self.chasing = false;
                 self.pending_npc = None;
                 self.pending_skill = None;
                 self.pending_pickup = None;
-                if self.player.as_ref().is_some_and(|p| p.sitting) {
+                if p.sitting {
                     self.send(ro_net::Command::Sit(false));
                 }
-                let me = self.player.as_ref().map(|p| p.walker.cell);
+                let (dir, origin) = (self.pad_dir.unwrap_or(dir), self.pad_line.unwrap_or(here));
+                let along = (here - origin).dot(dir);
                 let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
-                let goal = me.and_then(|me| {
-                    (1..=PAD_STEP).rev().map(|k| (me.0 + (dir.x * k as f32).round() as i32, me.1 + (dir.y * k as f32).round() as i32)).find(|&(x, y)| (x, y) != me && gat.is_some_and(|g| g.walkable(x, y)))
-                });
+                let goal = (1..=PAD_STEP).rev().map(|k| origin + dir * (along + k as f32)).map(|v| (v.x.round() as i32, v.y.round() as i32)).find(|&(x, y)| (x, y) != me && gat.is_some_and(|g| g.walkable(x, y)));
                 if let Some((x, y)) = goal {
                     self.request_walk((x as u16, y as u16));
                 }
-                self.pad_dir = Some(dir);
-                self.pad_walk_ms = 200.0;
+                self.pad_walk_ms = 100.0;
             }
         } else if self.pad_dir.take().is_some() {
-            // Let go: stop on the next cell instead of running on to the old goal.
+            // Let go: stop on the cell being stepped into (stopping on the one we are leaving
+            // would walk us back to it).
+            self.pad_line = None;
             if let Some(p) = self.player.as_ref() {
-                let c = p.walker.cell;
+                let c = p.walker.next().unwrap_or(p.walker.cell);
                 self.request_walk((c.0 as u16, c.1 as u16));
             }
         }
@@ -6103,6 +6135,14 @@ impl App {
                             _ => padglyph::Style::Xbox,
                         };
                         self.pad_preview = Some((style, it.next().and_then(|r| r.parse().ok())));
+                        None
+                    }
+                    // stick:x:y:ms holds the left stick there (-1..1, y up) for ms.
+                    Some(("stick", a)) => {
+                        let v: Vec<f32> = a.split(':').filter_map(|v| v.parse().ok()).collect();
+                        if let [x, y, ms] = v[..] {
+                            self.test_stick = Some((glam::Vec2::new(x, y), ms));
+                        }
                         None
                     }
                     // holdwalk:dx:dy:ms holds a walk target dx, dy cells from the player.
@@ -8006,6 +8046,7 @@ fn run() -> anyhow::Result<()> {
         pad_preview: None,
         hold_walk: None,
         walk_speed: None,
+        test_stick: None,
         hid: None,
         hid_retry_ms: 0.0,
         audio_haptics: None,
@@ -8020,6 +8061,7 @@ fn run() -> anyhow::Result<()> {
         touch_button: None,
         pad_target: None,
         pad_dir: None,
+        pad_line: None,
         pad_walk_ms: 0.0,
         dead: false,
         fx_test: arg("--fx").map(|s| &*s.leak()),
