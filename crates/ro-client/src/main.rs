@@ -7110,6 +7110,14 @@ impl FpsCounter {
     }
 }
 
+/// The window's icon, the logo (packaging/logo.py draws it). On Windows the exe also carries
+/// it as a resource (build.rs), which Explorer and the taskbar use.
+fn app_icon() -> Option<winit::window::Icon> {
+    let img = image::load_from_memory(include_bytes!("../assets/icon.png")).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    winit::window::Icon::from_rgba(img.into_raw(), w, h).ok()
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, el: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -7117,6 +7125,7 @@ impl ApplicationHandler for App {
         }
         let attrs = Window::default_attributes()
             .with_title("Tenseiga")
+            .with_window_icon(app_icon())
             .with_inner_size(winit::dpi::LogicalSize::new(1600.0, 900.0))
             .with_min_inner_size(winit::dpi::LogicalSize::new(640.0, 360.0))
             .with_visible(self.capture.is_none());

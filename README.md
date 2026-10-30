@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.png" alt="Tenseiga" width="160"></p>
+
 # Tenseiga
 
 A from-scratch client for rAthena servers (formerly roclient), in Rust (wgpu: Vulkan / DX12 / GL).
