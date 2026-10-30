@@ -107,11 +107,27 @@ QuestInfoList[900151] = {
 }
 QuestInfoList[900152] = {
     Title = "Twin Flames VI: The Palace of Masks",
-    Summary = "Expose Daimyo Kurozane for Lady Hanae.",
-    Description = { "Daimyo Kurozane made a pact with Yami's cult.", "Bring Lady Hanae 3 Sealed Letters, carried by the shinobi and dolls of the Amatsu dungeon.", "Then confront Kurozane in the Amatsu palace's inner court, past his masked steward." },
+    Summary = "Find Lady Hanae in the Amatsu palace.",
+    Description = { "Lady Hanae, an exile from court, could use a samurai's help.", "Find her inside the Amatsu palace, beside its lord." },
     NpcNavi = "ama_in02",
     NpcPosX = 196,
     NpcPosY = 172,
+}
+QuestInfoList[900153] = {
+    Title = "Twin Flames VI: Sealed Letters",
+    Summary = "Bring Lady Hanae 3 Sealed Letters.",
+    Description = { "Daimyo Kurozane made a pact with Yami's cult and had Lady Hanae exiled for learning of it.", "The cult's orders travel as Sealed Letters, carried by the Shinobi and Miyabi Dolls of the Tatami Maze, the first floor of the Amatsu dungeon.", "Bring three to Lady Hanae in the Amatsu palace." },
+    NpcNavi = "ama_dun01",
+    NpcPosX = 0,
+    NpcPosY = 0,
+}
+QuestInfoList[900154] = {
+    Title = "Twin Flames VI: Behind the Masks",
+    Summary = "Defeat Daimyo Kurozane.",
+    Description = { "The letters bear Kurozane's seal, and he knows it.", "Confront him in the palace's inner court, past his masked steward.", "Then return to Lady Hanae." },
+    NpcNavi = "ama_in02",
+    NpcPosX = 204,
+    NpcPosY = 168,
 }
 QuestInfoList[900161] = {
     Title = "Twin Flames VII: Return of the Ashes",
