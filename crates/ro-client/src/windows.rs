@@ -185,9 +185,11 @@ pub struct View<'a> {
     pub show_equip: Option<bool>,
     /// Our character as the select screen draws it, for the equipment window.
     pub portrait: Option<&'a egui::TextureHandle>,
-    /// A controller is in use: label slots with its buttons.
-    pub pad_hints: bool,
-    pub playstation: bool,
+    /// A controller is in use: label slots with its buttons, drawn in this family's style.
+    pub pad: Option<crate::padglyph::Style>,
+    /// The shortcut row a held trigger points at (0 the row on show, 1 the next, 2 the one
+    /// after), for the controller's cross bar.
+    pub pad_row: Option<u8>,
 }
 
 /// Draws a skill or item icon centred in `rect`.
@@ -204,14 +206,34 @@ fn outlined(painter: &egui::Painter, pos: egui::Pos2, align: egui::Align2, text:
     painter.text(pos, align, text, font, color);
 }
 
-/// The key shown on a shortcut slot: F1..F9 on the first row, the battle mode letters on
-/// the rows above it, or the controller buttons.
-fn slot_key_label(v: &View, offset: u8, col: usize) -> String {
-    const XBOX: [&str; HOTKEYS_PER_ROW] = ["A", "B", "X", "Y", "Up", "Rt", "Dn", "Lt", ""];
-    const PS: [&str; HOTKEYS_PER_ROW] = ["Cr", "Ci", "Sq", "Tr", "Up", "Rt", "Dn", "Lt", ""];
+/// The triggers a controller holds for a shortcut row (by its offset from the row on show):
+/// RT, LT, and in battle mode both.
+pub fn pad_row_triggers(offset: u8, battle_mode: bool) -> Option<&'static [crate::padglyph::Btn]> {
+    use crate::padglyph::Btn;
     match offset {
-        // Controller: hold RT for this row (LT for the next), then the button shown.
-        0 if v.pad_hints => (if v.playstation { PS } else { XBOX })[col].to_string(),
+        0 => Some(&[Btn::RT]),
+        1 => Some(&[Btn::LT]),
+        2 if battle_mode => Some(&[Btn::LT, Btn::RT]),
+        _ => None,
+    }
+}
+
+/// The controller glyph on a shortcut slot, when its row answers to a trigger.
+fn slot_glyph(v: &View, offset: u8, col: usize) -> Option<(crate::padglyph::Btn, crate::padglyph::Style)> {
+    let style = v.pad?;
+    pad_row_triggers(offset, v.battle_mode)?;
+    Some((crate::padglyph::SLOT_BUTTONS[col], style))
+}
+
+/// The key shown on a shortcut slot: F1..F9 on the first row, the battle mode letters on
+/// the rows above it, or the controller buttons ("RT + A").
+fn slot_key_label(v: &View, offset: u8, col: usize) -> String {
+    if let (Some(style), Some(t)) = (v.pad, pad_row_triggers(offset, v.battle_mode)) {
+        let mut bs = t.to_vec();
+        bs.push(crate::padglyph::SLOT_BUTTONS[col]);
+        return crate::padglyph::combo_name(&bs, style);
+    }
+    match offset {
         0 => format!("F{}", col + 1),
         n if v.battle_mode => v.battle_keys.get(n as usize - 1).and_then(|k| k.chars().nth(col)).map_or(String::new(), |c| c.to_uppercase().to_string()),
         _ => String::new(),
@@ -219,7 +241,7 @@ fn slot_key_label(v: &View, offset: u8, col: usize) -> String {
 }
 
 /// One shortcut slot: draws it and returns what the player did with it.
-fn hotkey_slot_ui(ui: &mut egui::Ui, v: &View, index: usize, key_label: &str, size: f32) -> Option<UiAction> {
+fn hotkey_slot_ui(ui: &mut egui::Ui, v: &View, index: usize, key_label: &str, glyph: Option<(crate::padglyph::Btn, crate::padglyph::Style)>, size: f32) -> Option<UiAction> {
     let mut action = None;
     let key = v.hotkeys.get(index).copied().unwrap_or_default();
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click_and_drag());
@@ -255,7 +277,9 @@ fn hotkey_slot_ui(ui: &mut egui::Ui, v: &View, index: usize, key_label: &str, si
             outlined(&painter, rect.right_bottom() - Vec2::new(3.0, 1.0), egui::Align2::RIGHT_BOTTOM, &count.to_string(), 11.0, Color32::WHITE);
         }
     }
-    if v.skin.is_some() {
+    if let Some((b, style)) = glyph {
+        crate::padglyph::paint_at(&painter, rect.left_top() + Vec2::new(2.0, 2.0), b, style, (size * 0.36).round());
+    } else if v.skin.is_some() {
         painter.text(rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, key_label, egui::FontId::proportional(9.5), Color32::from_rgb(90, 100, 140));
     } else {
         outlined(&painter, rect.left_top() + Vec2::new(3.0, 1.0), egui::Align2::LEFT_TOP, key_label, 10.0, Color32::from_gray(200));
@@ -285,6 +309,73 @@ fn hotkey_slot_ui(ui: &mut egui::Ui, v: &View, index: usize, key_label: &str, si
         };
         resp.on_hover_text(if key_label.is_empty() { name } else { format!("[ {key_label} ] {name}") });
     }
+    action
+}
+
+/// The controller's cross bar: while a trigger is held, the row it reaches laid out the way
+/// the buttons sit, the D-pad's four on the left, the face buttons' four on the right and the
+/// right stick's click between them.
+fn cross_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
+    use crate::padglyph::{Btn, SLOT_BUTTONS};
+    let (style, offset) = (v.pad?, v.pad_row?);
+    let triggers = pad_row_triggers(offset, v.battle_mode)?;
+    const SIZE: f32 = 40.0;
+    const GAP: f32 = 4.0;
+    let row = (v.hotkey_row + offset) % HOTKEY_ROWS;
+    let rows_shown = v.hotkey_rows.min(HOTKEY_ROWS) as f32;
+    let diamond = 3.0 * SIZE + 2.0 * GAP;
+    let width = diamond * 2.0 + SIZE + 32.0 + 20.0;
+    // Right of the shortcut bar when the screen has room there, else above it; never over
+    // the middle of the screen, where the character stands.
+    let screen = ctx.content_rect();
+    let bar: Option<egui::Rect> = ctx.data(|d| d.get_temp(egui::Id::unique("hotkey bar rect")));
+    let (anchor, offset_px) = match bar {
+        Some(bar) if screen.right() - bar.right() >= width + 32.0 => (egui::Align2::RIGHT_BOTTOM, Vec2::new(-16.0, -12.0)),
+        Some(bar) => (egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -(screen.bottom() - bar.top() + 8.0))),
+        None => (egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -(12.0 + 24.0 + rows_shown * 44.0))),
+    };
+    let mut action = None;
+    egui::Area::new(egui::Id::unique("cross bar"))
+        .anchor(anchor, offset_px)
+        .interactable(true)
+        .show(ctx, |ui| {
+            egui::Frame::new().fill(Color32::from_rgba_unmultiplied(14, 16, 24, 225)).stroke((1.0, Color32::from_rgb(70, 76, 96))).corner_radius(10).inner_margin(10).show(ui, |ui| {
+                ui.style_mut().visuals = egui::Visuals::dark();
+                ui.horizontal(|ui| {
+                    crate::padglyph::combo(ui, triggers, style, 18.0);
+                    ui.label(RichText::new(format!("Row {}", row + 1)).size(12.5).color(Color32::from_gray(200)));
+                    if v.battle_mode {
+                        ui.label(RichText::new("instant cast").size(11.0).color(Color32::from_rgb(230, 140, 100)));
+                    }
+                });
+                ui.add_space(4.0);
+                let (canvas, _) = ui.allocate_exact_size(Vec2::new(diamond * 2.0 + SIZE + 32.0, diamond), egui::Sense::hover());
+                let left = canvas.left_center() + Vec2::new(diamond / 2.0, 0.0);
+                let right = canvas.right_center() - Vec2::new(diamond / 2.0, 0.0);
+                let step = SIZE + GAP;
+                for (col, b) in SLOT_BUTTONS.iter().enumerate() {
+                    let at = match b {
+                        Btn::Up => left + Vec2::new(0.0, -step),
+                        Btn::Right => left + Vec2::new(step, 0.0),
+                        Btn::Down => left + Vec2::new(0.0, step),
+                        Btn::Left => left + Vec2::new(-step, 0.0),
+                        Btn::North => right + Vec2::new(0.0, -step),
+                        Btn::East => right + Vec2::new(step, 0.0),
+                        Btn::South => right + Vec2::new(0.0, step),
+                        Btn::West => right + Vec2::new(-step, 0.0),
+                        _ => canvas.center(),
+                    };
+                    let rect = egui::Rect::from_center_size(at, Vec2::splat(SIZE));
+                    let mut bs = triggers.to_vec();
+                    bs.push(*b);
+                    let label = crate::padglyph::combo_name(&bs, style);
+                    let index = row as usize * HOTKEYS_PER_ROW + col;
+                    if let Some(a) = ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| hotkey_slot_ui(ui, v, index, &label, Some((*b, style)), SIZE)).inner {
+                        action = Some(a);
+                    }
+                }
+            });
+        });
     action
 }
 
@@ -324,9 +415,21 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                             let row = (v.hotkey_row + offset) % HOTKEY_ROWS;
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
+                                // With a controller, each row starts with the trigger(s) that reach it.
+                                if let Some(style) = v.pad {
+                                    let (rect, _) = ui.allocate_exact_size(Vec2::new(46.0, SIZE), egui::Sense::hover());
+                                    if let Some(t) = pad_row_triggers(offset, v.battle_mode) {
+                                        let h = 16.0;
+                                        let w: f32 = t.iter().map(|b| crate::padglyph::width(*b, h)).sum::<f32>() + 2.0 * (t.len() as f32 - 1.0);
+                                        let mut x = rect.center().x - w / 2.0;
+                                        for b in t {
+                                            x += crate::padglyph::paint_at(ui.painter(), egui::pos2(x, rect.center().y - h / 2.0), *b, style, h) + 2.0;
+                                        }
+                                    }
+                                }
                                 for col in 0..HOTKEYS_PER_ROW {
                                     let label = slot_key_label(v, offset, col);
-                                    if let Some(a) = hotkey_slot_ui(ui, v, row as usize * HOTKEYS_PER_ROW + col, &label, SIZE) {
+                                    if let Some(a) = hotkey_slot_ui(ui, v, row as usize * HOTKEYS_PER_ROW + col, &label, slot_glyph(v, offset, col), SIZE) {
                                         action = Some(a);
                                     }
                                 }
@@ -343,14 +446,12 @@ fn hotkey_bar(ctx: &egui::Context, v: &View) -> Option<UiAction> {
                             ui.label(RichText::new("BM").size(10.0).color(Color32::from_rgb(230, 120, 90))).on_hover_text("Battle mode (/bm): letter keys use the shortcut rows; Enter or Space to chat");
                         }
                     });
-                    if v.pad_hints {
-                        let hint = if v.playstation { "hold R2\nL2: next" } else { "hold RT\nLT: next" };
-                        ui.label(RichText::new(hint).size(10.0).color(Color32::from_gray(170)));
-                    }
                 });
             });
             // The top edge: drag it up for more rows, down for fewer.
             let rect = bar.response.rect;
+            // Where the bar is, for the controller's cross bar beside it.
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("hotkey bar rect"), rect));
             let edge = egui::Rect::from_min_max(rect.left_top() - Vec2::new(0.0, 5.0), rect.right_top() + Vec2::new(0.0, 5.0));
             let grip = ui.interact(edge, egui::Id::unique("hotkey bar resize"), egui::Sense::drag());
             if grip.hovered() || grip.dragged() {
@@ -834,6 +935,9 @@ impl Windows {
     pub fn show(&mut self, ctx: &egui::Context, v: &View) -> Option<UiAction> {
         self.menu(ctx);
         let mut action = hotkey_bar(ctx, v);
+        if let Some(a) = cross_bar(ctx, v) {
+            action = Some(a);
+        }
 
         // Default layout across the top, sized to the screen (windows remember moves after).
         let w = v.screen_width;

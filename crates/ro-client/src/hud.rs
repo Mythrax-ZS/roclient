@@ -846,7 +846,7 @@ pub enum DeathChoice {
 
 /// The death window. `revive` names what can revive us on the spot (a Token of Siegfried,
 /// Light of Regene), which adds a button for it as in the original.
-pub fn death_window(ctx: &egui::Context, pad_hint: Option<&str>, revive: Option<&str>) -> Option<DeathChoice> {
+pub fn death_window(ctx: &egui::Context, pad: Option<crate::padglyph::Style>, revive: Option<&str>) -> Option<DeathChoice> {
     let mut go = None;
     egui::Window::new("death")
         .title_bar(false)
@@ -863,11 +863,14 @@ pub fn death_window(ctx: &egui::Context, pad_hint: Option<&str>, revive: Option<
                 ui.add_space(4.0);
                 ui.label(RichText::new("Wait for a resurrection, or return to your save point.").size(12.5).color(Color32::from_gray(200)));
                 ui.add_space(10.0);
-                let label = match pad_hint {
-                    Some(b) => format!("Return to Save Point  ({b})"),
-                    None => "Return to Save Point".to_string(),
-                };
-                if ui.add(egui::Button::new(RichText::new(label).size(14.0)).min_size(Vec2::new(220.0, 30.0))).clicked() {
+                let back = ui.add(egui::Button::new(RichText::new("Return to Save Point").size(14.0)).min_size(Vec2::new(220.0, 30.0)));
+                // With a controller, its confirm button drawn in the button's corner.
+                if let Some(style) = pad {
+                    let h = 18.0;
+                    let at = back.rect.right_center() - Vec2::new(crate::padglyph::width(crate::padglyph::Btn::South, h) + 6.0, h / 2.0);
+                    crate::padglyph::paint_at(ui.painter(), at, crate::padglyph::Btn::South, style, h);
+                }
+                if back.clicked() {
                     go = Some(DeathChoice::SavePoint);
                 }
                 if let Some(with) = revive {

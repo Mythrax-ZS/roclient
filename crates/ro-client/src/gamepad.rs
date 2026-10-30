@@ -12,7 +12,7 @@ const DEADZONE: f32 = 0.22;
 pub struct PadFrame {
     pub left: Vec2,
     pub right: Vec2,
-    /// Held: the shortcut bar modifiers.
+    /// Held: the shortcut bar modifiers (LT, RT, and both together in battle mode).
     pub lt: bool,
     pub rt: bool,
     /// Pressed this frame.
@@ -30,8 +30,8 @@ pub struct Pad {
     active: Option<gilrs::GamepadId>,
     /// Set once the controller is actually touched (hints stay hidden for mouse players).
     used: bool,
-    /// Face buttons are labelled the PlayStation way.
-    pub playstation: bool,
+    /// The connected controller's family, for its button glyphs.
+    pub detected: crate::padglyph::Style,
 }
 
 fn deadzone(v: Vec2) -> Vec2 {
@@ -49,8 +49,8 @@ impl Pad {
             tracing::info!(name = pad.name(), "controller connected");
             id
         }));
-        let playstation = gilrs.as_ref().is_some_and(|g| g.gamepads().any(|(_, p)| is_playstation(p.name())));
-        Self { gilrs, active, used: false, playstation }
+        let detected = gilrs.as_ref().map_or(crate::padglyph::Style::Xbox, family);
+        Self { gilrs, active, used: false, detected }
     }
 
     /// True once a controller has been used (the UI then shows button hints).
@@ -64,9 +64,9 @@ impl Pad {
         while let Some(ev) = g.next_event() {
             match ev.event {
                 EventType::ButtonPressed(b, _) => {
-                    // Steam Input can put a virtual Xbox pad in front of a PlayStation one;
-                    // label for the physical controller if one is connected.
-                    self.playstation = g.gamepads().any(|(_, p)| is_playstation(p.name()));
+                    // Steam Input can put a virtual Xbox pad in front of a PlayStation or
+                    // Nintendo one; label for the physical controller if one is connected.
+                    self.detected = family(g);
                     self.active = Some(ev.id);
                     self.used = true;
                     frame.pressed.push(b);
@@ -90,7 +90,7 @@ impl Pad {
     }
 }
 
-fn is_playstation(name: &str) -> bool {
-    let n = name.to_ascii_lowercase();
-    ["ps3", "ps4", "ps5", "dualsense", "dualshock", "sony", "wireless controller"].iter().any(|k| n.contains(k))
+/// The family of the connected controllers: PlayStation or Nintendo if any is one, else Xbox.
+fn family(g: &Gilrs) -> crate::padglyph::Style {
+    g.gamepads().find_map(|(_, p)| crate::padglyph::detect(p.name())).unwrap_or(crate::padglyph::Style::Xbox)
 }

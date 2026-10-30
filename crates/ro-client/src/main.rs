@@ -57,6 +57,7 @@ mod companions;
 mod emblem;
 mod emotes;
 mod settings;
+mod padglyph;
 mod shortcuts;
 mod skilltree;
 mod status_icons;
@@ -1088,6 +1089,12 @@ struct App {
     /// When a paused (`wait:`) test script carries on.
     script_resume: Option<std::time::Instant>,
     pad: gamepad::Pad,
+    /// The shortcut row a held controller trigger reaches (0 the row on show, 1 the next,
+    /// 2 the one after), while one is held.
+    pad_row: Option<u8>,
+    /// Test runs: draw the controller UI in this style (and as if this row's trigger were
+    /// held) without a controller (`pad:style[:row]`).
+    pad_preview: Option<(padglyph::Style, Option<u8>)>,
     /// The unit the controller acts on (highlighted), the walk direction being held and
     /// time until the walk is re-aimed.
     pad_target: Option<u32>,
@@ -4929,12 +4936,52 @@ impl App {
         v.into_iter().map(|(_, id)| id).collect()
     }
 
+    /// Battle mode on a controller: a shortcut slot fires at once, without aiming. Attacks go
+    /// on the target (the nearest monster when there is none), support skills on the targeted
+    /// player or ourselves, ground skills under the target or at our feet.
+    fn pad_quick_slot(&mut self, slot: usize) {
+        let Some(key) = self.hotkeys.get(slot).copied().filter(|k| k.id != 0) else { return };
+        let skill = key.id as u16;
+        let Some(s) = self.skills.iter().find(|s| key.skill && s.id == skill) else {
+            // Items, and skills we no longer have, as a click would.
+            self.queued_action = Some(windows::UiAction::UseHotkey(slot));
+            return;
+        };
+        let (flags, level) = (s.target, (key.count.max(1) as u16).clamp(1, s.level.max(1)));
+        let target = self.pad_target.and_then(|t| self.units.get(&t).map(|m| (t, m.kind, m.walker.cell)));
+        let me = self.player.as_ref().map(|p| p.walker.cell);
+        if flags & 4 != 0 {
+            self.use_skill_on(skill, level, self.account_id);
+        } else if flags & 16 != 0 && flags & 1 == 0 {
+            let ally = target.filter(|t| t.1 == 0).map_or(self.account_id, |t| t.0);
+            self.use_skill_on(skill, level, ally);
+        } else if flags & 2 != 0 {
+            if let Some(c) = target.map(|t| t.2).or(me) {
+                self.use_skill_at(skill, level, (c.0 as u16, c.1 as u16));
+            }
+        } else if flags & 1 != 0 {
+            let foe = target
+                .filter(|t| t.1 == 5 || (t.1 == 0 && self.is_enemy_player(t.0)))
+                .map(|t| t.0)
+                .or_else(|| self.pad_candidates(false).into_iter().find(|id| self.units.get(id).is_some_and(|m| m.kind == 5)));
+            if let Some(foe) = foe {
+                self.pad_target = Some(foe);
+                self.use_skill_on(skill, level, foe);
+            }
+        } else {
+            self.start_skill(skill, level);
+        }
+    }
+
     /// Controller play: left stick walks (camera-relative), right stick turns and tilts the
     /// camera, A acts on the highlighted target, LB/RB change target, X picks up, Y sits,
-    /// B cancels, RT/LT + face buttons or D-pad fire the shortcut bar.
+    /// B cancels. Holding RT reaches the shortcut row on show, LT the next and, in battle
+    /// mode, both the one after; then a face button, the D-pad or R3 fires a slot (at once in
+    /// battle mode, else aimed first).
     fn pad_tick(&mut self, dt: f32) {
         use gilrs::Button::*;
         let f = self.pad.poll();
+        self.pad_row = None;
         if !self.pad.in_use() {
             return;
         }
@@ -4946,7 +4993,8 @@ impl App {
             if f.right != glam::Vec2::ZERO {
                 r.camera.rotate(-f.right.x * secs * 2.2, -f.right.y * secs * 1.2);
             }
-            if f.just(RightThumb) {
+            // (With a trigger held, R3 is a shortcut slot.)
+            if f.just(RightThumb) && !(f.lt || f.rt) {
                 r.camera.yaw = 0.0;
             }
         }
@@ -4975,12 +5023,23 @@ impl App {
             return;
         }
 
-        // Shortcut bar: hold RT (this row) or LT (next row), then a face button or D-pad.
+        // Shortcut bar: hold RT (the row on show), LT (the next) or, in battle mode, both (the
+        // one after), then a face button, the D-pad or R3 (padglyph::SLOT_BUTTONS' order).
         if f.rt || f.lt {
-            const KEYS: [gilrs::Button; 8] = [South, East, West, North, DPadUp, DPadRight, DPadDown, DPadLeft];
+            let offset = match (f.lt, f.rt) {
+                (true, true) if self.settings.battle_mode => 2,
+                (true, false) => 1,
+                _ => 0,
+            };
+            self.pad_row = Some(offset);
+            const KEYS: [gilrs::Button; 9] = [South, East, West, North, DPadUp, DPadRight, DPadDown, DPadLeft, RightThumb];
             if let Some(col) = KEYS.iter().position(|k| f.just(*k)) {
-                let row = (self.hotkey_row + if f.lt && !f.rt { 1 } else { 0 }) % HOTKEY_ROWS;
-                self.queued_action = Some(windows::UiAction::UseHotkey(row as usize * HOTKEYS_PER_ROW + col));
+                let slot = ((self.hotkey_row + offset) % HOTKEY_ROWS) as usize * HOTKEYS_PER_ROW + col;
+                if self.settings.battle_mode {
+                    self.pad_quick_slot(slot);
+                } else {
+                    self.queued_action = Some(windows::UiAction::UseHotkey(slot));
+                }
             }
         } else {
             // Target: keep the current one while it is in reach, else the nearest.
@@ -5708,6 +5767,24 @@ impl App {
                             Some(n) => self.key_pressed(Key::Named(n)),
                             None => self.key_pressed(Key::Character(k.into())),
                         }
+                        None
+                    }
+                    // pad:style[:row] draws the controller UI in that style (xbox, playstation,
+                    // nintendo), as if that row's trigger were held; keys:n opens Shortcut
+                    // Information on tab n.
+                    Some(("pad", p)) => {
+                        let mut it = p.split(':');
+                        let style = match it.next() {
+                            Some("playstation") => padglyph::Style::PlayStation,
+                            Some("nintendo") => padglyph::Style::Nintendo,
+                            _ => padglyph::Style::Xbox,
+                        };
+                        self.pad_preview = Some((style, it.next().and_then(|r| r.parse().ok())));
+                        None
+                    }
+                    Some(("keys", t)) => {
+                        self.shortcut_win.open = true;
+                        self.shortcut_win.tab = t.parse().unwrap_or(0);
                         None
                     }
                     // hover:x:y holds the UI pointer there (UI points), for tooltips.
@@ -6536,8 +6613,8 @@ impl App {
                 cooldowns: &self.cooldowns,
                 has_cart: self.merchant.has_cart(),
                 show_equip: self.show_equip,
-                pad_hints: self.pad.in_use(),
-                playstation: self.pad.playstation,
+                pad: self.pad_preview.map(|p| p.0).or_else(|| self.pad.in_use().then(|| self.settings.pad_style.resolve(self.pad.detected))),
+                pad_row: self.pad_preview.and_then(|p| p.1).or(self.pad_row),
             };
             let my_name = self.hud.status.name.clone();
             let social_ctx = social::Ctx {
@@ -6757,7 +6834,7 @@ impl App {
                 let mut macros_changed = false;
                 self.shortcut_win.show(
                     ui.ctx(),
-                    shortcuts::Ctx { battle_mode: self.settings.battle_mode, battle_keys: &self.settings.battle_keys, battle_space_chat: self.settings.battle_space_chat, playstation: self.pad.playstation },
+                    shortcuts::Ctx { battle_mode: self.settings.battle_mode, battle_keys: &self.settings.battle_keys, battle_space_chat: self.settings.battle_space_chat, pad: self.pad_preview.map_or_else(|| self.settings.pad_style.resolve(self.pad.detected), |p| p.0) },
                 );
                 if let Some(line) = self.emote_win.show(ui.ctx(), self.vfs.as_ref(), &mut self.settings.macros, &mut macros_changed) {
                     self.queued_chat.push(line);
@@ -6844,7 +6921,7 @@ impl App {
                     }
                 }
                 if self.dead {
-                    let hint = self.pad.in_use().then_some(if self.pad.playstation { "Cross" } else { "A" });
+                    let hint = self.pad_preview.map(|p| p.0).or_else(|| self.pad.in_use().then(|| self.settings.pad_style.resolve(self.pad.detected)));
                     // A Token of Siegfried in any of its forms, or Light of Regene, revives in place.
                     const TOKENS: [u32; 4] = [7621, 6293, 6316, 25310];
                     let token = self.inventory.items.values().find(|i| TOKENS.contains(&i.id) && i.equipped == 0);
@@ -7549,6 +7626,8 @@ fn main() -> anyhow::Result<()> {
         cooldowns: Default::default(),
         script_resume: None,
         pad: gamepad::Pad::new(),
+        pad_row: None,
+        pad_preview: None,
         pad_target: None,
         pad_dir: None,
         pad_walk_ms: 0.0,

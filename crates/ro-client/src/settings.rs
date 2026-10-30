@@ -47,11 +47,13 @@ pub struct Settings {
     /// Experience gained from monsters in the chat (the original's "Experience message" chat
     /// option, off by default). Quest rewards always show.
     pub exp_messages: bool,
+    /// Controller button icons: the connected pad's family, or one chosen.
+    pub pad_style: crate::padglyph::Choice,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false, pad_style: Default::default() }
     }
 }
 
@@ -234,6 +236,23 @@ impl Settings {
     }
 
     fn controls_tab(&mut self, ui: &mut egui::Ui) {
+        section(ui, "Controller");
+        ui.label("Button icons");
+        {
+            use crate::padglyph::Choice;
+            let label = |c: Choice| match c {
+                Choice::Auto => "Match the controller",
+                Choice::Xbox => "Xbox",
+                Choice::PlayStation => "PlayStation",
+                Choice::Nintendo => "Nintendo",
+            };
+            egui::ComboBox::from_id_salt("pad style").selected_text(label(self.pad_style)).show_ui(ui, |ui| {
+                for c in [Choice::Auto, Choice::Xbox, Choice::PlayStation, Choice::Nintendo] {
+                    ui.selectable_value(&mut self.pad_style, c, label(c));
+                }
+            });
+        }
+        ui.end_row();
         section(ui, "Shortcut bar");
         ui.label("Rows shown");
         egui::ComboBox::from_id_salt("hotkey rows")
