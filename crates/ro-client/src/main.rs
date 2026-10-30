@@ -3789,6 +3789,11 @@ impl App {
             }
             // Shortcut bar: F1-F9 use the first row on show; F12 shows one to four
             // rows or hides the bar.
+            // F11: full screen on or off (borderless, at the desktop's resolution).
+            Key::Named(NamedKey::F11) => {
+                self.settings.fullscreen = !self.settings.fullscreen;
+                self.settings.save();
+            }
             Key::Named(NamedKey::F12) => {
                 self.settings.hotkey_rows = (self.settings.hotkey_rows + 1) % (HOTKEY_ROWS + 1);
                 self.settings.save();
@@ -5669,6 +5674,7 @@ impl App {
                         let named = match k {
                             "Space" => Some(NamedKey::Space),
                             "Enter" => Some(NamedKey::Enter),
+                            "F11" => Some(NamedKey::F11),
                             "F12" => Some(NamedKey::F12),
                             f => f.strip_prefix('F').and_then(|n| n.parse::<usize>().ok()).and_then(|n| [NamedKey::F1, NamedKey::F2, NamedKey::F3, NamedKey::F4, NamedKey::F5, NamedKey::F6, NamedKey::F7, NamedKey::F8, NamedKey::F9].get(n.wrapping_sub(1)).copied()),
                         };
@@ -6426,6 +6432,10 @@ impl App {
         self.hud.digit_text = self.digit.map(|(kind, value, t)| digit_text(kind, value, t));
         self.hud.pvp_text = self.pvp_rank.map(|(rank, total)| format!("{rank} / {total}"));
         if let Some(state) = self.egui_state.as_mut() {
+            // Full screen follows the setting (F11 or the settings window).
+            if self.capture.is_none() && window.fullscreen().is_some() != self.settings.fullscreen {
+                window.set_fullscreen(self.settings.fullscreen.then_some(winit::window::Fullscreen::Borderless(None)));
+            }
             let mut input = state.take_egui_input(window);
             if let Some(p) = self.fake_pointer.take() {
                 input.events.push(egui::Event::PointerMoved(p));
@@ -7199,7 +7209,7 @@ impl ApplicationHandler for App {
         }
         // Login / character screens: the world takes no input.
         let front_blocks = self.front.is_some() && matches!(event, WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::KeyboardInput { .. });
-        let function_key = matches!(&event, WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key: winit::keyboard::Key::Named(k), .. }, .. } if hotkey_slot(*k).is_some() || *k == winit::keyboard::NamedKey::F12);
+        let function_key = matches!(&event, WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key: winit::keyboard::Key::Named(k), .. }, .. } if hotkey_slot(*k).is_some() || matches!(*k, winit::keyboard::NamedKey::F11 | winit::keyboard::NamedKey::F12));
         let ui_used = ui_used && !function_key;
         if (ui_used || front_blocks) && !matches!(event, WindowEvent::Resized(_) | WindowEvent::CloseRequested | WindowEvent::ScaleFactorChanged { .. }) {
             return;

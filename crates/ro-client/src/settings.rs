@@ -42,11 +42,13 @@ pub struct Settings {
     pub macros: Vec<String>,
     /// Screenshots (Print Screen) include the interface; off, they show the world alone.
     pub screenshot_ui: bool,
+    /// Borderless full screen (F11).
+    pub fullscreen: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false }
     }
 }
 
@@ -199,6 +201,9 @@ impl Settings {
         ui.add(egui::Slider::new(&mut self.sfx_volume, 0.0..=1.0).show_value(false));
         ui.end_row();
         section(ui, "Interface");
+        ui.label("Window");
+        ui.checkbox(&mut self.fullscreen, "Full screen (F11)");
+        ui.end_row();
         ui.label("UI scale");
         // Applied on release, so the slider doesn't move under the pointer while dragging.
         let mut scale = self.ui_scale;
