@@ -218,9 +218,9 @@ impl Skin {
 }
 
 /// Windows with no place of their own: they open spread out instead of all on one spot.
-const CASCADE: [&str; 21] = [
+const CASCADE: [&str; 20] = [
     "Battle", "Room password", "Create Chat Room", "Clan", "Enchant", "Game Options", "Merge Items", "Navigation", "Attendance", "Quests", "Ranking",
-    "Item Reform", "Reputation", "Settings", "Store Search", "Stylist", "Dressing Room", "Market", "Trade", "Bank", "Cash Shop",
+    "Item Reform", "Reputation", "Store Search", "Stylist", "Dressing Room", "Market", "Trade", "Bank", "Cash Shop",
 ];
 
 /// A starting position from the title, on a grid over the middle of the screen.

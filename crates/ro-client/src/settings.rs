@@ -157,167 +157,212 @@ impl Settings {
         }
     }
 
-    /// The settings window. Returns true when something changed (already saved).
+    /// The settings window, in tabs (Game, Controls, Graphics) that scroll when the screen is
+    /// short. Returns true when something changed (already saved).
     pub fn show(&mut self, ctx: &egui::Context, open: &mut bool) -> bool {
+        const TABS: [&str; 3] = ["Game", "Controls", "Graphics"];
         let before = self.clone();
-        crate::classic::show(ctx, egui::Window::new("Settings").open(open).resizable(false).collapsible(false), "Settings", true, |ui| {
-            egui::Grid::new("settings").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
-                ui.label("Music");
-                ui.add(egui::Slider::new(&mut self.bgm_volume, 0.0..=1.0).show_value(false));
-                ui.end_row();
-                ui.label("Effects");
-                ui.add(egui::Slider::new(&mut self.sfx_volume, 0.0..=1.0).show_value(false));
-                ui.end_row();
-                ui.label("UI scale");
-                // Applied on release, so the slider doesn't move under the pointer while dragging.
-                let mut scale = self.ui_scale;
-                let r = ui.add(egui::Slider::new(&mut scale, 0.75..=2.0).step_by(0.05));
-                if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                    self.ui_scale = scale;
+        let tab_id = egui::Id::unique("settings tab");
+        let mut tab: usize = ctx.data(|d| d.get_temp(tab_id)).unwrap_or(0);
+        // Room for the window inside the screen, below its title bar.
+        let max_height = (ctx.content_rect().height() - 140.0).clamp(220.0, 620.0);
+        crate::classic::show(ctx, egui::Window::new("Settings").open(open).resizable(false).collapsible(false).default_width(420.0).default_pos(egui::pos2(ctx.content_rect().center().x - 210.0, 70.0)), "Settings", true, |ui| {
+            ui.horizontal(|ui| {
+                for (i, name) in TABS.iter().enumerate() {
+                    ui.selectable_value(&mut tab, i, *name);
                 }
-                ui.end_row();
-                ui.label("Interface");
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.classic_ui, true, "Classic");
-                    ui.selectable_value(&mut self.classic_ui, false, "Modern");
+            });
+            ui.separator();
+            egui::ScrollArea::vertical().max_height(max_height).min_scrolled_height(max_height.min(500.0)).auto_shrink([false, true]).show(ui, |ui| {
+                ui.set_width(400.0);
+                egui::Grid::new(("settings", tab)).num_columns(2).spacing([16.0, 8.0]).min_col_width(130.0).show(ui, |ui| match tab {
+                    0 => self.game_tab(ui),
+                    1 => self.controls_tab(ui),
+                    _ => self.graphics_tab(ui),
                 });
-                ui.end_row();
-                ui.label("Minimap");
-                ui.checkbox(&mut self.minimap, "Show (Ctrl+Tab)");
-                ui.end_row();
-                ui.label(egui::RichText::new("Battle mode").strong());
-                ui.checkbox(&mut self.battle_mode, "On (/bm)").on_hover_text("Letter keys use the shortcut rows; Enter opens the chat");
-                ui.end_row();
-                ui.label("");
-                ui.checkbox(&mut self.battle_space_chat, "Space opens the chat");
-                ui.end_row();
-                ui.label("Shortcut rows");
-                egui::ComboBox::from_id_salt("hotkey rows")
-                    .selected_text(match self.hotkey_rows { 0 => "Hidden".to_string(), n => n.to_string() })
-                    .show_ui(ui, |ui| {
-                        for n in [1, 2, 3, 4, 0] {
-                            ui.selectable_value(&mut self.hotkey_rows, n, if n == 0 { "Hidden".to_string() } else { n.to_string() });
-                        }
-                    })
-                    .response
-                    .on_hover_text("F12 cycles these too");
-                ui.end_row();
-                self.battle_keys.resize(3, String::new());
-                for (i, keys) in self.battle_keys.iter_mut().enumerate() {
-                    ui.label(format!("Row {} keys", i + 2)).on_hover_text("One key per slot, left to right (nine). Counted from the row on show.");
-                    ui.horizontal(|ui| {
-                        let mut text = keys.to_uppercase();
-                        if ui.add(egui::TextEdit::singleline(&mut text).char_limit(9).desired_width(110.0).font(egui::TextStyle::Monospace)).changed() {
-                            *keys = text.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
-                        }
-                        if keys.chars().count() < 9 {
-                            ui.label(egui::RichText::new(format!("{} of 9", keys.chars().count())).size(11.0).color(egui::Color32::from_rgb(220, 140, 60)));
-                        }
-                    });
-                    ui.end_row();
-                }
-                ui.label("");
-                if ui.button("Default keys").clicked() {
-                    self.battle_keys = crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect();
-                    self.battle_space_chat = true;
-                }
-                ui.end_row();
-                ui.label("Screenshots");
-                ui.checkbox(&mut self.screenshot_ui, "Include the interface").on_hover_text("Print Screen or Scroll Lock saves a lossless PNG in the ScreenShot folder");
-                ui.end_row();
-                ui.label(egui::RichText::new("Visual").strong());
-                ui.checkbox(&mut self.visual.hd2d, "HD-2D lighting and effects");
-                ui.end_row();
-                let v = &mut self.visual;
-                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Bloom"));
-                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.bloom, 0.0..=1.0));
-                ui.end_row();
-                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Depth of field"));
-                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.depth_of_field, 0.0..=1.0));
-                ui.end_row();
-                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Shadows"));
-                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.shadows, 0.0..=1.0));
-                ui.end_row();
-                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Sun height"));
-                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.sun_elevation, 15.0..=85.0).suffix("°"));
-                ui.end_row();
-                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Sun cycle")).response.on_hover_text("Minutes for the sun to cross the sky; 0 keeps it still");
-                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.sun_cycle, 0.0..=180.0).suffix(" min"));
-                ui.end_row();
-                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Water"));
-                ui.add_enabled_ui(v.hd2d, |ui| {
-                    egui::ComboBox::from_id_salt("water quality").selected_text(ro_render::WaterQuality::ALL[(v.water as usize).min(4)].name()).show_ui(ui, |ui| {
-                        for (i, q) in ro_render::WaterQuality::ALL.iter().enumerate() {
-                            ui.selectable_value(&mut v.water, i as u8, q.name());
-                        }
-                    });
-                });
-                ui.end_row();
-                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Vignette"));
-                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.vignette, 0.0..=1.0));
-                ui.end_row();
-                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Warmth"));
-                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.warmth, -1.0..=1.0));
-                ui.end_row();
-                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Saturation"));
-                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.saturation, 0.5..=1.5));
-                ui.end_row();
-                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Contrast"));
-                ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.contrast, 0.7..=1.4));
-                ui.end_row();
-                for (label, value, max) in [
-                    ("Sprite lighting", &mut v.sprite_light, 1.0),
-                    ("Rim light", &mut v.rim_light, 1.0),
-                    ("Light sources", &mut v.point_lights, 2.0),
-                    ("Fog", &mut v.fog, 1.0),
-                    ("God rays", &mut v.god_rays, 1.0),
-                    ("Ambient occlusion", &mut v.ambient_occlusion, 1.0),
-                    ("Underwater", &mut v.underwater, 1.0),
-                ] {
-                    ui.add_enabled_ui(v.hd2d, |ui| ui.label(label));
-                    ui.add_enabled(v.hd2d, egui::Slider::new(value, 0.0..=max));
-                    ui.end_row();
-                }
-                ui.add_enabled_ui(v.hd2d, |ui| ui.label("Pixel snapping"));
-                ui.add_enabled(v.hd2d, egui::Checkbox::new(&mut v.pixel_snap, "Crisp sprites"));
-                ui.end_row();
-                if ui.add_enabled(v.hd2d, egui::Button::new("Reset look")).clicked() {
-                    *v = Visual { hd2d: true, ..Visual::default() };
-                }
-                ui.end_row();
-                ui.label(egui::RichText::new("Textures").strong());
-                ui.end_row();
-                let u = &mut self.upscale;
-                ui.label("Upscaling").on_hover_text("Ground, models, item icons and interface art (never character sprites). Load-time upscaling applies from the next map or window opened.");
-                use ro_render::UpscaleQuality as Q;
-                let names = |q: Q| match q {
-                    Q::Off => "Off",
-                    Q::Fast => "Fast (filtering only)",
-                    Q::Balanced => "Balanced (bicubic)",
-                    Q::High => "High (Lanczos)",
-                };
-                egui::ComboBox::from_id_salt("upscale quality").selected_text(names(u.quality)).show_ui(ui, |ui| {
-                    for q in [Q::Off, Q::Fast, Q::Balanced, Q::High] {
-                        ui.selectable_value(&mut u.quality, q, names(q));
-                    }
-                });
-                ui.end_row();
-                let scaling = matches!(u.quality, Q::Balanced | Q::High);
-                ui.add_enabled_ui(scaling, |ui| ui.label("Upscale factor"));
-                ui.add_enabled_ui(scaling, |ui| {
-                    egui::ComboBox::from_id_salt("upscale factor").selected_text(format!("{}x", u.factor)).show_ui(ui, |ui| {
-                        for f in ro_render::UpscaleSettings::FACTORS {
-                            ui.selectable_value(&mut u.factor, f, format!("{f}x"));
-                        }
-                    });
-                });
-                ui.end_row();
             });
         });
+        ctx.data_mut(|d| d.insert_temp(tab_id, tab));
         let changed = *self != before;
         if changed {
             self.save();
         }
         changed
     }
+
+    fn game_tab(&mut self, ui: &mut egui::Ui) {
+        section(ui, "Sound");
+        ui.label("Music");
+        ui.add(egui::Slider::new(&mut self.bgm_volume, 0.0..=1.0).show_value(false));
+        ui.end_row();
+        ui.label("Effects");
+        ui.add(egui::Slider::new(&mut self.sfx_volume, 0.0..=1.0).show_value(false));
+        ui.end_row();
+        section(ui, "Interface");
+        ui.label("UI scale");
+        // Applied on release, so the slider doesn't move under the pointer while dragging.
+        let mut scale = self.ui_scale;
+        let r = ui.add(egui::Slider::new(&mut scale, 0.75..=2.0).step_by(0.05));
+        if r.drag_stopped() || (r.changed() && !r.dragged()) {
+            self.ui_scale = scale;
+        }
+        ui.end_row();
+        ui.label("Style");
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.classic_ui, true, "Classic");
+            ui.selectable_value(&mut self.classic_ui, false, "Modern");
+        });
+        ui.end_row();
+        ui.label("Minimap");
+        ui.checkbox(&mut self.minimap, "Show (Ctrl+Tab)");
+        ui.end_row();
+        section(ui, "Screenshots");
+        ui.label("Print Screen");
+        ui.checkbox(&mut self.screenshot_ui, "Include the interface").on_hover_text("Print Screen or Scroll Lock saves a lossless PNG in the ScreenShot folder");
+        ui.end_row();
+    }
+
+    fn controls_tab(&mut self, ui: &mut egui::Ui) {
+        section(ui, "Shortcut bar");
+        ui.label("Rows shown");
+        egui::ComboBox::from_id_salt("hotkey rows")
+            .selected_text(match self.hotkey_rows { 0 => "Hidden".to_string(), n => n.to_string() })
+            .show_ui(ui, |ui| {
+                for n in [1, 2, 3, 4, 0] {
+                    ui.selectable_value(&mut self.hotkey_rows, n, if n == 0 { "Hidden".to_string() } else { n.to_string() });
+                }
+            })
+            .response
+            .on_hover_text("F12 cycles these too");
+        ui.end_row();
+        section(ui, "Battle mode");
+        ui.label("Enabled");
+        ui.checkbox(&mut self.battle_mode, "On (/bm)").on_hover_text("Letter keys use the shortcut rows; Enter opens the chat");
+        ui.end_row();
+        ui.label("Chat");
+        ui.checkbox(&mut self.battle_space_chat, "Space opens the chat");
+        ui.end_row();
+        self.battle_keys.resize(3, String::new());
+        for (i, keys) in self.battle_keys.iter_mut().enumerate() {
+            ui.label(format!("Row {} keys", i + 2)).on_hover_text("One key per slot, left to right (nine). Counted from the row on show.");
+            ui.horizontal(|ui| {
+                let mut text = keys.to_uppercase();
+                if ui.add(egui::TextEdit::singleline(&mut text).char_limit(9).desired_width(110.0).font(egui::TextStyle::Monospace)).changed() {
+                    *keys = text.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
+                }
+                if keys.chars().count() < 9 {
+                    ui.label(egui::RichText::new(format!("{} of 9", keys.chars().count())).size(11.0).color(egui::Color32::from_rgb(220, 140, 60)));
+                }
+            });
+            ui.end_row();
+        }
+        ui.label("");
+        if ui.button("Default keys").clicked() {
+            self.battle_keys = crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect();
+            self.battle_space_chat = true;
+        }
+        ui.end_row();
+    }
+
+    fn graphics_tab(&mut self, ui: &mut egui::Ui) {
+        section(ui, "HD-2D");
+        ui.label("Enabled");
+        ui.checkbox(&mut self.visual.hd2d, "Lighting and effects");
+        ui.end_row();
+        let v = &mut self.visual;
+        section(ui, "Camera and light");
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Bloom"));
+        ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.bloom, 0.0..=1.0));
+        ui.end_row();
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Depth of field"));
+        ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.depth_of_field, 0.0..=1.0));
+        ui.end_row();
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Shadows"));
+        ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.shadows, 0.0..=1.0));
+        ui.end_row();
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Sun height"));
+        ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.sun_elevation, 15.0..=85.0).suffix("°"));
+        ui.end_row();
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Sun cycle")).response.on_hover_text("Minutes for the sun to cross the sky; 0 keeps it still");
+        ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.sun_cycle, 0.0..=180.0).suffix(" min"));
+        ui.end_row();
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Water"));
+        ui.add_enabled_ui(v.hd2d, |ui| {
+            egui::ComboBox::from_id_salt("water quality").selected_text(ro_render::WaterQuality::ALL[(v.water as usize).min(4)].name()).show_ui(ui, |ui| {
+                for (i, q) in ro_render::WaterQuality::ALL.iter().enumerate() {
+                    ui.selectable_value(&mut v.water, i as u8, q.name());
+                }
+            });
+        });
+        ui.end_row();
+        section(ui, "Look");
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Vignette"));
+        ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.vignette, 0.0..=1.0));
+        ui.end_row();
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Warmth"));
+        ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.warmth, -1.0..=1.0));
+        ui.end_row();
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Saturation"));
+        ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.saturation, 0.5..=1.5));
+        ui.end_row();
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Contrast"));
+        ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.contrast, 0.7..=1.4));
+        ui.end_row();
+        for (label, value, max) in [
+            ("Sprite lighting", &mut v.sprite_light, 1.0),
+            ("Rim light", &mut v.rim_light, 1.0),
+            ("Light sources", &mut v.point_lights, 2.0),
+            ("Fog", &mut v.fog, 1.0),
+            ("God rays", &mut v.god_rays, 1.0),
+            ("Ambient occlusion", &mut v.ambient_occlusion, 1.0),
+            ("Underwater", &mut v.underwater, 1.0),
+        ] {
+            ui.add_enabled_ui(v.hd2d, |ui| ui.label(label));
+            ui.add_enabled(v.hd2d, egui::Slider::new(value, 0.0..=max));
+            ui.end_row();
+        }
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Pixel snapping"));
+        ui.add_enabled(v.hd2d, egui::Checkbox::new(&mut v.pixel_snap, "Crisp sprites"));
+        ui.end_row();
+        if ui.add_enabled(v.hd2d, egui::Button::new("Reset look")).clicked() {
+            *v = Visual { hd2d: true, ..Visual::default() };
+        }
+        ui.end_row();
+        section(ui, "Textures");
+        let u = &mut self.upscale;
+        ui.label("Upscaling").on_hover_text("Ground, models, item icons and interface art (never character sprites). Load-time upscaling applies from the next map or window opened.");
+        use ro_render::UpscaleQuality as Q;
+        let names = |q: Q| match q {
+            Q::Off => "Off",
+            Q::Fast => "Fast (filtering only)",
+            Q::Balanced => "Balanced (bicubic)",
+            Q::High => "High (Lanczos)",
+        };
+        egui::ComboBox::from_id_salt("upscale quality").selected_text(names(u.quality)).show_ui(ui, |ui| {
+            for q in [Q::Off, Q::Fast, Q::Balanced, Q::High] {
+                ui.selectable_value(&mut u.quality, q, names(q));
+            }
+        });
+        ui.end_row();
+        let scaling = matches!(u.quality, Q::Balanced | Q::High);
+        ui.add_enabled_ui(scaling, |ui| ui.label("Upscale factor"));
+        ui.add_enabled_ui(scaling, |ui| {
+            egui::ComboBox::from_id_salt("upscale factor").selected_text(format!("{}x", u.factor)).show_ui(ui, |ui| {
+                for f in ro_render::UpscaleSettings::FACTORS {
+                    ui.selectable_value(&mut u.factor, f, format!("{f}x"));
+                }
+            });
+        });
+        ui.end_row();
+    }
+}
+
+/// A heading row in a settings grid, in the accent colour.
+fn section(ui: &mut egui::Ui, title: &str) {
+    let color = if ui.visuals().dark_mode { egui::Color32::from_rgb(140, 175, 255) } else { egui::Color32::from_rgb(50, 70, 150) };
+    ui.vertical(|ui| {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(title).strong().size(13.5).color(color));
+    });
+    ui.end_row();
 }
