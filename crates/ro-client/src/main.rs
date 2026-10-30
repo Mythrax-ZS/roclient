@@ -5214,7 +5214,7 @@ impl App {
                 if let Some(p) = held(f) {
                     let d = glam::Vec2::new(f.x - p.x, f.y - p.y);
                     // A full stroke crosses the window; faster strokes go further.
-                    let gain = 0.9 + 6.0 * d.length().min(0.05);
+                    let gain = (0.9 + 6.0 * d.length().min(0.05)) * self.settings.pad_tuning.touch_speed;
                     let (x, y) = self.touch_pos.or(self.cursor).unwrap_or((size.width as f64 / 2.0, size.height as f64 / 2.0));
                     let pos = ((x + (d.x * gain * size.width as f32) as f64).clamp(0.0, size.width as f64 - 1.0), (y + (d.y * gain * size.width as f32 * 0.6) as f64).clamp(0.0, size.height as f64 - 1.0));
                     if pos != (x, y) {
@@ -5305,6 +5305,7 @@ impl App {
     /// battle mode, else aimed first).
     fn pad_tick(&mut self, dt: f32) {
         use gilrs::Button::*;
+        self.pad.tuning = self.settings.pad_tuning;
         let mut f = self.pad.poll();
         self.pad_row = None;
         let mut testing = false;
@@ -7323,6 +7324,7 @@ impl App {
                 if let Some(feet) = pad_marker {
                     hud::target_marker(ui.ctx(), feet, ppp, self.aiming.is_some());
                 }
+                self.settings.pad_live = self.pad.connected().then_some(self.pad.raw);
                 if self.windows.settings && self.settings.show(ui.ctx(), &mut self.windows.settings) {
                     self.ui_scale = self.settings.ui_scale;
                     uitex::set_upscaler(ro_render::Upscaler::new(self.settings.upscale.clone()));

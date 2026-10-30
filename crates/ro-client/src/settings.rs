@@ -61,11 +61,16 @@ pub struct Settings {
     /// The vibration test button was pressed (not saved).
     #[serde(skip)]
     pub vibration_test: bool,
+    /// Deadzones, camera speed and response, triggers, stick swap, touchpad speed.
+    pub pad_tuning: crate::gamepad::Tuning,
+    /// The connected controller's sticks as read, for the preview (not saved).
+    #[serde(skip)]
+    pub pad_live: Option<[glam::Vec2; 2]>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false, pad_style: Default::default(), vibration: 1.0, touchpad: true, light_bar: true, dualsense_hd: true, vibration_test: false }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false, pad_style: Default::default(), vibration: 1.0, touchpad: true, light_bar: true, dualsense_hd: true, vibration_test: false, pad_tuning: Default::default(), pad_live: None }
     }
 }
 
@@ -202,7 +207,8 @@ impl Settings {
             });
         });
         ctx.data_mut(|d| d.insert_temp(tab_id, tab));
-        let changed = Settings { vibration_test: false, ..self.clone() } != before;
+        let plain = |s: &Settings| Settings { vibration_test: false, pad_live: None, ..s.clone() };
+        let changed = plain(self) != plain(&before);
         if changed {
             self.save();
         }
@@ -265,6 +271,55 @@ impl Settings {
             });
         }
         ui.end_row();
+        let live = self.pad_live;
+        let t = &mut self.pad_tuning;
+        let pct = |v: f64, _| format!("{:.0}%", v * 100.0);
+        for (i, name) in ["Left stick", "Right stick"].into_iter().enumerate() {
+            ui.label(name);
+            ui.horizontal(|ui| {
+                let dz = if i == 0 { &mut t.left_deadzone } else { &mut t.right_deadzone };
+                stick_preview(ui, live.map(|l| l[i]), *dz, t.outer_deadzone);
+                ui.vertical(|ui| {
+                    ui.add(egui::Slider::new(dz, 0.0..=0.5).custom_formatter(pct).text("deadzone")).on_hover_text("Travel ignored around the centre. Raise it if the character or camera drifts on its own; lower it for a quicker response");
+                    let role = if (i == 1) != t.swap_sticks { "Turns the camera" } else { "Walks" };
+                    ui.label(egui::RichText::new(role).weak());
+                });
+            });
+            ui.end_row();
+        }
+        ui.label("Full tilt");
+        ui.add(egui::Slider::new(&mut t.outer_deadzone, 0.0..=0.3).custom_formatter(|v, _| format!("at {:.0}%", (1.0 - v) * 100.0)))
+            .on_hover_text("How far a stick leans before it reads as fully pushed (an outer deadzone, for sticks that no longer reach the rim)");
+        ui.end_row();
+        ui.label("Swap sticks");
+        ui.checkbox(&mut t.swap_sticks, "Walk with the right stick, turn with the left");
+        ui.end_row();
+        ui.label("Camera speed");
+        ui.vertical(|ui| {
+            let times = |v: f64, _| format!("{v:.1}×");
+            ui.add(egui::Slider::new(&mut t.turn_speed, 0.2..=3.0).custom_formatter(times).text("turn"));
+            ui.add(egui::Slider::new(&mut t.tilt_speed, 0.2..=3.0).custom_formatter(times).text("tilt"));
+        });
+        ui.end_row();
+        ui.label("Camera response");
+        ui.add(egui::Slider::new(&mut t.curve, 1.0..=3.0).custom_formatter(|v, _| if v <= 1.0 { "Linear".into() } else { format!("Curved {v:.1}") }))
+            .on_hover_text("Linear: speed follows the stick. Curved: gentle near the centre for fine turns, still fast at full tilt");
+        ui.end_row();
+        ui.label("Invert camera");
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut t.invert_turn, "Turn");
+            ui.checkbox(&mut t.invert_tilt, "Tilt");
+        });
+        ui.end_row();
+        ui.label("Triggers");
+        ui.add(egui::Slider::new(&mut t.trigger, 0.1..=0.9).custom_formatter(pct).text("press point"))
+            .on_hover_text("How far LT / RT (L2 / R2, ZL / ZR) press before the shortcut row opens");
+        ui.end_row();
+        ui.label("");
+        if ui.button("Reset controller tuning").clicked() {
+            *t = Default::default();
+        }
+        ui.end_row();
         ui.label("Vibration");
         ui.horizontal(|ui| {
             ui.add(egui::Slider::new(&mut self.vibration, 0.0..=1.0).custom_formatter(|v, _| if v <= 0.0 { "Off".into() } else { format!("{:.0}%", v * 100.0) }))
@@ -277,6 +332,7 @@ impl Settings {
         ui.label("PlayStation");
         ui.vertical(|ui| {
             ui.checkbox(&mut self.touchpad, "Touchpad moves the pointer").on_hover_text("Press to click, two fingers to right-click; swipe two fingers across to change the shortcut row, up or down to zoom");
+            ui.add_enabled(self.touchpad, egui::Slider::new(&mut self.pad_tuning.touch_speed, 0.25..=3.0).custom_formatter(|v, _| format!("{v:.1}×")).text("pointer speed"));
             ui.checkbox(&mut self.light_bar, "Light bar shows HP");
             ui.horizontal(|ui| {
                 ui.label("DualSense");
@@ -420,6 +476,28 @@ impl Settings {
 }
 
 /// A heading row in a settings grid, in the accent colour.
+/// A stick's live position in its circle: the deadzone shaded, the full-tilt ring, and the dot
+/// lit once the stick reads past the deadzone.
+fn stick_preview(ui: &mut egui::Ui, stick: Option<glam::Vec2>, inner: f32, outer: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(44.0, 44.0), egui::Sense::hover());
+    let p = ui.painter();
+    let c = rect.center();
+    let r = rect.width() / 2.0 - 2.0;
+    let line = ui.visuals().widgets.noninteractive.fg_stroke.color;
+    p.circle(c, r, ui.visuals().extreme_bg_color, egui::Stroke::new(1.0, line));
+    p.circle_filled(c, r * inner, line.gamma_multiply(0.25));
+    if outer > 0.0 {
+        p.circle_stroke(c, r * (1.0 - outer), egui::Stroke::new(1.0, line.gamma_multiply(0.5)));
+    }
+    let Some(v) = stick else {
+        p.text(c, egui::Align2::CENTER_CENTER, "—", egui::FontId::proportional(12.0), line);
+        return;
+    };
+    let on = v.length() > inner;
+    let dot = c + egui::vec2(v.x, -v.y).clamp(egui::vec2(-1.0, -1.0), egui::vec2(1.0, 1.0)) * r;
+    p.circle_filled(dot, 3.5, if on { egui::Color32::from_rgb(90, 200, 120) } else { line });
+}
+
 fn section(ui: &mut egui::Ui, title: &str) {
     let color = if ui.visuals().dark_mode { egui::Color32::from_rgb(140, 175, 255) } else { egui::Color32::from_rgb(50, 70, 150) };
     ui.vertical(|ui| {

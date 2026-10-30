@@ -4,13 +4,45 @@
 
 use gilrs::{Axis, Button, EventType, Gilrs};
 use glam::Vec2;
+use serde::{Deserialize, Serialize};
 
-/// Stick travel ignored around the centre, rescaled so motion starts smoothly past it.
-const DEADZONE: f32 = 0.22;
+/// How the sticks, triggers and touchpad respond (Settings > Controls > Controller).
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+#[serde(default)]
+pub struct Tuning {
+    /// Stick travel ignored around the centre (share of full travel), per physical stick;
+    /// motion starts smoothly past it.
+    pub left_deadzone: f32,
+    pub right_deadzone: f32,
+    /// Travel short of the rim that already reads as full tilt (worn sticks that never
+    /// reach the edge still turn at full speed).
+    pub outer_deadzone: f32,
+    /// Camera turn and tilt speed (1: the default).
+    pub turn_speed: f32,
+    pub tilt_speed: f32,
+    pub invert_turn: bool,
+    pub invert_tilt: bool,
+    /// Camera stick response: 1 linear; higher is gentler near the centre, for fine aim.
+    pub curve: f32,
+    /// How far a trigger presses before it counts (share of full travel).
+    pub trigger: f32,
+    /// The right stick walks and the left turns the camera.
+    pub swap_sticks: bool,
+    /// Touchpad pointer speed (1: the default).
+    pub touch_speed: f32,
+}
+
+impl Default for Tuning {
+    fn default() -> Self {
+        Self { left_deadzone: 0.22, right_deadzone: 0.22, outer_deadzone: 0.0, turn_speed: 1.0, tilt_speed: 1.0, invert_turn: false, invert_tilt: false, curve: 1.0, trigger: 0.4, swap_sticks: false, touch_speed: 1.0 }
+    }
+}
 
 #[derive(Default, Clone)]
 pub struct PadFrame {
+    /// Walking: the direction (and how far) the walking stick leans.
     pub left: Vec2,
+    /// The camera: turn and tilt, with the tuning's curve, speeds and inversion applied.
     pub right: Vec2,
     /// Held: the shortcut bar modifiers (LT, RT, and both together in battle mode).
     pub lt: bool,
@@ -36,25 +68,35 @@ pub struct Pad {
     /// strength wanted, and the strengths last set.
     rumble: Option<(gilrs::GamepadId, gilrs::ff::Effect, gilrs::ff::Effect)>,
     rumble_now: (f32, f32),
+    /// Set before each poll from the settings.
+    pub tuning: Tuning,
+    /// The physical left and right sticks as read, before any deadzone (the settings'
+    /// stick preview).
+    pub raw: [Vec2; 2],
 }
 
-fn deadzone(v: Vec2) -> Vec2 {
+/// A stick's reading with a radial deadzone: nothing inside `inner`, full tilt from
+/// `outer` short of the rim, rescaled in between so motion starts smoothly.
+pub fn deadzone(v: Vec2, inner: f32, outer: f32) -> Vec2 {
     let len = v.length();
-    if len < DEADZONE {
+    if len <= inner || len == 0.0 {
         return Vec2::ZERO;
     }
-    v / len * ((len - DEADZONE) / (1.0 - DEADZONE)).min(1.0)
+    let span = (1.0 - outer - inner).max(0.05);
+    v / len * ((len - inner) / span).min(1.0)
 }
 
 impl Pad {
     pub fn new() -> Self {
-        let gilrs = Gilrs::new().inspect_err(|e| tracing::warn!("controller support unavailable: {e}")).ok();
+        // No default filters: gilrs's own per-device deadzone would sit under ours and make
+        // smaller settings do nothing. The D-pad hat is still turned into buttons (poll).
+        let gilrs = gilrs::GilrsBuilder::new().with_default_filters(false).build().inspect_err(|e| tracing::warn!("controller support unavailable: {e}")).ok();
         let active = gilrs.as_ref().and_then(|g| g.gamepads().inspect(|(_, p)| tracing::info!(name = p.name(), "controller found")).last().map(|(id, pad)| {
             tracing::info!(name = pad.name(), "controller connected");
             id
         }));
         let detected = gilrs.as_ref().map_or(crate::padglyph::Style::Xbox, |g| family(g, active));
-        Self { gilrs, active, used: false, detected, rumble: None, rumble_now: (0.0, 0.0) }
+        Self { gilrs, active, used: false, detected, rumble: None, rumble_now: (0.0, 0.0), tuning: Tuning::default(), raw: [Vec2::ZERO; 2] }
     }
 
     /// Runs the active pad's motors at these strengths (0..1): the heavy one and the light one.
@@ -104,7 +146,12 @@ impl Pad {
     pub fn poll(&mut self) -> PadFrame {
         let mut frame = PadFrame::default();
         let Some(g) = self.gilrs.as_mut() else { return frame };
+        let mut any = false;
         while let Some(ev) = g.next_event() {
+            use gilrs::ev::filter::{axis_dpad_to_button, Filter};
+            // A D-pad reported as a hat axis arrives as its buttons.
+            let Some(ev) = ev.filter_ev(&axis_dpad_to_button, g).filter(|e| !e.is_dropped()) else { continue };
+            any = true;
             match ev.event {
                 EventType::ButtonPressed(b, _) => {
                     if !self.used {
@@ -123,16 +170,30 @@ impl Pad {
                 EventType::AxisChanged(..) if self.active.is_none() => self.active = Some(ev.id),
                 _ => {}
             }
-            // Controllers announce themselves after start-up: label for them as they do.
+        }
+        // Controllers announce themselves after start-up: label for them as they do.
+        if any {
             self.detected = family(g, self.active);
         }
-        let Some(pad) = self.active.map(|id| g.gamepad(id)) else { return frame };
-        frame.left = deadzone(Vec2::new(pad.value(Axis::LeftStickX), pad.value(Axis::LeftStickY)));
-        frame.right = deadzone(Vec2::new(pad.value(Axis::RightStickX), pad.value(Axis::RightStickY)));
-        let trigger = |b: Button| pad.button_data(b).is_some_and(|d| d.value() > 0.4);
+        let t = self.tuning;
+        let Some(pad) = self.active.map(|id| g.gamepad(id)) else {
+            self.raw = [Vec2::ZERO; 2];
+            return frame;
+        };
+        self.raw = [Vec2::new(pad.value(Axis::LeftStickX), pad.value(Axis::LeftStickY)), Vec2::new(pad.value(Axis::RightStickX), pad.value(Axis::RightStickY))];
+        let left = deadzone(self.raw[0], t.left_deadzone, t.outer_deadzone);
+        let right = deadzone(self.raw[1], t.right_deadzone, t.outer_deadzone);
+        let (walk, look) = if t.swap_sticks { (right, left) } else { (left, right) };
+        frame.left = walk;
+        let look = if look == Vec2::ZERO { look } else { look.normalize() * look.length().powf(t.curve.max(0.1)) };
+        let sign = |inv: bool| if inv { -1.0 } else { 1.0 };
+        frame.right = Vec2::new(look.x * t.turn_speed * sign(t.invert_turn), look.y * t.tilt_speed * sign(t.invert_tilt));
+        let trigger = |b: Button| pad.button_data(b).is_some_and(|d| d.value() > t.trigger.clamp(0.05, 0.95));
         frame.lt = trigger(Button::LeftTrigger2);
         frame.rt = trigger(Button::RightTrigger2);
-        if frame.left != Vec2::ZERO || frame.right != Vec2::ZERO {
+        // A stick only counts as picking up the controller when clearly pushed (with a small
+        // deadzone, resting drift would otherwise wake the controller hints).
+        if self.raw.iter().any(|v| v.length() > 0.35) && (frame.left != Vec2::ZERO || frame.right != Vec2::ZERO) {
             if !self.used {
                 tracing::info!(name = pad.name(), left = ?frame.left, right = ?frame.right, "controller in use (sticks)");
             }
@@ -158,4 +219,23 @@ fn family(g: &Gilrs, active: Option<gilrs::GamepadId>) -> crate::padglyph::Style
         .and_then(|id| pad_family(&g.gamepad(id)))
         .or_else(|| g.gamepads().find_map(|(_, p)| pad_family(&p)))
         .unwrap_or(crate::padglyph::Style::Xbox)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::deadzone;
+    use glam::Vec2;
+
+    #[test]
+    fn deadzone_rescales_between_inner_and_outer() {
+        assert_eq!(deadzone(Vec2::new(0.2, 0.0), 0.22, 0.0), Vec2::ZERO);
+        // Just past the deadzone: barely moving; halfway: half; the rim: full.
+        assert!(deadzone(Vec2::new(0.23, 0.0), 0.22, 0.0).x < 0.02);
+        assert!((deadzone(Vec2::new(0.61, 0.0), 0.22, 0.0).x - 0.5).abs() < 1e-5);
+        assert!((deadzone(Vec2::new(0.0, -1.0), 0.22, 0.0).y + 1.0).abs() < 1e-5);
+        // An outer deadzone reads 90% travel as full tilt.
+        assert!((deadzone(Vec2::new(0.9, 0.0), 0.2, 0.1).x - 1.0).abs() < 1e-5);
+        // No deadzone at all passes the stick through.
+        assert_eq!(deadzone(Vec2::new(0.3, 0.4), 0.0, 0.0), Vec2::new(0.3, 0.4));
+    }
 }
