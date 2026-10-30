@@ -104,3 +104,16 @@ pub fn questinfo(src: &[u8], name: &str) -> Vec<(u32, QuestText)> {
     tracing::info!(quests = out.len(), "{name}");
     out
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn saga_quests_know_where_to_go() {
+        let src = include_bytes!("../../../overlays/samurai/System/samurai_questinfo.lua");
+        let quests = super::questinfo(src, "samurai_questinfo.lua");
+        assert_eq!(quests.len(), 21);
+        assert!(quests.iter().all(|(_, q)| q.npc.is_some()));
+        let raider = quests.iter().find(|(id, _)| *id == 900112).map(|(_, q)| q.npc.clone());
+        assert_eq!(raider, Some(Some(("amatsu".to_string(), 187, 158))));
+    }
+}
