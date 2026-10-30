@@ -195,3 +195,19 @@ py tools/samurai_assets/skill_icons.py --output overlays/samurai --preview targe
 It writes `data/texture/유저인터페이스/item/sam_<skill>.bmp` (24-bit, magenta
 transparent). The client uses these before the stock stand-in icons, in the skill
 window, hotkeys and the buff column.
+
+## Buff icons
+
+`buff_icons.py` draws the five Samurai status icons (the buffs of Kusanagi Guard,
+Moonlit Reflection, Blade Harmony, Blood Covenant and Muramasa's Curse) the way the
+stock 32x32 status TGAs are built. The glyph and frame are one-pixel bright lines.
+Every other pixel is coloured by its distance from them: a glow, a mid-tone, then a
+translucent fill. Kusanagi buffs use the classic blue theme (as Cloaking and
+Two-Hand Quicken do); Muramasa buffs use a crimson one.
+
+```powershell
+py tools/samurai_assets/buff_icons.py --output overlays/samurai --preview target/buff-icons.png
+```
+
+It writes `data/texture/effect/efst_sam_<skill>.tga`, the name the client looks up
+for the status `EFST_SAM_<skill>`.

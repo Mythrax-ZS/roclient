@@ -191,6 +191,22 @@ mod tests {
     }
 
     #[test]
+    fn every_buff_has_a_bundled_status_icon() {
+        let root = overlay_path().expect("bundled Samurai overlay");
+        for &(efst, _) in BUFFS {
+            let skill = buff_skill(efst).unwrap();
+            // The client looks status icons up as efst_<name>.tga; ours are EFST_<internal>.
+            let path = format!("data/texture/effect/efst_{}.tga", skill.internal.to_ascii_lowercase());
+            let bytes = std::fs::read(root.join(&path)).expect("bundled status icon");
+            let image = ro_formats::image::decode(&bytes, &path).unwrap();
+            assert_eq!((image.width, image.height), (32, 32), "{path}");
+            // Like the stock icons: an opaque line art over a translucent fill.
+            assert!(image.pixels.chunks_exact(4).any(|p| p[3] == 255), "{path}");
+            assert!(image.pixels.chunks_exact(4).any(|p| (100..=160).contains(&p[3])), "{path}");
+        }
+    }
+
+    #[test]
     fn dual_wielded_katanas_resolve_to_their_offhand_sprites() {
         assert_eq!(offhand(900000), Some(KATANA_OFFHAND));
         assert_eq!(offhand(900001), Some(KUSANAGI_OFFHAND));

@@ -32,10 +32,16 @@ impl Buffs {
                 }
             }
         }
-        if let Some(c) = read(r"data\lua514\data\luafiles514\lua files\stateicon\stateiconinfo.lub") {
+        // The English table the iRO client reads, then the older Korean copy for the few
+        // statuses it lacks.
+        for path in [r"data\luafiles514\lua files\stateicon\stateiconinfo.lub", r"data\lua514\data\luafiles514\lua files\stateicon\stateiconinfo.lub"] {
+            let Some(c) = read(path) else { continue };
             for (_, table) in c.globals.iter().filter(|(n, _)| *n == "StateIconList") {
                 for (k, v) in c.entries(table) {
                     let Some(name) = k.as_str() else { continue };
+                    if b.descriptions.contains_key(name) {
+                        continue;
+                    }
                     let lines: Vec<String> = c
                         .field(v, "descript")
                         .map(|d| c.entries(d).iter().filter_map(|(_, line)| c.entries(line).first()?.1.as_str().map(str::to_string)).collect())
@@ -71,15 +77,17 @@ impl Buffs {
         self.icons
             .entry(id)
             .or_insert_with(|| {
-                // Samurai buffs show their skill's icon: the bundled one, else the stock stand-in.
-                if let Some(skill) = crate::samurai::buff_skill(id) {
-                    return [skill.internal.to_ascii_lowercase(), skill.icon.to_string()]
-                        .iter()
-                        .find_map(|name| crate::load_texture(ctx, vfs, &format!(r"data\texture\유저인터페이스\item\{name}.bmp")));
-                }
                 let classic = crate::status_icons::ICONS.iter().find(|(i, _)| *i == id).map(|(_, f)| f.to_string());
+                // Samurai buffs are EFST_SAM_<skill>: the bundled efst_sam_<skill>.tga.
                 let modern = names.get(&id).map(|n| format!("{}.tga", n.to_ascii_lowercase()));
-                classic.into_iter().chain(modern).find_map(|f| crate::load_texture(ctx, vfs, &format!(r"data\texture\effect\{f}")))
+                let found = classic.into_iter().chain(modern).find_map(|f| crate::load_texture(ctx, vfs, &format!(r"data\texture\effect\{f}")));
+                // Without one, a Samurai buff shows its skill's icon (bundled, else the stock stand-in).
+                found.or_else(|| {
+                    let skill = crate::samurai::buff_skill(id)?;
+                    [skill.internal.to_ascii_lowercase(), skill.icon.to_string()]
+                        .iter()
+                        .find_map(|name| crate::load_texture(ctx, vfs, &format!(r"data\texture\유저인터페이스\item\{name}.bmp")))
+                })
             })
             .clone()
     }

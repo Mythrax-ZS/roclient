@@ -550,6 +550,23 @@ fn inv_item(d: ro_net::ItemData) -> ro_game::items::InvItem {
     }
 }
 
+/// Korean text from the game data (some status descriptions, names) is drawn with a system
+/// font after egui's own, as the original client draws it with Windows' fonts; without one
+/// it shows as empty boxes.
+fn install_fallback_fonts(ctx: &egui::Context) {
+    let dir = std::path::PathBuf::from(std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into())).join("Fonts");
+    let Some(data) = ["malgun.ttf", "gulim.ttc"].iter().find_map(|f| std::fs::read(dir.join(f)).ok()) else {
+        tracing::warn!("no Korean system font found; Korean text will show as boxes");
+        return;
+    };
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert("korean".into(), egui::FontData::from_owned(data).into());
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts.families.entry(family).or_default().push("korean".into());
+    }
+    ctx.set_fonts(fonts);
+}
+
 /// Decodes an image from the VFS into an egui texture.
 /// An interface texture (item icons, window art...), upscaled per the settings. Size it with
 /// `ui_size()`, never `size_vec2()`. Not for sprites: they never load through here.
@@ -6665,6 +6682,7 @@ impl ApplicationHandler for App {
             None,
             None,
         ));
+        install_fallback_fonts(&self.egui_ctx);
         if let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) {
             let path = r"data\texture\effect\ring_blue.tga";
             match vfs.read(path).ok().flatten().map(|d| ro_formats::image::decode(&d, path)) {

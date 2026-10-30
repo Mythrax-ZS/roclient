@@ -74,5 +74,17 @@
       "data/texture/유저인터페이스/item/sam_muramasas_curse.bmp": "1c1452b412223e8ee7c6f87c59617c1630a0a3aca2424d153d43cff3cfcb9f72",
       "data/texture/유저인터페이스/item/sam_wrath_unbound.bmp": "057e9f62acedbc324ec247c4800fa51ba155817a1e82b6fd08881ddcce4cbc66"
     }
+  },
+  "buff_icons": {
+    "generator": "tools/samurai_assets/buff_icons.py",
+    "style": "32x32 status icons built like the stock ones: one-pixel bright line art (frame ring and glyph) with a glow, mid-tone and translucent fill by distance. Kusanagi buffs use the classic blue theme, Muramasa buffs a crimson one. Drawn in the generator; nothing is copied from game data.",
+    "validation": "Live login as Hayate: Kusanagi Guard, Blade Harmony and Muramasa's Curse show beside stock Cloaking and Poison React in the buff column.",
+    "sha256": {
+      "data/texture/effect/efst_sam_blade_harmony.tga": "5c0911c88ec9d39ab427f4d9970fd18939e2aaef3803522d8c7ccee13dae7295",
+      "data/texture/effect/efst_sam_blood_covenant.tga": "a0d877a98044b6cf6c0927df79efcd3a2af7e46cef50796eb64b77228f5378fc",
+      "data/texture/effect/efst_sam_kusanagi_guard.tga": "6b4e357feda95cf3d1286c4d93d8711321c8b48134df68f013463f0b6612386d",
+      "data/texture/effect/efst_sam_moonlit_reflection.tga": "828a2eda4ea8811ddfd8f6ba18d3fc662bab35592ecfc0143756d0c0aa267bae",
+      "data/texture/effect/efst_sam_muramasas_curse.tga": "6ea20bef84bf43b407fe64c78219aa0d32a855347047ec73c5a36861f153f08c"
+    }
   }
 }
