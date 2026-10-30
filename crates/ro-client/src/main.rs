@@ -858,6 +858,9 @@ struct App {
     front: Option<screens::Front>,
     /// Exit requested from the login screen.
     quit: bool,
+    /// Exit was asked of the map server at this time; we leave on its answer, or after a
+    /// few seconds without one.
+    quit_asked: Option<std::time::Instant>,
     /// The Esc game menu (Character Select, Options, Exit).
     esc_menu: bool,
     /// Start-up splash, title art and loading screens (made once the window exists).
@@ -3263,6 +3266,15 @@ impl App {
                 };
                 self.hud.push_chat(ro_net::ChatKind::Guild, text.into());
             }
+            DisconnectAck(result) => {
+                if result == 0 {
+                    self.quit = self.quit_asked.take().is_some() || self.quit;
+                } else {
+                    self.quit_asked = None;
+                    let text = msgstr::get(502, &[]).unwrap_or_else(|| "Please wait 10 seconds before trying to log out.".into());
+                    self.hud.push_chat(ro_net::ChatKind::System, text);
+                }
+            }
             UnitGuild { id, guild, emblem } => {
                 if let Some(m) = self.mob_mut(id) {
                     m.guild = guild;
@@ -3657,6 +3669,17 @@ impl App {
     }
 
     /// Turns a window action into a server request.
+    /// Leaves the game, asking the map server first as the original does: it refuses within
+    /// 10 seconds of combat (prevent_logout).
+    fn request_exit(&mut self) {
+        if self.net.is_some() {
+            self.queued_commands.push(ro_net::Command::Quit);
+            self.quit_asked = Some(std::time::Instant::now());
+        } else {
+            self.quit = true;
+        }
+    }
+
     /// Fetches a guild's emblem unless this version was already asked for: from the web
     /// server, or the map server when there is no web login.
     fn want_emblem(&mut self, guild: u32, version: u32) {
@@ -5040,6 +5063,11 @@ impl App {
 
     /// One frame: network events, movement, camera, render (or capture).
     fn tick(&mut self, el: &ActiveEventLoop) {
+        // Leave as soon as quitting is decided (the server's go-ahead arrives between window events).
+        if self.quit {
+            el.exit();
+            return;
+        }
         let now = std::time::Instant::now();
         let dt = (now - self.last_tick).as_secs_f32() * 1000.0;
         self.last_tick = now;
@@ -5426,6 +5454,10 @@ impl App {
                         self.fake_click = (f.len() == 2).then(|| (egui::pos2(f[0], f[1]), true));
                         None
                     }
+                    Some(("exit", _)) => {
+                        self.request_exit();
+                        None
+                    }
                     Some(("cashshop", _)) => {
                         self.toggle_cash_shop();
                         None
@@ -5653,6 +5685,10 @@ impl App {
             self.guild.start_tab = std::env::args().skip_while(|a| a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()).unwrap_or(0);
         }
         self.update_emblems();
+        if self.quit_asked.is_some_and(|t| t.elapsed().as_secs() >= 3) {
+            tracing::warn!("no answer to the exit request; leaving");
+            self.quit = true;
+        }
         for text in std::mem::take(&mut self.queued_chat) {
             self.submit_chat(text);
         }
@@ -6426,7 +6462,16 @@ impl App {
                             self.esc_menu = false;
                             self.windows.settings = true;
                         }
-                        Some(hud::EscChoice::Exit) => self.quit = true,
+                        // As request_exit (self is borrowed here): ask the server before leaving.
+                        Some(hud::EscChoice::Exit) => {
+                            self.esc_menu = false;
+                            if self.net.is_some() {
+                                self.queued_commands.push(ro_net::Command::Quit);
+                                self.quit_asked = Some(std::time::Instant::now());
+                            } else {
+                                self.quit = true;
+                            }
+                        }
                         Some(hud::EscChoice::Back) => self.esc_menu = false,
                         None => {}
                     }
@@ -6969,6 +7014,7 @@ fn main() -> anyhow::Result<()> {
         net,
         session: session.clone(),
         quit: false,
+        quit_asked: None,
         esc_menu: false,
         splash: None,
         front: (online && !auto).then(|| screens::Front::new(settings::Settings::load(Default::default()).last_id.clone(), true)),

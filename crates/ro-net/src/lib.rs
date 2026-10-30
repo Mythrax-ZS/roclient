@@ -540,6 +540,9 @@ pub enum Event {
     /// ZC_CHANGE_GUILD: a unit's guild (and emblem) changed.
     /// A unit's guild and that guild's emblem version (ZC_CHANGE_GUILD).
     UnitGuild { id: u32, guild: u32, emblem: u32 },
+    /// ZC_ACK_REQ_DISCONNECT: 0 we may leave, 1 not within 10 seconds of combat (also the
+    /// refusal of a character-select request).
+    DisconnectAck(u16),
     AllyRequest { inviter: u32, guild: String },
     RelationNotice(String),
     RelationRemoved { guild: u32, relation: u32 },
@@ -792,6 +795,8 @@ pub enum Command {
     Sit(bool),
     /// After dying: 0 return to the save point, 1 character select.
     Restart(u8),
+    /// Ask to leave the game (Esc menu Exit); the answer is Event::DisconnectAck.
+    Quit,
     /// Talk to an NPC or answer its dialog.
     Npc { npc: u32, reply: NpcReply },
     /// Say something in public chat.
@@ -1037,6 +1042,7 @@ impl MapSession {
                     Some(Command::Attack { target, keep }) => self.send(CzRequestAct { target, action: if keep { 7 } else { 0 } }).await?,
                     Some(Command::Sit(sit)) => self.send(CzRequestAct { target: 0, action: if sit { 2 } else { 3 } }).await?,
                     Some(Command::Restart(kind)) => self.send(CzRestart { kind }).await?,
+                    Some(Command::Quit) => self.send(CzReqDisconnect).await?,
                     // Login and character-select screen commands mean nothing once in game.
                     Some(Command::Login { .. } | Command::SelectServer(_) | Command::Char(_) | Command::Pin(_) | Command::SelectChar(_)) => {}
                     Some(Command::Npc { npc, reply }) => self.send(CzNpc { npc, reply: &reply }).await?,
@@ -1560,6 +1566,7 @@ impl MapSession {
                         0x0a57 if data.len() >= 6 => Some(Event::MacroApplied(l(&data, 2))),
                         0x0adf if data.len() >= 58 => Some(Event::NpcName { id: l(&data, 2), name: ro_proto::packets::get_fixed_str(&mut &data[10..34], 24), title: ro_proto::packets::get_fixed_str(&mut &data[34..58], 24) }),
                         // ZC_CHANGE_GUILD (this version's layout: guild, emblem, unit).
+                        0x018b if data.len() >= 4 => Some(Event::DisconnectAck(u16::from_le_bytes([data[2], data[3]]))),
                         0x0b47 if data.len() >= 14 => Some(Event::UnitGuild { id: l(&data, 10), guild: l(&data, 2), emblem: l(&data, 6) }),
                         0x09da => ro_proto::guild::parse_storage_log(&data).map(|(r, e)| Event::GuildStorageLog(r, e)),
                         0x0a41 if data.len() >= 18 => {

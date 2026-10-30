@@ -1050,6 +1050,16 @@ impl Encode for CzRestart {
     }
 }
 
+/// CZ_REQ_DISCONNECT (0x018a): ask to leave the game. The server answers ZC_ACK_REQ_DISCONNECT:
+/// 0 go ahead, 1 not yet (within prevent_logout of combat).
+pub struct CzReqDisconnect;
+
+impl Encode for CzReqDisconnect {
+    fn encode(&self, d: &mut BytesMut) {
+        put_db_packet(d, "QuitGame", &[&0u16.to_le_bytes()]);
+    }
+}
+
 /// Character-select screen requests at PACKETVER 20250402.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CharRequest {
