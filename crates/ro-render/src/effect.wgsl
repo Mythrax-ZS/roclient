@@ -52,9 +52,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         discard;
     }
     let t = textureSample(tex, samp, in.uv);
+    if SHADE {
+        // Alpha-blended (premultiplied): a soft disc over the quad that darkens what is
+        // behind, so glows read on bright ground. The texture is not used.
+        let r = length(in.uv * 2.0 - 1.0);
+        let a = (1.0 - smoothstep(0.25, 1.0, r)) * in.color.a;
+        return vec4(srgb_to_linear(in.color.rgb) * a, a);
+    }
     // Additive: brightness carries the effect; alpha only scales it.
     return vec4(srgb_to_linear(t.rgb) * in.color.rgb * t.a * in.color.a, 1.0);
 }
+
+// The renderer builds this shader twice: additive, and with SHADE set for the shade pipeline.
+const SHADE: bool = false;
 /// Indoors, only the room the player is in is drawn (other rooms share the map).
 fn in_room(world: vec3<f32>) -> bool {
     if g.room.x < 0.5 {

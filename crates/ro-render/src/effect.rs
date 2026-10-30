@@ -82,7 +82,60 @@ pub enum Shape {
     Area { size: (f32, f32) },
     /// One layer of the level 99 aura, held under its owner while it stands in view
     /// (`time_ms` runs from when it appeared; `seed` varies the sparkles between owners).
-    Aura { layer: AuraLayer, seed: u32 },
+    Aura { layer: AuraLayer, seed: u32, style: AuraStyle },
+}
+
+/// Whose colours an aura wears.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuraStyle {
+    /// The original's level 99 aura: blue throughout.
+    Level,
+    /// Tenseiga-no-Hayate's (a custom hat effect): its blade from crimson hilt to cyan tip.
+    /// Drawn with whitened textures, so the colours here are the whole of it.
+    Tenseiga,
+}
+
+const CRIMSON: [f32; 3] = [1.0, 0.06, 0.18];
+const MAGENTA: [f32; 3] = [1.0, 0.3, 0.72];
+const VIOLET: [f32; 3] = [0.45, 0.15, 1.0];
+const CYAN: [f32; 3] = [0.1, 0.75, 1.0];
+
+impl AuraStyle {
+    /// Ribbon colour at its foot and at its top.
+    fn ribbon(self) -> ([f32; 4], [f32; 4]) {
+        match self {
+            AuraStyle::Level => {
+                let c = [100.0 / 255.0, 100.0 / 255.0, 1.0, 120.0 / 255.0];
+                (c, c)
+            }
+            AuraStyle::Tenseiga => ([CRIMSON[0], CRIMSON[1], CRIMSON[2], 2.0], [VIOLET[0], VIOLET[1], VIOLET[2], 2.0]),
+        }
+    }
+
+    /// The two ground stars' colours, and how fast they turn (turns per step).
+    fn ground(self) -> ([[f32; 4]; 2], f32) {
+        match self {
+            AuraStyle::Level => ([[1.0, 1.0, 1.0, 0.8]; 2], 0.0),
+            AuraStyle::Tenseiga => ([[CRIMSON[0], CRIMSON[1], CRIMSON[2], 1.0], [CYAN[0], CYAN[1], CYAN[2], 0.8]], 1.0 / 800.0),
+        }
+    }
+
+    /// The dark pool under the aura (the blade's indigo body), if it has one.
+    fn shade(self) -> Option<[f32; 4]> {
+        match self {
+            AuraStyle::Level => None,
+            AuraStyle::Tenseiga => Some([0.05, 0.02, 0.14, 0.92]),
+        }
+    }
+
+    /// The `j`th sparkle's colour (alpha 1).
+    fn sparkle(self, j: u32) -> [f32; 3] {
+        match self {
+            AuraStyle::Level => [80.0 / 255.0, 80.0 / 255.0, 1.0],
+            // The runes' magenta, the edge's cyan and the body's violet.
+            AuraStyle::Tenseiga => [MAGENTA, CYAN, VIOLET][j as usize % 3],
+        }
+    }
 }
 
 /// The level 99 aura's layers. The original builds them in code; the shapes and numbers
@@ -95,6 +148,16 @@ pub enum AuraLayer {
     Ground,
     /// EF_LEVEL99_3: blue motes (effect\whitelight.tga) drifting up from the feet.
     Sparkles,
+    /// A dark pool on the ground under the light layers (alpha-blended), so coloured auras
+    /// read on bright ground. Custom auras only; the level aura has none.
+    Shade,
+}
+
+impl ProcFx {
+    /// Drawn alpha-blended (darkening) rather than added.
+    pub fn shades(&self) -> bool {
+        matches!(self.shape, Shape::Aura { layer: AuraLayer::Shade, .. })
+    }
 }
 
 /// The original's effect clock: one step every 25 ms.
@@ -102,14 +165,22 @@ const AURA_TICK_MS: f32 = 25.0;
 /// roBrowser's scale from the original's aura units to cells.
 const AURA_UNIT: f32 = 0.22 * CELL;
 
-fn aura(layer: AuraLayer, seed: u32, pos: Vec3, time_ms: f32, eye: Vec3, out: &mut Vec<Vertex>) {
+fn aura(layer: AuraLayer, seed: u32, style: AuraStyle, pos: Vec3, time_ms: f32, eye: Vec3, out: &mut Vec<Vertex>) {
     let ticks = time_ms / AURA_TICK_MS;
     match layer {
+        AuraLayer::Shade => {
+            let Some(color) = style.shade() else { return };
+            // Breathes with the ground stars.
+            let half = 2.4 * CELL * (1.0 + 0.05 * (ticks / 120.0 * std::f32::consts::TAU).sin());
+            let v = |x: f32, z: f32, u: f32, vv: f32| Vertex { pos: (pos + Vec3::new(x, 0.08, z)).into(), uv: [u, vv], color };
+            let (a, b, c, d) = (v(-half, -half, 0.0, 0.0), v(half, -half, 1.0, 0.0), v(half, half, 1.0, 1.0), v(-half, half, 0.0, 1.0));
+            out.extend([a, b, c, a, c, d]);
+        }
         AuraLayer::Swirl => {
             const DIVISIONS: usize = 21;
             // The ribbons grow to full height over the first 90 steps.
             let grow = ticks.min(90.0).to_radians().sin();
-            let color = [100.0 / 255.0, 100.0 / 255.0, 1.0, 120.0 / 255.0];
+            let (foot, top_color) = style.ribbon();
             for band in 0..3 {
                 let b = band as f32;
                 let start = b * 90.0 + ticks * (b + 3.0);
@@ -123,7 +194,7 @@ fn aura(layer: AuraLayer, seed: u32, pos: Vec3, time_ms: f32, eye: Vec3, out: &m
                     let base = pos + Vec3::new(radius * c, 0.0, radius * s);
                     let top = base + Vec3::new(rise_cos * h * c, rise_sin * h, rise_cos * h * s);
                     let u = k as f32 / 20.0;
-                    (Vertex { pos: base.into(), uv: [u, 1.0], color }, Vertex { pos: top.into(), uv: [u, 0.0], color })
+                    (Vertex { pos: base.into(), uv: [u, 1.0], color: foot }, Vertex { pos: top.into(), uv: [u, 0.0], color: top_color })
                 };
                 for k in 0..DIVISIONS - 1 {
                     let ((b0, t0), (b1, t1)) = (edge(k), edge(k + 1));
@@ -132,13 +203,16 @@ fn aura(layer: AuraLayer, seed: u32, pos: Vec3, time_ms: f32, eye: Vec3, out: &m
             }
         }
         AuraLayer::Ground => {
-            // Two stars, 23° apart, swelling and shrinking out of step over 120 steps.
+            // Two stars, 23° apart, swelling and shrinking out of step over 120 steps
+            // (Tenseiga's also turn slowly, against each other).
+            let (colors, spin) = style.ground();
             for (i, base) in [(0, 115.0), (1, 130.0)] {
                 let breathe = (ticks / 120.0 * std::f32::consts::TAU + i as f32 * std::f32::consts::PI).sin();
                 let half = base / 35.0 * CELL * 0.5 * (1.0 + 0.07 * breathe);
-                let (s, c) = (i as f32 * 23.0).to_radians().sin_cos();
+                let turn = ticks * spin * 360.0 * if i == 0 { 1.0 } else { -1.0 };
+                let (s, c) = (i as f32 * 23.0 + turn).to_radians().sin_cos();
                 let corner = |x: f32, z: f32| pos + Vec3::new(x * c - z * s, 0.1, x * s + z * c);
-                let color = [1.0, 1.0, 1.0, 0.8];
+                let color = colors[i];
                 let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color };
                 let (a, b, cc, d) = (v(corner(-half, -half), 0.0, 0.0), v(corner(half, -half), 1.0, 0.0), v(corner(half, half), 1.0, 1.0), v(corner(-half, half), 0.0, 1.0));
                 out.extend([a, b, cc, a, cc, d]);
@@ -169,7 +243,8 @@ fn aura(layer: AuraLayer, seed: u32, pos: Vec3, time_ms: f32, eye: Vec3, out: &m
                 let (f1, f2, p1, p2) = (0.02 + r(3) * 0.03, 0.02 + r(4) * 0.03, r(5) * 6.3, r(6) * 6.3);
                 let drift = |f: f32, p: f32| ((t - rest) * f + p).sin() - p.sin();
                 let centre = pos + Vec3::new(drift(f1, p1) * 3.0 * AURA_UNIT, lift * AURA_UNIT, drift(f2, p2) * 3.0 * AURA_UNIT);
-                let color = [80.0 / 255.0, 80.0 / 255.0, 1.0, alpha * 2.0];
+                let [r, g, b] = style.sparkle(j);
+                let color = [r, g, b, alpha * 2.0];
                 let (a, b) = (right * half, up * half);
                 let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color };
                 let (p0, p1, p2, p3) = (v(centre - a - b, 0.0, 1.0), v(centre + a - b, 1.0, 1.0), v(centre + a + b, 1.0, 0.0), v(centre - a + b, 0.0, 0.0));
@@ -205,7 +280,7 @@ impl ProcFx {
         let fade = (t / 0.1).min(1.0) * ((1.0 - t) / 0.5).min(1.0);
         let color = [self.color[0], self.color[1], self.color[2], fade];
         match self.shape {
-            Shape::Aura { layer, seed } => aura(layer, seed, self.pos, self.time_ms, eye, out),
+            Shape::Aura { layer, seed, style } => aura(layer, seed, style, self.pos, self.time_ms, eye, out),
             Shape::Column { radius, height } => {
                 let h = height * CELL * (t / 0.3).min(1.0);
                 let r = radius * CELL;

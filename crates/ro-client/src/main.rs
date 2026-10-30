@@ -1118,6 +1118,8 @@ struct App {
     /// Hat effect files by id (hateffectinfo), and the ones playing: (unit, effect) -> fx tag.
     hat_files: std::collections::HashMap<u16, &'static str>,
     hat_fx: std::collections::HashMap<(u32, u16), u32>,
+    /// Units wearing a custom code-drawn aura (custom hat effect ids, see `custom_hat_aura`).
+    hat_auras: std::collections::HashMap<u32, ro_render::AuraStyle>,
     /// Guild emblems by guild id (None while being fetched).
     emblems: std::collections::HashMap<u32, Option<egui::TextureHandle>>,
     /// The emblem version last asked for, by guild id.
@@ -3512,6 +3514,14 @@ impl App {
             }
             HatEffect { id, on, effects } => {
                 for e in effects {
+                    if let Some(style) = custom_hat_aura(e) {
+                        if on {
+                            self.hat_auras.insert(id, style);
+                        } else if self.hat_auras.get(&id) == Some(&style) {
+                            self.hat_auras.remove(&id);
+                        }
+                        continue;
+                    }
                     let key = (id, e);
                     if on && !self.hat_fx.contains_key(&key) {
                         let Some(name) = self.hat_files.get(&e).copied() else { continue };
@@ -5993,15 +6003,18 @@ impl App {
         r.auras.clear();
         if let Some(w) = self.world.as_ref() {
             let octant = (r.camera.yaw / std::f32::consts::FRAC_PI_4).round() as i32;
-            // The level aura's textures, unless /aura2 turned it off.
-            let aura_tex = match (self.settings.aura_off, self.vfs.as_ref()) {
-                (false, Some(vfs)) => match (self.fx.texture(r, vfs, "ring_blue.tga"), self.fx.texture(r, vfs, "pikapika2.bmp"), self.fx.texture(r, vfs, "whitelight.tga")) {
-                    (Some(a), Some(b), Some(c)) => Some([a, b, c]),
-                    _ => None,
-                },
-                _ => None,
+            // Aura textures: the level aura's as they are, custom auras' whitened to be tinted.
+            let auras = match self.vfs.as_ref() {
+                Some(vfs) => {
+                    let mut set = |white: bool| {
+                        let mut get = |n: &'static str| if white { self.fx.texture_white(r, vfs, n) } else { self.fx.texture(r, vfs, n) };
+                        Some([get("ring_blue.tga")?, get("pikapika2.bmp")?, get("whitelight.tga")?])
+                    };
+                    AuraTextures { level: set(false), white: set(true), level_off: self.settings.aura_off, simple: self.settings.aura_simple }
+                }
+                None => AuraTextures::default(),
             };
-            let simple = self.settings.aura_simple;
+            self.hat_auras.retain(|id, _| *id == self.account_id || self.units.contains_key(id));
             if let Some(p) = self.player.as_mut() {
                 // Combat stance (weapon drawn) while attacking something.
                 let idle = if self.attack.is_some() && self.action == 0 { 4 } else { self.action };
@@ -6009,11 +6022,8 @@ impl App {
                 p.fit_pose(r);
                 let a = p.update(dt, w, octant, idle);
                 r.camera.target = a.pos;
-                let aura = self.hud.status.base_level >= AURA_LEVEL as i64 && a.alpha >= 1.0;
-                p.aura_ms = if aura { p.aura_ms + dt } else { 0.0 };
-                if let (true, Some(tex)) = (aura, aura_tex) {
-                    push_aura(r, tex, simple, a.pos, p.aura_ms, self.account_id);
-                }
+                let level = self.hud.status.base_level >= AURA_LEVEL as i64;
+                p.aura_ms = auras.push(r, self.hat_auras.get(&self.account_id).copied(), level, &a, p.aura_ms + dt, self.account_id);
                 r.actors.push(a);
             }
             for (&id, m) in self.units.iter_mut() {
@@ -6028,11 +6038,8 @@ impl App {
                         audio.play(vfs, &s);
                     }
                 }
-                let aura = m.kind == 0 && m.level >= AURA_LEVEL && a.alpha >= 1.0;
-                m.aura_ms = if aura { m.aura_ms + dt } else { 0.0 };
-                if let (true, Some(tex)) = (aura, aura_tex) {
-                    push_aura(r, tex, simple, a.pos, m.aura_ms, id);
-                }
+                let level = m.kind == 0 && m.level >= AURA_LEVEL;
+                m.aura_ms = auras.push(r, self.hat_auras.get(&id).copied(), level, &a, m.aura_ms + dt, id);
                 r.actors.push(a);
             }
             // Ambient map effects (RSW emitters, EF_* ids): torches loop in place; bubbles and
@@ -7331,6 +7338,7 @@ fn main() -> anyhow::Result<()> {
         map_flags: 0,
         hat_files: Default::default(),
         hat_fx: Default::default(),
+        hat_auras: Default::default(),
         emblems: Default::default(),
         emblem_versions: Default::default(),
         emblem_web: Default::default(),
@@ -7572,16 +7580,48 @@ mod login_addr_tests {
 /// level each player reports (rAthena's max_lv and aura_lv); the client only compares.
 const AURA_LEVEL: u16 = 99;
 
-/// The level aura under a unit standing at `pos`: EF_LEVEL99_2 on the ground, the
-/// EF_LEVEL99 ribbons and the EF_LEVEL99_3 sparkles (`simple`, the original's /aura: the
-/// sparkles alone). `tex`: ring_blue, pikapika2 and whitelight.
-fn push_aura(r: &mut ro_render::Renderer, tex: [ro_render::TexId; 3], simple: bool, pos: glam::Vec3, time_ms: f32, seed: u32) {
-    use ro_render::AuraLayer::*;
-    for (layer, tex) in [(Ground, tex[1]), (Swirl, tex[0]), (Sparkles, tex[2])] {
-        if simple && layer != Sparkles {
-            continue;
+/// Custom hat effect ids (rAthena's `hateffect`) the client draws in code as auras. The
+/// server's HAT_EF_* constants for them live in src/map/script.hpp.
+fn custom_hat_aura(id: u16) -> Option<ro_render::AuraStyle> {
+    match id {
+        2000 => Some(ro_render::AuraStyle::Tenseiga), // HAT_EF_SAMURAI_TENSEIGA
+        _ => None,
+    }
+}
+
+/// This frame's aura textures (ring_blue, pikapika2 and whitelight) and switches.
+#[derive(Default)]
+struct AuraTextures {
+    level: Option<[ro_render::TexId; 3]>,
+    /// The same, whitened, for custom auras that bring their own colours.
+    white: Option<[ro_render::TexId; 3]>,
+    /// /aura2 and /aura (which touch only the level aura).
+    level_off: bool,
+    simple: bool,
+}
+
+impl AuraTextures {
+    /// Puts the aura under `a`, if it carries one: its custom aura, else the level aura
+    /// (EF_LEVEL99_2 on the ground, the EF_LEVEL99 ribbons and the EF_LEVEL99_3 sparkles;
+    /// simplified, the sparkles alone). Hidden units show none. Returns the aura's clock:
+    /// `time_ms` while it shows, 0 otherwise (so its ribbons grow in again).
+    fn push(&self, r: &mut ro_render::Renderer, custom: Option<ro_render::AuraStyle>, level: bool, a: &ro_render::Actor, time_ms: f32, seed: u32) -> f32 {
+        use ro_render::AuraLayer::*;
+        let (style, tex, simple) = match custom {
+            Some(style) => (style, self.white, false),
+            None if level && !self.level_off => (ro_render::AuraStyle::Level, self.level, self.simple),
+            None => return 0.0,
+        };
+        let Some(tex) = tex.filter(|_| a.alpha >= 1.0) else { return 0.0 };
+        // Custom auras lay a dark pool first (its texture is unused).
+        for (layer, tex) in [(Shade, tex[2]), (Ground, tex[1]), (Swirl, tex[0]), (Sparkles, tex[2])] {
+            if (simple && layer != Sparkles) || (layer == Shade && custom.is_none()) {
+                continue;
+            }
+            let shape = ro_render::Shape::Aura { layer, seed, style };
+            r.auras.push(ro_render::ProcFx { tex, shape, pos: a.pos, color: [1.0; 3], time_ms, duration_ms: f32::MAX });
         }
-        r.auras.push(ro_render::ProcFx { tex, shape: ro_render::Shape::Aura { layer, seed }, pos, color: [1.0; 3], time_ms, duration_ms: f32::MAX });
+        time_ms
     }
 }
 

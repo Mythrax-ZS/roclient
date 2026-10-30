@@ -154,3 +154,10 @@ flames behind it share the guard's reds), scaled to 62 game pixels from pommel t
 tip and brightened so the dark blade's cyan edge, red runes and white core read at
 gameplay zoom. Being two-handed, it has no off-hand pair (`"offhand": false` in
 `legendary_weapons.json`). It shares the katana ready and attack poses.
+
+While it is equipped the server turns on custom hat effect 2000
+(`HAT_EF_SAMURAI_TENSEIGA`), which the client draws in code as the Mortal Flame
+aura (`AuraStyle::Tenseiga` in `crates/ro-render/src/effect.rs`). It reuses the
+level aura's ribbons, ground stars and sparkles with whitened textures, tinted with
+the blade's colours, over a dark indigo pool so they read on bright ground. It
+takes the place of the level aura, and `/aura` and `/aura2` leave it alone.

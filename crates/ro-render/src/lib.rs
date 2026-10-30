@@ -22,7 +22,7 @@ pub use ro_formats::image::Rgba;
 pub use scene::{SceneBuilder, SceneMesh};
 pub use upscale::{is_sprite_path, AssetClass, Quality as UpscaleQuality, UpscaleSettings, Upscaler};
 pub use water::{flag as water_flag, Foam, WaterMesh, WaterQuality, WaterSettings};
-pub use effect::{AuraLayer, ProcFx, Shape, TexId};
+pub use effect::{AuraLayer, AuraStyle, ProcFx, Shape, TexId};
 pub use particle::{Emitter, EmitterDef, Glow, Waterfall, Wind};
 pub use fx::{Fx, FxId};
 pub use post::PostSettings;
@@ -200,6 +200,8 @@ pub struct Renderer {
     /// Draw skill effects (STR and code-drawn); the original's /effect turns them off.
     pub show_effects: bool,
     effect_pipeline: wgpu::RenderPipeline,
+    /// The same geometry alpha-blended (effects that darken, see `ProcFx::shades`).
+    shade_pipeline: wgpu::RenderPipeline,
     started: std::time::Instant,
     /// The grid is drawn instead while no map is loaded.
     scene: Option<scene::Scene>,
@@ -484,6 +486,13 @@ impl Renderer {
                 alpha: wgpu::BlendComponent::OVER,
             }),
         );
+        let shade_pipeline = pipeline(
+            "effect shade",
+            &include_str!("effect.wgsl").replace("const SHADE: bool = false;", "const SHADE: bool = true;"),
+            &[Some(&globals_layout), Some(&sprite_layout)],
+            &[Some(effect::Vertex::layout())],
+            Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+        );
         let sprite_pipeline = pipeline(
             "sprite",
             include_str!("sprite.wgsl"),
@@ -565,6 +574,7 @@ impl Renderer {
             effects: vec![],
             show_effects: true,
             effect_pipeline,
+            shade_pipeline,
             started: std::time::Instant::now(),
             lighting: Lighting::default(),
             camera: Camera::default(),
@@ -690,7 +700,8 @@ impl Renderer {
         self.particles.set_glows(&self.device, glows);
     }
 
-    /// Draws code-built effects (additive), batched into one buffer.
+    /// Draws code-built effects in order (additive, or alpha-blended where they shade),
+    /// batched into one buffer.
     fn draw_procs(&self, pass: &mut wgpu::RenderPass<'_>, procs: &[ProcFx], label: &str) {
         let mut vertices = vec![];
         let mut draws = vec![];
@@ -700,7 +711,7 @@ impl Renderer {
             }
             let start = vertices.len() as u32;
             p.vertices(self.camera.eye(), &mut vertices);
-            draws.push((p.tex.0, start..vertices.len() as u32));
+            draws.push((p.tex.0, p.shades(), start..vertices.len() as u32));
         }
         if vertices.is_empty() {
             return;
@@ -710,9 +721,13 @@ impl Renderer {
             contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
-        pass.set_pipeline(&self.effect_pipeline);
         pass.set_vertex_buffer(0, buffer.slice(..));
-        for (tex, range) in draws {
+        let mut current = None;
+        for (tex, shades, range) in draws {
+            if current != Some(shades) {
+                pass.set_pipeline(if shades { &self.shade_pipeline } else { &self.effect_pipeline });
+                current = Some(shades);
+            }
             pass.set_bind_group(1, &self.effect_textures[tex], &[]);
             pass.draw(range, 0..1);
         }

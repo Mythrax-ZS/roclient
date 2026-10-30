@@ -487,6 +487,8 @@ pub struct FxLib {
     textures_dyn: HashMap<String, Option<ro_render::TexId>>,
     cache: HashMap<String, Option<ro_render::FxId>>,
     textures: HashMap<&'static str, Option<ro_render::TexId>>,
+    /// Effect textures turned to white light (see `texture_white`).
+    textures_white: HashMap<&'static str, Option<ro_render::TexId>>,
     sprites: HashMap<&'static str, Option<ro_render::SheetId>>,
     /// STR paths under effect that sit in subfolders (see `index`).
     strs: Vec<String>,
@@ -539,6 +541,20 @@ impl FxLib {
                 tracing::warn!(%path, "effect texture missing");
             }
             Some(r.add_effect_texture(&img?))
+        })
+    }
+
+    /// An effect texture with its colour taken out (each pixel as bright as its brightest
+    /// channel), for code-drawn effects that tint it themselves.
+    pub fn texture_white(&mut self, r: &mut ro_render::Renderer, vfs: &ro_vfs::Vfs, name: &'static str) -> Option<ro_render::TexId> {
+        *self.textures_white.entry(name).or_insert_with(|| {
+            let path = format!("data\\texture\\effect\\{name}");
+            let mut img = vfs.read(&path).ok().flatten().and_then(|d| ro_formats::image::decode(&d, &path).ok())?;
+            for p in img.pixels.chunks_exact_mut(4) {
+                let v = p[0].max(p[1]).max(p[2]);
+                (p[0], p[1], p[2]) = (v, v, v);
+            }
+            Some(r.add_effect_texture(&img))
         })
     }
 
