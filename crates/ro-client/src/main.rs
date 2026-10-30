@@ -813,6 +813,35 @@ impl Mob {
     fn walk(&mut self, gat: Option<&ro_formats::gat::Gat>, from: (u16, u16), to: (u16, u16)) {
         let from = (from.0 as i32, from.1 as i32);
         let to = (to.0 as i32, to.1 as i32);
+        // A re-aimed walk whose start is close to where we are (the cell we are leaving, the
+        // one we are stepping into, or one behind when the server took the new target as we
+        // crossed a cell) goes on from our own position: finish the step in progress, then
+        // path from its end. Starting over from the server's cell would jump us back. The
+        // walk ends in the same place either way.
+        // It rejoins the server's own route (the path it walks from its cell) where we
+        // already are on it, or at the furthest of its first cells next to us, so the two
+        // keep to the same cells rather than drifting apart over re-aims.
+        let here = self.walker.next().unwrap_or(self.walker.cell);
+        let dist = |a: (i32, i32), b: (i32, i32)| (a.0 - b.0).abs().max((a.1 - b.1).abs());
+        if let (true, Some(g)) = (self.walker.is_walking() && (dist(from, self.walker.cell) <= 2 || dist(from, here) <= 2), gat) {
+            if let Some(server) = ro_game::path::find(g, from, to) {
+                let route: Vec<(i32, i32)> = std::iter::once(from).chain(server).collect();
+                if let Some(j) = route.iter().position(|&c| c == here) {
+                    self.walker.continue_with(route[j + 1..].to_vec());
+                    return;
+                }
+                if let Some(j) = route.iter().take(4).rposition(|&c| dist(c, here) == 1) {
+                    if let Some(link) = ro_game::path::find(g, here, route[j]).filter(|l| l.len() == 1) {
+                        self.walker.continue_with(link.into_iter().chain(route[j + 1..].iter().copied()).collect());
+                        return;
+                    }
+                }
+            }
+            if let Some(path) = ro_game::path::find(g, here, to) {
+                self.walker.continue_with(path);
+                return;
+            }
+        }
         match gat.and_then(|g| ro_game::path::find(g, from, to)) {
             // Continue smoothly when the new walk starts where we are (re-aimed walks).
             Some(path) => {
@@ -1100,6 +1129,11 @@ struct App {
     /// Test runs: draw the controller UI in this style (and as if this row's trigger were
     /// held) without a controller (`pad:style[:row]`).
     pad_preview: Option<(padglyph::Style, Option<u8>)>,
+    /// Test runs: hold-to-walk toward a fixed offset (cells) from the player, for this many
+    /// ms (`holdwalk:dx:dy:ms`), as a mouse held still on screen.
+    hold_walk: Option<((i32, i32), f32)>,
+    /// Our walk speed as the server last sent it (SP_SPEED), kept for when we respawn.
+    walk_speed: Option<f32>,
     /// A Sony or Nintendo controller opened directly (touchpad, rumble, light bar), and when
     /// to look for one again.
     hid: Option<hidpad::HidPad>,
@@ -1408,6 +1442,9 @@ impl App {
             // NPC/monster actors borrow the player's shadow sheet.
             self.sprites.insert("shadow".into(), Some(actor.clone()));
             let mut mob = Mob::new(actor, cell, dir, speed);
+            if let Some(s) = self.walk_speed {
+                mob.walker.speed = s;
+            }
             mob.name = self.hud.status.name.clone();
             mob.look = Some(look.clone());
             self.player = Some(mob);
@@ -1708,7 +1745,7 @@ impl App {
             Walk { from, to } => {
                 let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
                 if let Some(p) = self.player.as_mut() {
-                    tracing::debug!(?from, ?to, "walk");
+                    tracing::debug!(?from, ?to, cell = ?p.walker.cell, next = ?p.walker.next(), "walk");
                     if let Some(g) = self.walk_goal.as_mut() {
                         g.tries = 0; // the server accepted this hop
                     }
@@ -1724,6 +1761,16 @@ impl App {
             Unit(info) => self.unit(info),
             Stat { id, value } => {
                 self.hud.status.set(id, value);
+                // SP_SPEED: our walk speed (ms per cell) as the server moves us. Walking at any
+                // other pace runs ahead of (or behind) the server, and every re-aimed walk
+                // then pulls us back to where it has us.
+                if id == 0 && value > 0 {
+                    tracing::debug!(speed = value, "walk speed");
+                    self.walk_speed = Some(value as f32);
+                    if let Some(p) = self.player.as_mut() {
+                        p.walker.speed = value as f32;
+                    }
+                }
                 // Keep the Status window live: points and the derived values (SP_ATK1..SP_ASPD).
                 if let Some(s) = self.stats.as_mut() {
                     let v = value.clamp(i16::MIN as i64, i16::MAX as i64) as i16;
@@ -3819,6 +3866,7 @@ impl App {
                 self.floor.clear();
                 self.warps.clear();
                 self.player = None;
+                self.walk_speed = None;
                 self.world = None;
                 self.walk_goal = None;
                 self.attack = None;
@@ -4248,6 +4296,22 @@ impl App {
     /// Left button held on the ground: re-aim the walk at the cursor every few frames, as
     /// the original client does when you hold the button and point.
     fn steer_to_cursor(&mut self, dt: f32) {
+        if let Some((off, left)) = self.hold_walk.as_mut() {
+            *left -= dt;
+            let (off, done) = (*off, *left <= 0.0);
+            if done {
+                self.hold_walk = None;
+                return;
+            }
+            self.mouse_walk_ms -= dt;
+            if self.mouse_walk_ms <= 0.0 {
+                self.mouse_walk_ms = 150.0;
+                if let Some(c) = self.player.as_ref().map(|p| p.walker.cell) {
+                    self.steer_toward(((c.0 + off.0).max(0) as u16, (c.1 + off.1).max(0) as u16));
+                }
+            }
+            return;
+        }
         if !self.mouse_walk {
             return;
         }
@@ -4264,9 +4328,28 @@ impl App {
             return;
         }
         if let Some(cell) = self.pick() {
-            if self.walk_goal.as_ref().is_none_or(|g| g.cell != cell) {
-                self.request_walk(cell);
-            }
+            self.steer_toward(cell);
+        }
+    }
+
+    /// Hold-to-walk toward a cell. Re-planning every time the aimed-at cell moves (it moves
+    /// with us, the camera following) makes each new path start with the same step, so a
+    /// heading between straight and diagonal drifts to the diagonal, and every re-plan risks
+    /// a stutter. So the walk is re-aimed only when it is nearly done or when the aim turns
+    /// (the mouse moves, the camera turns): paths run their length, straight and diagonal
+    /// steps both, and the heading follows the cursor.
+    fn steer_toward(&mut self, cell: (u16, u16)) {
+        let Some(p) = self.player.as_ref() else { return };
+        if self.walk_goal.as_ref().is_some_and(|g| g.cell == cell) {
+            return;
+        }
+        let here = p.walker.cell;
+        let goal = self.walk_goal.as_ref().map_or_else(|| p.walker.goal_or_cell(), |g| (g.cell.0 as i32, g.cell.1 as i32));
+        let aim = glam::Vec2::new((cell.0 as i32 - here.0) as f32, (cell.1 as i32 - here.1) as f32);
+        let going = glam::Vec2::new((goal.0 - here.0) as f32, (goal.1 - here.1) as f32);
+        let turned = aim.length() > 0.5 && going.length() > 0.5 && aim.angle_to(going).abs() > 25f32.to_radians();
+        if !p.walker.is_walking() || p.walker.remaining() <= 2 || turned {
+            self.request_walk(cell);
         }
     }
 
@@ -6022,6 +6105,15 @@ impl App {
                         self.pad_preview = Some((style, it.next().and_then(|r| r.parse().ok())));
                         None
                     }
+                    // holdwalk:dx:dy:ms holds a walk target dx, dy cells from the player.
+                    Some(("holdwalk", a)) => {
+                        let v: Vec<f32> = a.split(':').filter_map(|v| v.parse().ok()).collect();
+                        if let [dx, dy, ms] = v[..] {
+                            self.hold_walk = Some(((dx as i32, dy as i32), ms));
+                            self.mouse_walk_ms = 0.0;
+                        }
+                        None
+                    }
                     // vibetest: Settings > Controls > Vibration > Test.
                     Some(("vibetest", _)) => {
                         self.settings.vibration_test = true;
@@ -6536,6 +6628,7 @@ impl App {
                 p.attack_group = attack_group(r, &p.actor);
                 p.fit_pose(r);
                 let a = p.update(dt, w, octant, idle);
+                tracing::trace!(x = a.pos.x / ro_render::CELL, z = a.pos.z / ro_render::CELL, dt, cell = ?p.walker.cell, next = ?p.walker.next(), "walk trace");
                 r.camera.target = a.pos;
                 let level = self.hud.status.base_level >= AURA_LEVEL as i64;
                 p.aura_ms = auras.push(r, self.hat_auras.get(&self.account_id).copied(), level, &a, p.aura_ms + dt, self.account_id);
@@ -7911,6 +8004,8 @@ fn run() -> anyhow::Result<()> {
         pad: gamepad::Pad::new(),
         pad_row: None,
         pad_preview: None,
+        hold_walk: None,
+        walk_speed: None,
         hid: None,
         hid_retry_ms: 0.0,
         audio_haptics: None,

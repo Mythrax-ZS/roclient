@@ -41,6 +41,25 @@ impl Walker {
         !self.path.is_empty()
     }
 
+    /// The cell being stepped into, if walking.
+    pub fn next(&self) -> Option<(i32, i32)> {
+        self.path.first().copied()
+    }
+
+    /// Steps left on the path (the one in progress included).
+    pub fn remaining(&self) -> usize {
+        self.path.len()
+    }
+
+    /// Keeps the step in progress, then follows `path`, which starts from the cell that step
+    /// ends on (standing: from our cell).
+    pub fn continue_with(&mut self, path: Vec<(i32, i32)>) {
+        match self.path.first().copied() {
+            Some(next) => self.path = std::iter::once(next).chain(path).collect(),
+            None => self.walk(path),
+        }
+    }
+
     /// Where the walk ends, or the current cell when standing.
     pub fn goal_or_cell(&self) -> (i32, i32) {
         self.path.last().copied().unwrap_or(self.cell)
@@ -110,6 +129,21 @@ impl Walker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn continues_without_losing_the_step() {
+        let mut w = Walker::new((0, 0), 0, 100.0);
+        w.walk(vec![(1, 1), (2, 2)]);
+        // Half way through the first (diagonal, 140 ms) step.
+        assert_eq!(w.update(70.0), (0.5, 0.5));
+        // Re-aimed from the cell the step ends on: no snap back.
+        w.continue_with(vec![(1, 2), (1, 3)]);
+        assert_eq!(w.update(0.0), (0.5, 0.5));
+        // The step ends on (1, 1); the new path goes on from there.
+        let (x, y) = w.update(70.0);
+        assert!((x - 1.0).abs() < 1e-3 && (y - 1.0).abs() < 1e-3);
+        assert_eq!(w.remaining(), 2);
+    }
 
     #[test]
     fn walks_at_speed() {
