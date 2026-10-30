@@ -606,6 +606,9 @@ const PAD_STEP: i32 = 4;
 use windows::{HOTKEYS_PER_ROW, HOTKEY_ROWS};
 
 /// F1..F9 -> slot within the visible shortcut row.
+/// The skill rAthena keeps using while its key is held (CZ_USE_SKILL_START): Rolling Cutter.
+const HOLD_SKILL: u16 = 2036;
+
 fn hotkey_slot(k: winit::keyboard::NamedKey) -> Option<usize> {
     use winit::keyboard::NamedKey::*;
     [F1, F2, F3, F4, F5, F6, F7, F8, F9].iter().position(|&f| f == k)
@@ -861,6 +864,8 @@ struct App {
     /// Exit was asked of the map server at this time; we leave on its answer, or after a
     /// few seconds without one.
     quit_asked: Option<std::time::Instant>,
+    /// A skill kept going while its shortcut key is held (CZ_USE_SKILL_START), and that key.
+    held_skill: Option<(u16, winit::keyboard::NamedKey)>,
     /// The Esc game menu (Character Select, Options, Exit).
     esc_menu: bool,
     /// Start-up splash, title art and loading screens (made once the window exists).
@@ -3681,6 +3686,13 @@ impl App {
     }
 
     /// Turns a window action into a server request.
+    /// Lets go of a held skill (CZ_USE_SKILL_END).
+    fn release_held_skill(&mut self) {
+        if let Some((skill, _)) = self.held_skill.take() {
+            self.send(ro_net::Command::Stat(ro_net::StatRequest::ReleaseSkill(skill)));
+        }
+    }
+
     /// Leaves the game, asking the map server first as the original does: it refuses within
     /// 10 seconds of combat (prevent_logout).
     fn request_exit(&mut self) {
@@ -6882,6 +6894,12 @@ impl ApplicationHandler for App {
                 self.hud.focus_chat();
             }
             WindowEvent::ModifiersChanged(m) => self.alt = m.state().alt_key(),
+            WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key: winit::keyboard::Key::Named(k), state: ElementState::Released, .. }, .. }
+                if self.held_skill.is_some_and(|(_, held)| held == k) =>
+            {
+                self.release_held_skill();
+            }
+            WindowEvent::Focused(false) if self.held_skill.is_some() => self.release_held_skill(),
             WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key, state: ElementState::Pressed, repeat: false, .. }, .. } => {
                 use winit::keyboard::{Key, NamedKey};
                 match logical_key {
@@ -6895,7 +6913,17 @@ impl ApplicationHandler for App {
                     Key::Named(NamedKey::F12) => self.queued_action = Some(windows::UiAction::HotkeyRow((self.hotkey_row + 1) % HOTKEY_ROWS)),
                     Key::Named(k) if hotkey_slot(k).is_some() => {
                         let slot = self.hotkey_row as usize * HOTKEYS_PER_ROW + hotkey_slot(k).unwrap_or(0);
-                        self.queued_action = Some(windows::UiAction::UseHotkey(slot));
+                        // Rolling Cutter repeats for as long as its key is held, as in the original.
+                        let key = self.hotkeys.get(slot).copied().filter(|h| h.skill && h.id as u16 == HOLD_SKILL);
+                        let learned = key.and_then(|h| self.skills.iter().find(|s| s.id == HOLD_SKILL).map(|s| (h.count.max(1) as u16).min(s.level.max(1))));
+                        match learned {
+                            Some(level) if self.held_skill.is_none() => {
+                                self.send(ro_net::Command::Stat(ro_net::StatRequest::HoldSkill { skill: HOLD_SKILL, level, target: self.account_id }));
+                                self.held_skill = Some((HOLD_SKILL, k));
+                            }
+                            Some(_) => {}
+                            None => self.queued_action = Some(windows::UiAction::UseHotkey(slot)),
+                        }
                     }
                     Key::Character(c) if self.alt => self.alt_key(&c.to_ascii_lowercase()),
                     _ => {}
@@ -7044,6 +7072,7 @@ fn main() -> anyhow::Result<()> {
         session: session.clone(),
         quit: false,
         quit_asked: None,
+        held_skill: None,
         esc_menu: false,
         splash: None,
         front: (online && !auto).then(|| screens::Front::new(settings::Settings::load(Default::default()).last_id.clone(), true)),

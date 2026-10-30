@@ -339,6 +339,10 @@ pub enum StatRequest {
     Raise(u16),
     /// Raise a trait stat by one; `stat` is the rAthena SP_POW..SP_CRT id (219..=224).
     RaiseTrait(u16),
+    /// CZ_USE_SKILL_START (0x0b10): keep using a skill while its key is held (Rolling Cutter).
+    HoldSkill { skill: u16, level: u16, target: u32 },
+    /// CZ_USE_SKILL_END (0x0b11): the key was let go.
+    ReleaseSkill(u16),
     SkillUp(u16),
     UseSkill { skill: u16, level: u16, target: u32 },
     UseSkillAt { skill: u16, level: u16, x: u16, y: u16 },
@@ -354,6 +358,16 @@ impl Encode for StatRequest {
     fn encode(&self, d: &mut BytesMut) {
         match *self {
             StatRequest::Raise(stat) => put_db_packet(d, "StatusUp", &[&stat.to_le_bytes(), &[1]]),
+            StatRequest::HoldSkill { skill, level, target } => {
+                d.put_u16_le(0x0b10);
+                d.put_u16_le(skill);
+                d.put_u16_le(level);
+                d.put_u32_le(target);
+            }
+            StatRequest::ReleaseSkill(skill) => {
+                d.put_u16_le(0x0b11);
+                d.put_u16_le(skill);
+            }
             // CZ_ADVANCED_STATUS_CHANGE (0x0b24): <type>.W <amount>.W, one point at a time.
             StatRequest::RaiseTrait(stat) => {
                 d.put_u16_le(0x0b24);
@@ -427,6 +441,8 @@ mod tests {
         assert_eq!(size(&ItemRequest::Equip { index: 2, location: 256 }), 8);
         assert_eq!(size(&StatRequest::Raise(13)), client_packet("StatusUp").len as usize);
         assert_eq!(size(&StatRequest::RaiseTrait(219)), client_packet("traitstatus_up").len as usize);
+        assert_eq!(size(&StatRequest::HoldSkill { skill: 2036, level: 5, target: 1 }), client_packet("StartUseSkillToId").len as usize);
+        assert_eq!(size(&StatRequest::ReleaseSkill(2036)), client_packet("StopUseSkillToId").len as usize);
         assert_eq!(size(&StatRequest::UseSkill { skill: 1, level: 1, target: 1 }), client_packet("UseSkillToId").len as usize);
     }
 }
