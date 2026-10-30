@@ -3,6 +3,11 @@ name = "ro-client"
 edition.workspace = true
 version.workspace = true
 
+# The client is called Tenseiga; the package keeps its crate name (cargo -p ro-client).
+[[bin]]
+name = "tenseiga"
+path = "src/main.rs"
+
 [dependencies]
 flate2.workspace = true
 ro-net = { path = "../ro-net" }

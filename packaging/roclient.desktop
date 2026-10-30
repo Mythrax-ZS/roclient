@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=roclient
-Comment=Ragnarok Online client
-Exec=ro-client
-Icon=roclient
-Categories=Game;
-Terminal=false

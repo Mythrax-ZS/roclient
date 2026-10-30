@@ -1,4 +1,4 @@
-//! roclient
+//! Tenseiga
 //!
 //!   ro-client --headless   run login -> char select -> map entry and exit
 //!   ro-client              open the renderer window
@@ -7078,9 +7078,9 @@ ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(i
             let at = self.player.as_ref().map(|p| p.walker.cell).unwrap_or_default();
             let map = self.world.as_ref().map_or("-", |w| w.name.as_str());
             let title = match &self.status {
-                Some(s) => format!("roclient — {s}"),
-                None if self.world.is_none() && self.net.is_some() => "roclient — connecting…".to_string(),
-                None => format!("roclient — {map} {},{} — {w}x{h} — {fps:.0} fps", at.0, at.1),
+                Some(s) => format!("Tenseiga — {s}"),
+                None if self.world.is_none() && self.net.is_some() => "Tenseiga — connecting…".to_string(),
+                None => format!("Tenseiga — {map} {},{} — {w}x{h} — {fps:.0} fps", at.0, at.1),
             };
             window.set_title(&title);
         }
@@ -7116,7 +7116,7 @@ impl ApplicationHandler for App {
             return;
         }
         let attrs = Window::default_attributes()
-            .with_title("roclient")
+            .with_title("Tenseiga")
             .with_inner_size(winit::dpi::LogicalSize::new(1600.0, 900.0))
             .with_min_inner_size(winit::dpi::LogicalSize::new(640.0, 360.0))
             .with_visible(self.capture.is_none());

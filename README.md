@@ -1,6 +1,6 @@
-# roclient
+# Tenseiga
 
-A from-scratch Ragnarok Online client for rAthena, in Rust (wgpu: Vulkan / DX12 / GL).
+A from-scratch client for rAthena servers (formerly roclient), in Rust (wgpu: Vulkan / DX12 / GL).
 
 Status: login → character select → map entry → stay connected (headless). Rendering is a
 window that clears; map and sprite loading come next.
@@ -25,7 +25,7 @@ and set `pincode_enabled: no` in `conf/char_athena.conf`.
 | `ro-net` | login / char / map connection state machines |
 | `ro-vfs` | GRF 0x200 + loose `data/` folder |
 | `ro-render` | wgpu renderer |
-| `ro-client` | binary |
+| `ro-client` | the client binary, `tenseiga` |
 | `tools/packetgen` | regenerates `ro-proto/src/generated.rs` from rAthena |
 | `tools/grfdump` | list / extract GRF contents |
 
@@ -58,7 +58,7 @@ registration (`client_packet("WalkToXY")`), so shuffled opcodes follow the table
 
 The server's databases (`db/import/item_db.yml`, `quest_db.yml`) decide what an item or
 quest does; the client's data files only give it a name, icon and description. Like the
-original client, roclient reads the stock compiled tables and then, from the client
+original client, Tenseiga reads the stock compiled tables and then, from the client
 folder, any plain-text Lua with the same layout, whose entries override the stock ones:
 
 | What | Stock (compiled) | Text overrides, read in this order |

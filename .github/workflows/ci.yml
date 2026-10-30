@@ -32,16 +32,16 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist/roclient/config | Out-Null
+          New-Item -ItemType Directory -Force dist/tenseiga/config | Out-Null
           $t = "target/x86_64-pc-windows-msvc/release"
-          Copy-Item "$t/ro-client.exe","$t/grfdump.exe" dist/roclient/
-          Copy-Item config/example.toml dist/roclient/config/
-          Copy-Item README.md dist/roclient/
-          Compress-Archive -Path dist/roclient/* -DestinationPath roclient-windows-x86_64.zip
+          Copy-Item "$t/tenseiga.exe","$t/grfdump.exe" dist/tenseiga/
+          Copy-Item config/example.toml dist/tenseiga/config/
+          Copy-Item README.md dist/tenseiga/
+          Compress-Archive -Path dist/tenseiga/* -DestinationPath tenseiga-windows-x86_64.zip
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: roclient-windows-x86_64.zip
+          path: tenseiga-windows-x86_64.zip
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -56,9 +56,9 @@ jobs:
       - run: cargo build --release -p ro-client -p grfdump
       - name: Build AppImage
         run: |
-          mkdir -p AppDir/usr/bin AppDir/usr/share/roclient
-          cp target/release/ro-client target/release/grfdump AppDir/usr/bin/
-          cp config/example.toml README.md AppDir/usr/share/roclient/
+          mkdir -p AppDir/usr/bin AppDir/usr/share/tenseiga
+          cp target/release/tenseiga target/release/grfdump AppDir/usr/bin/
+          cp config/example.toml README.md AppDir/usr/share/tenseiga/
           cp packaging/AppRun AppDir/AppRun
           chmod +x AppDir/AppRun
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20250213-2/linuxdeploy-x86_64.AppImage
@@ -66,9 +66,9 @@ jobs:
           export APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64
           # exclude GPU/Vulkan libs: SteamOS provides them
           ./linuxdeploy-x86_64.AppImage --appdir AppDir \
-            --executable AppDir/usr/bin/ro-client \
-            --desktop-file packaging/roclient.desktop \
-            --icon-file packaging/roclient.png \
+            --executable AppDir/usr/bin/tenseiga \
+            --desktop-file packaging/tenseiga.desktop \
+            --icon-file packaging/tenseiga.png \
             --exclude-library 'libvulkan*' --exclude-library 'libGL*' --exclude-library 'libEGL*' \
             --exclude-library 'libGLX*' --exclude-library 'libdrm*' --exclude-library 'libgbm*' \
             --exclude-library 'libwayland*' --exclude-library 'libxcb*' --exclude-library 'libX11*' \
@@ -76,11 +76,11 @@ jobs:
             --output appimage
           # linuxdeploy overwrites AppRun with a symlink only if absent; ensure ours is used
           ls -la *.AppImage
-          [ -f roclient-x86_64.AppImage ] || mv "$(ls roclient*.AppImage | head -1)" roclient-x86_64.AppImage
+          [ -f tenseiga-x86_64.AppImage ] || mv "$(ls -1 *.AppImage | grep -v linuxdeploy | head -1)" tenseiga-x86_64.AppImage
       - uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: roclient-x86_64.AppImage
+          path: tenseiga-x86_64.AppImage
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -108,5 +108,5 @@ jobs:
           prerelease: true
           body_path: body.txt
           files: |
-            artifacts/roclient-windows-x86_64.zip
-            artifacts/roclient-x86_64.AppImage
+            artifacts/tenseiga-windows-x86_64.zip
+            artifacts/tenseiga-x86_64.AppImage

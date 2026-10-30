@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Tenseiga
+Comment=A client for rAthena servers
+Exec=tenseiga
+Icon=tenseiga
+Categories=Game;
+Terminal=false

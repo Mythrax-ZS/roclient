@@ -68,5 +68,5 @@ and `--capture-after 600` to let the first UI frame settle. `--offline --night` 
 the night sky without changing the server's day/night state.
 
 ```powershell
-.\target\release\ro-client.exe --offline --map prontera --at 156,34 --yaw 165 --pitch 30 --distance 650 --capture-after 600 --capture target/prontera-sky.png
+.\target\release\tenseiga.exe --offline --map prontera --at 156,34 --yaw 165 --pitch 30 --distance 650 --capture-after 600 --capture target/prontera-sky.png
 ```
