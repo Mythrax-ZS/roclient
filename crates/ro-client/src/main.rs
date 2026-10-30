@@ -5596,7 +5596,7 @@ impl App {
         if std::mem::take(&mut self.open_windows) {
             let args: Vec<String> = std::env::args().collect();
             self.quests.open = args.iter().any(|a| a == "--quest-win");
-            if args.iter().any(|a| a == "--skills-win") { self.windows.skills = true; self.windows.skill_list = args.iter().any(|a| a == "--skill-list"); self.windows.skill_tab = args.iter().skip_while(|a| *a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()); } else { self.windows.guild = true; }
+            if args.iter().any(|a| a == "--skills-win") { self.windows.skills = true; self.windows.skill_list = args.iter().any(|a| a == "--skill-list"); self.windows.skill_tab = args.iter().skip_while(|a| *a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()); } else if args.iter().any(|a| a == "--equip-win") { self.windows.equipment = true; } else { self.windows.guild = true; }
             self.guild.start_tab = std::env::args().skip_while(|a| a != "--guild-tab").nth(1).and_then(|t| t.parse().ok()).unwrap_or(0);
         }
         for text in std::mem::take(&mut self.queued_chat) {

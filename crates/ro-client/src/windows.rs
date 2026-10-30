@@ -920,6 +920,14 @@ impl Windows {
                 280.0,
                 &mut open,
                 |ui| {
+                    // The tabs head the body: the bottom bar has room only for the checkbox.
+                    ui.horizontal(|ui| {
+                        for (i, name) in EQUIP_TABS.iter().enumerate() {
+                            if skin.tab(ui, name, tab == i as u8).clicked() {
+                                new_tab = Some(i as u8);
+                            }
+                        }
+                    });
                     let (area, _) = ui.allocate_exact_size(Vec2::new(280.0, 130.0), egui::Sense::hover());
                     let p = ui.painter().clone();
                     skin.draw(&p, "equipwin_bg", area.min);
@@ -972,13 +980,6 @@ impl Windows {
                     }
                 },
                 |ui| {
-                    ui.horizontal(|ui| {
-                        for (i, name) in EQUIP_TABS.iter().enumerate() {
-                            if ui.selectable_label(tab == i as u8, RichText::new(*name).size(11.0)).clicked() {
-                                new_tab = Some(i as u8);
-                            }
-                        }
-                    });
                     if let Some(mut on) = v.show_equip {
                         if ui.checkbox(&mut on, RichText::new("Let others view my equipment").size(11.0)).changed() {
                             show_equip = Some(on);
