@@ -3863,6 +3863,7 @@ impl App {
             }
             // Back at character select: clear the world; the screens take over again.
             LeftGame => {
+                self.leave_character();
                 self.units.clear();
                 self.devotions.clear();
                 self.ground_units.clear();
@@ -3893,10 +3894,61 @@ impl App {
         }
     }
 
+    /// Back at character select: what belonged to the character goes, so the next one starts
+    /// clean. The server sends a character's guild, party, clan, pets and the like only when
+    /// it has one; kept over, the last character's would show as this one's. Loaded game
+    /// tables and the player's settings and window layout stay.
+    fn leave_character(&mut self) {
+        self.guild = Default::default();
+        self.social = Default::default();
+        self.companions = Default::default();
+        self.merchant = Default::default();
+        self.mailbox = Default::default();
+        self.clan = Default::default();
+        self.memorial = Default::default();
+        self.quests.leave_character();
+        self.progress.leave_character();
+        self.buffs.active.clear();
+        self.reputation.points.clear();
+        self.inventory = Default::default();
+        self.stats = None;
+        self.skills.clear();
+        self.hotkeys.clear();
+        self.hotkey_row = 0;
+        self.cooldowns.clear();
+        self.casts.clear();
+        self.unit_progress.clear();
+        self.script_progress = None;
+        self.member_pos.clear();
+        self.spirits.clear();
+        self.viewpoints.clear();
+        self.aggro.clear();
+        self.homun_ai = None;
+        self.merc_ai = None;
+        self.pad_target = None;
+        self.pending_npc = None;
+        self.pending_skill = None;
+        self.pending_pickup = None;
+        self.aiming = None;
+        self.cutin = None;
+        self.pvp_rank = None;
+        self.dead = false;
+        self.trade_partner = None;
+        self.trade_stage = 0;
+        self.trade_offers.clear();
+        self.player_menu = None;
+        self.attack_range = 1;
+    }
+
     fn send(&mut self, cmd: ro_net::Command) {
         // Remember how much of each item we offer in a trade (the ack only names the slot).
         if let ro_net::Command::Trade(ro_net::TradeRequest::Add { index, amount }) = &cmd {
             self.trade_offers.insert(*index, *amount);
+        }
+        // The server answers an invitation only when it reaches someone; to a name that is
+        // not online it says nothing, so say what was sent.
+        if let ro_net::Command::Guild(ro_net::GuildRequest::Invite { name }) = &cmd {
+            self.hud.push_chat(ro_net::ChatKind::Guild, format!("Guild invitation sent to {name}. They need to be online to answer it."));
         }
         if let Some((tx, _)) = self.net.as_ref() {
             let _ = tx.send(cmd);

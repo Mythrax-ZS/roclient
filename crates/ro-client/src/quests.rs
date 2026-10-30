@@ -24,6 +24,15 @@ pub struct QuestLog {
 }
 
 impl QuestLog {
+    /// Back at character select: the character's quests go (the quest text stays loaded).
+    pub fn leave_character(&mut self) {
+        self.quests.clear();
+        self.marks.clear();
+        self.navigate = None;
+        self.selected = None;
+        self.open = false;
+    }
+
     pub fn load(vfs: &ro_vfs::Vfs) -> Self {
         let mut q = Self::default();
         // Translation packs name it after kRO's file; prefer theirs when present.

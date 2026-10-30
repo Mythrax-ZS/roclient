@@ -56,6 +56,16 @@ fn group_name(g: &str) -> &str {
 const DAYS: i32 = 20;
 
 impl Progress {
+    /// Back at character select: the character's achievements and title go (the
+    /// achievement and title tables stay loaded).
+    pub fn leave_character(&mut self) {
+        self.list.clear();
+        self.rank = Default::default();
+        self.title = 0;
+        self.attendance = None;
+        self.open = false;
+    }
+
     pub fn load(vfs: &ro_vfs::Vfs) -> Self {
         let mut p = Self::default();
         if let Some(c) = [r"System\achievements.lub", r"System\achievement_list.lub"].iter().find_map(|p| vfs.read(p).ok().flatten()).and_then(|d| ro_formats::lub::eval(&d).ok()) {
