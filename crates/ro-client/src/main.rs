@@ -1303,6 +1303,9 @@ struct App {
     renderer: Option<ro_render::Renderer>,
     /// Right mouse button held: dragging rotates the camera.
     rotating: bool,
+    /// How far the cursor moved while the right button was held: a click (barely moved)
+    /// opens a player's menu, a drag only turns the camera.
+    right_drag: f64,
     cursor_sprite: Option<hud::CursorSprite>,
     /// Which cursor to show (hud::cursor), from what is under the mouse.
     cursor_action: usize,
@@ -4549,6 +4552,29 @@ impl App {
         w.room = Some(room);
     }
 
+    /// Right button: held and dragged it turns the camera; clicked on another player it
+    /// opens their menu, as in the original.
+    fn right_button(&mut self, pressed: bool) {
+        let released = self.rotating && !pressed;
+        self.rotating = pressed;
+        if pressed {
+            self.right_drag = 0.0;
+        }
+        if released && self.right_drag < 6.0 {
+            if let Some(id) = self.pick_unit().filter(|id| self.units.get(id).is_some_and(|m| m.kind == 0)) {
+                self.open_player_menu(id);
+            }
+        }
+    }
+
+    /// Opens the menu for another player (trade, party, friend; GM actions) at the cursor.
+    fn open_player_menu(&mut self, id: u32) {
+        let name = self.units.get(&id).map(|m| m.name.clone()).unwrap_or_default();
+        let ppp = self.egui_ctx.pixels_per_point();
+        let pos = self.cursor.map_or(egui::Pos2::ZERO, |(x, y)| egui::pos2(x as f32 / ppp, y as f32 / ppp));
+        self.player_menu = Some((id, name, pos));
+    }
+
     /// The cursor for what is under the mouse, as the original client shows it.
     fn hover_cursor(&self) -> usize {
         use hud::cursor::*;
@@ -6435,6 +6461,16 @@ impl App {
                         self.fake_click = (f.len() == 2).then(|| (egui::pos2(f[0], f[1]), true));
                         None
                     }
+                    // rclick:x:y right-clicks the world there (window pixels).
+                    Some(("rclick", at)) => {
+                        let f: Vec<f64> = at.split(':').filter_map(|v| v.parse().ok()).collect();
+                        if f.len() == 2 {
+                            self.cursor = Some((f[0], f[1]));
+                            self.right_button(true);
+                            self.right_button(false);
+                        }
+                        None
+                    }
                     Some(("trait", i)) => i.parse().ok().filter(|i: &usize| *i < 6).map(windows::UiAction::RaiseTrait),
                     Some(("identify", id)) => id.parse().ok().and_then(|id: u32| self.inventory.items.values().find(|i| i.id == id && !i.identified)).map(|i| windows::UiAction::Identify(i.index)),
                     Some(("revive", _)) => {
@@ -8020,9 +8056,7 @@ impl ApplicationHandler for App {
                 };
                 r.camera.zoom(steps);
             }
-            WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
-                self.rotating = state == ElementState::Pressed;
-            }
+            WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => self.right_button(state == ElementState::Pressed),
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
                 let unit = self.pick_unit().and_then(|id| self.units.get(&id).map(|m| (id, m.kind)));
                 match unit {
@@ -8035,12 +8069,7 @@ impl ApplicationHandler for App {
                     // PvP / GvG maps: clicking an enemy player attacks (the original's attack cursor).
                     Some((id, 0)) if self.aiming.is_none() && self.is_enemy_player(id) => self.attack_unit(id),
                     // Other players: a menu (trade, party, friend).
-                    Some((id, 0)) if self.aiming.is_none() => {
-                        let name = self.units.get(&id).map(|m| m.name.clone()).unwrap_or_default();
-                        let ppp = self.egui_ctx.pixels_per_point();
-                        let pos = self.cursor.map_or(egui::Pos2::ZERO, |(x, y)| egui::pos2(x as f32 / ppp, y as f32 / ppp));
-                        self.player_menu = Some((id, name, pos));
-                    }
+                    Some((id, 0)) if self.aiming.is_none() => self.open_player_menu(id),
                     // Monsters: attack until it dies (or use the skill being aimed).
                     Some((id, 5)) if std::mem::take(&mut self.capturing) => self.send(ro_net::Command::Companion(ro_net::CompanionRequest::Capture(id))),
                     Some((id, 5)) => match self.aiming.take() {
@@ -8081,6 +8110,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if let (true, Some((lx, ly))) = (self.rotating, self.cursor) {
+                    self.right_drag += (position.x - lx).hypot(position.y - ly);
                     // Scale by DPI so rotation speed matches across monitors.
                     let s = 0.005 / r.scale_factor as f32;
                     r.camera.rotate((position.x - lx) as f32 * s, (position.y - ly) as f32 * s);
@@ -8397,6 +8427,7 @@ fn run() -> anyhow::Result<()> {
         window: None,
         renderer: None,
         rotating: false,
+        right_drag: 0.0,
         cursor_sprite: None,
         cursor_action: 0,
         mouse_walk: false,
