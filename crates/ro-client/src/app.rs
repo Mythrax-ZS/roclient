@@ -278,6 +278,18 @@ struct LoadedMap {
 }
 
 /// `up` upscales ground, water and model textures (never sprites, which load elsewhere).
+/// Server maps that are copies of a stock map (its cells under a new name in the server's map
+/// cache, rathena db/import/map_cache.dat): the client draws the original's files.
+const MAP_COPIES: [(&str, &str); 1] = [
+    // Twin Flames: the battle against the Goddess.
+    ("tf_goddess", "herosria"),
+];
+
+/// The map whose files draw `name` (itself, unless it is a copy).
+fn map_files(name: &str) -> &str {
+    MAP_COPIES.iter().find(|(copy, _)| name.eq_ignore_ascii_case(copy)).map_or(name, |(_, original)| original)
+}
+
 fn load_map(vfs: &ro_vfs::Vfs, name: &str, up: &ro_render::Upscaler) -> anyhow::Result<LoadedMap> {
     let started = std::time::Instant::now();
     let read = |path: String| vfs.read(&path)?.with_context(|| format!("{path} not found"));
@@ -1365,6 +1377,9 @@ impl App {
             }
         }
         let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
+        // The server's name for the map stays the world's; its files may be another map's.
+        let server_name = name;
+        let name = map_files(name);
         match load_map(vfs, name, &ro_render::Upscaler::new(self.settings.upscale.clone())) {
             Ok(map) => {
                 r.set_scene(&map.mesh, map.images, map.lighting);
@@ -1418,7 +1433,7 @@ impl App {
                     a.enter_map(vfs, name);
                 }
                 r.set_room_mask(None);
-                self.world = Some(World { name: name.to_string(), outdoors, ground: map.mesh, gat, room: None, submerged });
+                self.world = Some(World { name: server_name.to_string(), outdoors, ground: map.mesh, gat, room: None, submerged });
                 self.ready_at = Some(std::time::Instant::now());
             }
             Err(e) => tracing::error!("map {name}: {e:#}"),
