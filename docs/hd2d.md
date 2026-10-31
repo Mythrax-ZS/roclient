@@ -51,7 +51,8 @@ non-opaque one, whose 256² alpha masks sit in a texture array, so leaves and ra
 light through. The world shader's `sun_ray` (from `rt.wgsl`, joined in place of the stub at the
 end of `scene.wgsl`) casts one ray toward `shadow_dir()`, the same sun the sprite shadows use.
 Where it's on, `lm.a` is ignored and the ray's result joins the sprite shadow, so both get
-the same darkness (Shadows). It runs outdoors only. Interiors, dungeons and underwater keep
+the same darkness (Shadows). Sprites trace the same ray from their feet (`sprite.wgsl`), so
+characters darken when they walk into a building's shadow. It runs outdoors only. Interiors, dungeons and underwater keep
 their hand-baked light. Setting: Ray-traced shadows (on by default except on Android).
 
 ### Tilt-shift depth of field

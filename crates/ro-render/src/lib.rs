@@ -497,16 +497,15 @@ impl Renderer {
         };
         let grid = pipeline("grid", include_str!("grid.wgsl"), &[Some(&globals_layout)], &[], None);
         let rt_layout = rt_needs.is_some().then(|| rt::layout(&device));
-        // With ray tracing, rt.wgsl's shadow ray replaces the stub at the end of scene.wgsl.
-        let scene_src = include_str!("scene.wgsl");
-        let scene_src = match &rt_layout {
-            Some(_) => format!("{}
-{}", include_str!("rt.wgsl"), &scene_src[..scene_src.find("// RT-STUB").expect("scene.wgsl stub")]),
-            None => scene_src.to_string(),
+        // With ray tracing, rt.wgsl's shadow ray replaces the stub at the end of the world and
+        // sprite shaders.
+        let with_rt = |src: &str| match &rt_layout {
+            Some(_) => format!("{}\n{}", include_str!("rt.wgsl"), &src[..src.find("// RT-STUB").expect("shader stub")]),
+            None => src.to_string(),
         };
         let scene_pipeline = pipeline(
             "scene",
-            &scene_src,
+            &with_rt(include_str!("scene.wgsl")),
             &[Some(&globals_layout), Some(&texture_layout), rt_layout.as_ref()],
             &[Some(scene::Vertex::layout())],
             None,
@@ -563,8 +562,8 @@ impl Renderer {
         );
         let sprite_pipeline = pipeline(
             "sprite",
-            include_str!("sprite.wgsl"),
-            &[Some(&globals_layout), Some(&sprite_layout)],
+            &with_rt(include_str!("sprite.wgsl")),
+            &[Some(&globals_layout), Some(&sprite_layout), rt_layout.as_ref()],
             &[Some(sprite::Vertex::layout())],
             Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
         );
@@ -1440,6 +1439,9 @@ impl Renderer {
             // Actors back to front (built before the shadow pass, which shares them).
             if let Some(buffer) = &sprite_buffer {
                 pass.set_pipeline(&self.sprite_pipeline);
+                if let Some(rt) = &self.rt_bind {
+                    pass.set_bind_group(2, rt, &[]);
+                }
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 for (sheet, range) in &sprite_draws {
                     pass.set_bind_group(1, &self.sheets[*sheet].bind, &[]);

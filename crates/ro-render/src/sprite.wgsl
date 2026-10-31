@@ -28,6 +28,9 @@ struct Globals {
     water: vec4<f32>,
     // rgb: the water's scatter colour
     water_tint: vec4<f32>,
+    upscale: vec4<f32>,
+    // xyz: direction the sun's light travels for ray-traced shadows, w: 1 when they are on
+    rt: vec4<f32>,
 };
 
 /// World units (about two cells) a sprite's depth is pulled toward the camera.
@@ -151,7 +154,10 @@ fn fs_main(in: VsOut) -> FsOut {
         let up = max(dot(vec3(0.0, 1.0, 0.0), -g.light_dir.xyz), 0.0);
         let full = g.ambient.rgb + g.diffuse.rgb * up;
         let feet = in.anchor - normalize(vec3(g.light_dir.x, 0.0, g.light_dir.z) + vec3(1e-4, 0.0, 0.0)) * 6.0 + vec3(0.0, 1.0, 0.0);
-        let here = g.ambient.rgb + g.diffuse.rgb * up * mix(1.0, sun_visible(feet), g.shadow.x);
+        // Buildings and trees shade sprites too where shadows are ray traced (from the feet,
+        // like the ground the sprite stands on).
+        let geometry = select(1.0, sun_ray(in.anchor + vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 0.0)), g.rt.w > 0.5);
+        let here = g.ambient.rgb + g.diffuse.rgb * up * mix(1.0, min(sun_visible(feet), geometry), g.shadow.x);
         let shade = here / max(full, vec3(0.05));
         rgb = rgb * mix(vec3(1.0), shade, k) + rgb * point_light(in.anchor + vec3(0.0, 8.0, 0.0)) * k;
         rgb += srgb_to_linear(g.diffuse.rgb) * edge * g.sprite_light.y * up;
@@ -186,4 +192,9 @@ fn in_room(world: vec3<f32>) -> bool {
         return false;
     }
     return textureLoad(room_mask, cell, 0).r > 0.5;
+}
+
+// RT-STUB: replaced by rt.wgsl where the GPU traces rays.
+fn sun_ray(world: vec3<f32>, n: vec3<f32>) -> f32 {
+    return 1.0;
 }
