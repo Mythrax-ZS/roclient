@@ -59,7 +59,7 @@ finds what it would see of the map, off screen included, and shades it from each
 info: a 128² copy of its texture (the same array the cut-out test reads), its vertex colour
 and the sun, with a one-ray shadow. Screen-space reflection still lies on top where it finds
 the scene, which keeps on-screen detail and sprites. The ray tracing has no lightmaps, so
-off-screen surfaces show no baked colour light. It runs outdoors only. Interiors, dungeons and underwater keep
+off-screen surfaces show no baked colour light. Setting: Ray-traced reflections (on by default except on Android). It runs outdoors only. Interiors, dungeons and underwater keep
 their hand-baked light. Setting: Ray-traced shadows (on by default except on Android).
 
 ### Tilt-shift depth of field

@@ -26,7 +26,7 @@ struct Globals {
     water_tint: vec4<f32>,
     // x: 1 to filter magnified textures with Catmull-Rom (texture upscaling)
     upscale: vec4<f32>,
-    // xyz: direction the sun's light travels for ray-traced shadows, w: 1 when they are on
+    // xyz: direction the sun's light travels, w: ray tracing on (bits: 1 shadows, 2 reflections)
     rt: vec4<f32>,
 };
 
@@ -135,7 +135,7 @@ fn fs_main(in: VsOut) -> FsOut {
     let n = relief(flat, in.uv, ddx, ddy, dwx, dwy, size);
     let ndl = max(dot(flat, -g.light_dir.xyz), 0.0);
     // Ray-traced shadows replace the lightmap's baked ones (which can't follow the sun).
-    let rt = g.rt.w > 0.5;
+    let rt = (u32(g.rt.w) & 1u) != 0u;
     let light = clamp(g.ambient.rgb + g.diffuse.rgb * ndl, vec3(0.0), vec3(1.0)) * select(lm.a, 1.0, rt);
     // Relief as a ratio of the tilted surface's light to the flat one's, so it shows on maps
     // whose light already saturates (the clamp above would swallow it).

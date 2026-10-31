@@ -29,7 +29,7 @@ struct Globals {
     // rgb: the water's scatter colour
     water_tint: vec4<f32>,
     upscale: vec4<f32>,
-    // xyz: direction the sun's light travels for ray-traced shadows, w: 1 when they are on
+    // xyz: direction the sun's light travels, w: ray tracing on (bits: 1 shadows, 2 reflections)
     rt: vec4<f32>,
 };
 

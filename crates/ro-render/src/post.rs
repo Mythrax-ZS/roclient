@@ -52,6 +52,8 @@ pub struct PostSettings {
     /// Outdoors, the sun's shadows from all map geometry are ray traced (GPUs with ray
     /// queries; ignored elsewhere), in place of the shadows baked into the lightmaps.
     pub ray_traced_shadows: bool,
+    /// Outdoors, water reflects the map ray traced, off screen too (same GPUs).
+    pub ray_traced_reflections: bool,
     /// Sprites snap to whole screen pixels (crisp pixel art).
     pub pixel_snap: bool,
 }
@@ -69,6 +71,7 @@ impl Default for PostSettings {
             auto_exposure: 0.0,
             relief: 0.0,
             ray_traced_shadows: false,
+            ray_traced_reflections: false,
             contrast: 1.12,
             saturation: 1.1,
             warmth: 0.35,

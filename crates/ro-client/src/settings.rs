@@ -110,6 +110,8 @@ pub struct Visual {
     pub relief: f32,
     /// Sun shadows ray traced from all map geometry (needs a ray-tracing GPU).
     pub ray_traced_shadows: bool,
+    /// Water reflections ray traced from the map (needs a ray-tracing GPU).
+    pub ray_traced_reflections: bool,
     pub pixel_snap: bool,
     /// Strength of the underwater look on submerged maps (caustics, murk, shafts, motes).
     pub underwater: f32,
@@ -146,6 +148,7 @@ impl Default for Visual {
             auto_exposure: 0.5,
             relief: 6.0,
             ray_traced_shadows: !cfg!(target_os = "android"),
+            ray_traced_reflections: !cfg!(target_os = "android"),
             pixel_snap: p.pixel_snap,
             underwater: 1.0,
             render_scale: if cfg!(target_os = "android") { 0.7 } else { 1.0 },
@@ -182,6 +185,7 @@ impl Visual {
             auto_exposure: self.auto_exposure,
             relief: self.relief,
             ray_traced_shadows: self.ray_traced_shadows,
+            ray_traced_reflections: self.ray_traced_reflections,
             pixel_snap: self.pixel_snap,
             ..Default::default()
         }
@@ -459,6 +463,9 @@ impl Settings {
         ui.end_row();
         ui.add_enabled_ui(v.hd2d, |ui| ui.label("Ray-traced shadows")).response.on_hover_text("Outdoors, buildings and trees cast shadows that follow the sun. Needs a GPU with ray tracing");
         ui.add_enabled(v.hd2d, egui::Checkbox::without_text(&mut v.ray_traced_shadows));
+        ui.end_row();
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Ray-traced reflections")).response.on_hover_text("Outdoors, water reflects buildings, ships and trees, even off screen. Needs a GPU with ray tracing");
+        ui.add_enabled(v.hd2d, egui::Checkbox::without_text(&mut v.ray_traced_reflections));
         ui.end_row();
         ui.add_enabled_ui(v.hd2d, |ui| ui.label("Sun height"));
         ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.sun_elevation, 15.0..=85.0).suffix("°"));

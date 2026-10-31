@@ -66,7 +66,7 @@ struct Globals {
     water_tint: [f32; 4],
     /// x: 1 to filter magnified world textures with Catmull-Rom (texture upscaling).
     upscale: [f32; 4],
-    /// Ray-traced shadows: xyz the direction sunlight travels, w 1 when on.
+    /// Ray tracing: xyz the direction sunlight travels, w what is on (bits: 1 shadows, 2 reflections).
     rt: [f32; 4],
 }
 
@@ -1272,8 +1272,10 @@ impl Renderer {
             upscale: [if self.upscale_runtime { 1.0 } else { 0.0 }, if self.post_settings.enabled { self.post_settings.relief } else { 0.0 }, 0.0, 0.0],
             // Outdoors only: interiors and dungeons keep their hand-baked light and shadow.
             rt: {
-                let on = self.rt_bind.is_some() && self.post_settings.enabled && self.post_settings.ray_traced_shadows && self.room.is_none() && self.underwater <= 0.0 && self.sky_profile.is_some();
-                self.shadow_dir().normalize_or_zero().extend(if on { 1.0 } else { 0.0 }).to_array()
+                let p = &self.post_settings;
+                let on = self.rt_bind.is_some() && p.enabled && self.room.is_none() && self.underwater <= 0.0 && self.sky_profile.is_some();
+                let bits = (on && p.ray_traced_shadows) as u32 | ((on && p.ray_traced_reflections) as u32) << 1;
+                self.shadow_dir().normalize_or_zero().extend(bits as f32).to_array()
             },
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));

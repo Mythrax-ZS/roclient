@@ -17,7 +17,7 @@ const SUN_RADIUS: f32 = 0.03;
 // How much of the sun reaches `world` past the map's geometry (1 all .. 0 none), from `rays`
 // rays spread over its disc; 1 where ray-traced shadows are off.
 fn sun_ray(world: vec3<f32>, n: vec3<f32>, rays: u32) -> f32 {
-    if g.rt.w < 0.5 {
+    if (u32(g.rt.w) & 1u) == 0u {
         return 1.0;
     }
     let to_sun = -normalize(g.rt.xyz);
@@ -74,7 +74,7 @@ fn surface(tri: u32, w: vec2<f32>) -> vec4<f32> {
 // What a reflected ray sees of the map (linear rgb, and 1 where it hit something; 0 for the
 // sky): the surface lit by the sun the way the world shader lights it, without lightmaps.
 fn rt_reflect(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
-    if g.rt.w < 0.5 {
+    if (u32(g.rt.w) & 2u) == 0u {
         return vec4(0.0);
     }
     var rq: ray_query;
