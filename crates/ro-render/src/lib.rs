@@ -1232,7 +1232,7 @@ impl Renderer {
                 let c = self.water_settings.scatter_color;
                 [c[0], c[1], c[2], 0.0]
             },
-            upscale: [if self.upscale_runtime { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
+            upscale: [if self.upscale_runtime { 1.0 } else { 0.0 }, if self.post_settings.enabled { self.post_settings.relief } else { 0.0 }, 0.0, 0.0],
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         let outdoor_sky = self.scene.is_some() && self.room.is_none() && self.underwater <= 0.0 && self.sky_profile.is_some();

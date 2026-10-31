@@ -47,6 +47,8 @@ pub struct PostSettings {
     /// 0..1: how far exposure follows the scene's brightness, as eyes adapt (brighter in a
     /// dark dungeon, a little darker on bright snow). 0 is a fixed exposure.
     pub auto_exposure: f32,
+    /// Depth in texels of the relief read from ground and model textures (0 flat).
+    pub relief: f32,
     /// Sprites snap to whole screen pixels (crisp pixel art).
     pub pixel_snap: bool,
 }
@@ -62,6 +64,7 @@ impl Default for PostSettings {
             vignette: 0.45,
             exposure: 1.0,
             auto_exposure: 0.0,
+            relief: 0.0,
             contrast: 1.12,
             saturation: 1.1,
             warmth: 0.35,

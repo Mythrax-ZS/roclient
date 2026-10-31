@@ -113,6 +113,8 @@ fn fs_main(in: VsOut) -> FsOut {
     // Gradients up front (uniform control flow), so both paths below can use them.
     let ddx = dpdx(in.uv);
     let ddy = dpdy(in.uv);
+    let dwx = dpdx(in.world);
+    let dwy = dpdy(in.world);
     var t: vec4<f32>;
     let size = vec2<f32>(textureDimensions(tex));
     let footprint = max(dot(ddx * size, ddx * size), dot(ddy * size, ddy * size));
@@ -127,11 +129,39 @@ fn fs_main(in: VsOut) -> FsOut {
         discard;
     }
     let lm = textureSample(lightmap, lightmap_samp, in.lightmap_uv);
-    let ndl = max(dot(normalize(in.normal), -g.light_dir.xyz), 0.0);
+    let flat = normalize(in.normal);
+    let n = relief(flat, in.uv, ddx, ddy, dwx, dwy, size);
+    let ndl = max(dot(flat, -g.light_dir.xyz), 0.0);
     let light = clamp(g.ambient.rgb + g.diffuse.rgb * ndl, vec3(0.0), vec3(1.0)) * lm.a;
-    let rgb = clamp(t.rgb * in.color * light + lm.rgb, vec3(0.0), vec3(1.0));
-    let lit = srgb_to_linear(rgb) * sprite_shadow(in.world) + srgb_to_linear(t.rgb * in.color) * point_light(in.world, normalize(in.normal));
+    // Relief as a ratio of the tilted surface's light to the flat one's, so it shows on maps
+    // whose light already saturates (the clamp above would swallow it).
+    let tilted = g.ambient.rgb + g.diffuse.rgb * max(dot(n, -g.light_dir.xyz), 0.0);
+    let shade = clamp(tilted / max(g.ambient.rgb + g.diffuse.rgb * ndl, vec3(0.05)), vec3(0.5), vec3(1.5));
+    let rgb = clamp(t.rgb * in.color * light * shade + lm.rgb, vec3(0.0), vec3(1.0));
+    let lit = srgb_to_linear(rgb) * sprite_shadow(in.world) + srgb_to_linear(t.rgb * in.color) * point_light(in.world, n);
     return FsOut(vec4(lit, 1.0), vec4(distance(in.world, g.eye.xyz), 0.0, 0.0, 0.0));
+}
+
+// Surface relief: the texture's own brightness read as height (pale stone stands out of dark
+// mortar) and turned into a tilted normal for the sun and point lights. g.upscale.y is the
+// depth in texels from black to white (0 off). Bump mapping without tangents (Mikkelsen 2010).
+fn relief(n: vec3<f32>, uv: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>, dwx: vec3<f32>, dwy: vec3<f32>, size: vec2<f32>) -> vec3<f32> {
+    let depth = g.upscale.y;
+    if depth <= 0.0 {
+        return n;
+    }
+    let w = vec3(0.299, 0.587, 0.114);
+    let h = dot(textureSampleGrad(tex, samp, uv, ddx, ddy).rgb, w);
+    let hu = dot(textureSampleGrad(tex, samp, uv + vec2(1.0 / size.x, 0.0), ddx, ddy).rgb, w);
+    let hv = dot(textureSampleGrad(tex, samp, uv + vec2(0.0, 1.0 / size.y), ddx, ddy).rgb, w);
+    // Height change per unit of uv, in world units (a texel's world size times the depth).
+    let texel = length(dwx) / max(length(ddx * size), 1e-4);
+    let dh = vec2(hu - h, hv - h) * size * depth * texel;
+    let r1 = cross(dwy, n);
+    let r2 = cross(n, dwx);
+    let det = dot(dwx, r1);
+    let grad = sign(det) * (dot(dh, ddx) * r1 + dot(dh, ddy) * r2);
+    return normalize(abs(det) * n - grad);
 }
 
 // How lit a point is by the sun with only sprites as casters: 1 lit, 1 - strength fully

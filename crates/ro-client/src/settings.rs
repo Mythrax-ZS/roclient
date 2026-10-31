@@ -106,6 +106,8 @@ pub struct Visual {
     pub ambient_occlusion: f32,
     /// Exposure follows the scene's brightness, as eyes adapt (0 fixed .. 1 fully).
     pub auto_exposure: f32,
+    /// Relief read from ground and model textures, lit by the sun and lamps (0 flat).
+    pub relief: f32,
     pub pixel_snap: bool,
     /// Strength of the underwater look on submerged maps (caustics, murk, shafts, motes).
     pub underwater: f32,
@@ -140,6 +142,7 @@ impl Default for Visual {
             god_rays: p.god_rays,
             ambient_occlusion: p.ambient_occlusion,
             auto_exposure: 0.5,
+            relief: 6.0,
             pixel_snap: p.pixel_snap,
             underwater: 1.0,
             render_scale: if cfg!(target_os = "android") { 0.7 } else { 1.0 },
@@ -174,6 +177,7 @@ impl Visual {
             god_rays: self.god_rays,
             ambient_occlusion: self.ambient_occlusion,
             auto_exposure: self.auto_exposure,
+            relief: self.relief,
             pixel_snap: self.pixel_snap,
             ..Default::default()
         }
@@ -439,6 +443,9 @@ impl Settings {
         ui.end_row();
         ui.add_enabled_ui(v.hd2d, |ui| ui.label("Auto exposure")).response.on_hover_text("Brightness adapts like eyes do: dungeons open up, bright snow tones down");
         ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.auto_exposure, 0.0..=1.0));
+        ui.end_row();
+        ui.add_enabled_ui(v.hd2d, |ui| ui.label("Surface relief")).response.on_hover_text("Stone, brick and roof tiles catch the light as if carved");
+        ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.relief, 0.0..=12.0));
         ui.end_row();
         ui.add_enabled_ui(v.hd2d, |ui| ui.label("Depth of field"));
         ui.add_enabled(v.hd2d, egui::Slider::new(&mut v.depth_of_field, 0.0..=1.0));
