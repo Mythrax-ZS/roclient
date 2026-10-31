@@ -86,9 +86,36 @@ jobs:
           name: linux
           path: tenseiga-x86_64.AppImage
 
+  # Android 13+ (API 33), arm64: the client as a NativeActivity library, packed by
+  # packaging/android/build_apk.sh with the runner's SDK and NDK.
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-ndk --locked
+      - name: Build the library
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          cargo ndk -t arm64-v8a --platform 33 -o apk/lib build --release -p ro-client --lib
+          ls -l apk/lib/arm64-v8a
+      - name: Build the APK
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: build-${{ github.run_number }}
+        run: sh packaging/android/build_apk.sh apk tenseiga-android-arm64.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: tenseiga-android-arm64.apk
+
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, build-windows, build-linux]
+    # Android is attached when it builds; it doesn't hold back the others.
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.result == 'success' && needs.build-windows.result == 'success' && needs.build-linux.result == 'success' }}
+    needs: [test, build-windows, build-linux, build-android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -114,3 +141,4 @@ jobs:
           files: |
             artifacts/tenseiga-windows-x86_64.zip
             artifacts/tenseiga-x86_64.AppImage
+            artifacts/tenseiga-android-arm64.apk

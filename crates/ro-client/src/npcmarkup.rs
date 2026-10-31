@@ -160,22 +160,6 @@ pub fn has_links(spans: &[Span]) -> bool {
     spans.iter().any(|s| s.link.is_some())
 }
 
-/// Opens a web page in the system browser.
-pub fn open_url(url: &str) {
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
-        return;
-    }
-    #[cfg(windows)]
-    let r = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn();
-    #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg(url).spawn();
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let r = std::process::Command::new("xdg-open").arg(url).spawn();
-    if let Err(e) = r {
-        tracing::warn!(url, "could not open the page: {e}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

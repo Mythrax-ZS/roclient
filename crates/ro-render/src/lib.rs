@@ -131,6 +131,8 @@ struct Targets {
 
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
+    /// Kept to make a new surface when the old one is lost (Android, after a resume).
+    instance: wgpu::Instance,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -536,6 +538,7 @@ impl Renderer {
         let model_lightmap = scene::upload_texture(&device, &queue, &Rgba { width: 1, height: 1, pixels: vec![0, 0, 0, 255] }, false);
         Ok(Self {
             surface,
+            instance,
             device,
             queue,
             config,
@@ -885,6 +888,18 @@ impl Renderer {
             msaa_info: (samples > 1).then(|| tex("msaa info", post::INFO_FORMAT)),
             post: post::PostTargets::new(device, config.width, config.height),
         }
+    }
+
+    /// A new surface for the window, on the same device: Android destroys the old one while the
+    /// app is in the background. Everything loaded stays.
+    pub fn recreate_surface(&mut self, window: Arc<Window>) -> anyhow::Result<()> {
+        let size = window.inner_size();
+        self.surface = self.instance.create_surface(window)?;
+        self.config.width = size.width.max(1);
+        self.config.height = size.height.max(1);
+        self.surface.configure(&self.device, &self.config);
+        self.targets = Self::make_targets(&self.device, &self.config, self.samples);
+        Ok(())
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {

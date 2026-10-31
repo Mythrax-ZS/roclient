@@ -8,6 +8,13 @@ version.workspace = true
 name = "tenseiga"
 path = "src/main.rs"
 
+# Android: the same client as a library the NativeActivity loads (libtenseiga_android.so).
+# Empty on other platforms.
+[lib]
+name = "tenseiga_android"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
 [build-dependencies]
 winresource = "0.1"
 
@@ -36,7 +43,13 @@ gilrs = "0.11.2"
 mlua = { version = "0.12.2", features = ["lua51", "vendored"] }
 serde_json = "1"
 ureq = { version = "3", default-features = false }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+# Sony and Nintendo pads straight over HID (touchpad, rumble, light); Android has no raw HID.
 hidapi = { version = "2.6", default-features = false, features = ["windows-native", "linux-native"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30.13", features = ["android-native-activity"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }

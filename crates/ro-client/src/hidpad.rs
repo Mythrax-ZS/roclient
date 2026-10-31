@@ -81,6 +81,18 @@ impl HidPad {
     /// Opens the supported controller with these ids (the pad in use); without ids, the first
     /// of the family the pad in use belongs to.
     pub fn open(want: Option<(u16, u16)>, family: crate::padglyph::Style) -> Option<HidPad> {
+        // Android gives apps no raw HID access; its controllers come through the system.
+        #[cfg(target_os = "android")]
+        {
+            let _ = (want, family);
+            None
+        }
+        #[cfg(not(target_os = "android"))]
+        Self::open_hid(want, family)
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn open_hid(want: Option<(u16, u16)>, family: crate::padglyph::Style) -> Option<HidPad> {
         if want.is_some_and(|(v, p)| kind_of(v, p).is_none()) {
             return None;
         }
@@ -147,6 +159,7 @@ impl HidPad {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 fn run(dev: hidapi::HidDevice, kind: Kind, bluetooth: Arc<AtomicBool>, touch: Arc<Mutex<Touch>>, rx: Receiver<Output>) {
     // Reading the calibration feature report switches a Bluetooth Sony pad to its full input
     // reports (with the touchpad); over USB it is harmless.

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tenseiga for Android 13+ (API 33): a NativeActivity with no Java code that loads
+     libtenseiga_android.so. build_apk.sh sets the version and SDK levels. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.mythraxzs.tenseiga">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+
+    <application
+        android:label="Tenseiga"
+        android:icon="@mipmap/ic_launcher"
+        android:hasCode="false"
+        android:extractNativeLibs="true"
+        android:appCategory="game"
+        android:isGame="true">
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="true"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density">
+            <meta-data android:name="android.app.lib_name" android:value="tenseiga_android" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
