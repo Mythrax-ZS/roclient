@@ -137,6 +137,9 @@ pub struct Renderer {
     relay: Option<wgpu::Texture>,
     /// The GPU and graphics API in use ("Adreno (TM) 740 (Vulkan)"), for the performance overlay.
     adapter_name: String,
+    /// The world's resolution as a share of the window's (0.5..1): the scene and its effects
+    /// render smaller and the last pass scales them up; the interface stays sharp.
+    render_scale: f32,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -549,7 +552,7 @@ impl Renderer {
         );
 
         let ui_renderer = egui_wgpu::Renderer::new(&device, config.format.remove_srgb_suffix(), Default::default());
-        let targets = Self::make_targets(&device, &config, samples);
+        let targets = Self::make_targets(&device, (config.width, config.height), samples);
         let water_screen = water::ScreenCopies::new(&device, &water_screen_layout, config.width, config.height);
         let water_detail = scene::upload_texture(&device, &queue, &water::detail_texture(), true);
         let post = post::Post::new(&device, config.format);
@@ -560,6 +563,7 @@ impl Renderer {
             instance,
             relay,
             adapter_name: format!("{} ({:?})", info.name, info.backend),
+            render_scale: 1.0,
             device,
             queue,
             config,
@@ -887,8 +891,8 @@ impl Renderer {
         });
     }
 
-    fn make_targets(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, samples: u32) -> Targets {
-        let size = wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 };
+    fn make_targets(device: &wgpu::Device, (width, height): (u32, u32), samples: u32) -> Targets {
+        let size = wgpu::Extent3d { width: width.max(1), height: height.max(1), depth_or_array_layers: 1 };
         let tex = |label, format| {
             device
                 .create_texture(&wgpu::TextureDescriptor {
@@ -907,7 +911,7 @@ impl Renderer {
             depth: tex("depth", DEPTH_FORMAT),
             msaa: (samples > 1).then(|| tex("msaa", post::HDR_FORMAT)),
             msaa_info: (samples > 1).then(|| tex("msaa info", post::INFO_FORMAT)),
-            post: post::PostTargets::new(device, config.width, config.height),
+            post: post::PostTargets::new(device, width, height),
         }
     }
 
@@ -922,7 +926,7 @@ impl Renderer {
         if self.relay.is_some() {
             self.relay = Some(Self::make_relay(&self.device, &self.config));
         }
-        self.targets = Self::make_targets(&self.device, &self.config, self.samples);
+        self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples);
         Ok(())
     }
 
@@ -936,12 +940,27 @@ impl Renderer {
         if self.relay.is_some() {
             self.relay = Some(Self::make_relay(&self.device, &self.config));
         }
-        self.targets = Self::make_targets(&self.device, &self.config, self.samples);
+        self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples);
     }
 
     /// The GPU and graphics API in use.
     pub fn adapter(&self) -> &str {
         &self.adapter_name
+    }
+
+    /// Sets the world's resolution as a share of the window's (see `render_scale`).
+    pub fn set_render_scale(&mut self, scale: f32) {
+        let scale = (scale.clamp(0.5, 1.0) * 20.0).round() / 20.0;
+        if scale != self.render_scale {
+            self.render_scale = scale;
+            self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples);
+        }
+    }
+
+    /// The size the world renders at.
+    pub fn scene_size(&self) -> (u32, u32) {
+        let s = |n: u32| ((n as f32 * self.render_scale).round() as u32).max(1);
+        (s(self.config.width), s(self.config.height))
     }
 
     pub fn size(&self) -> (u32, u32) {
@@ -1018,7 +1037,9 @@ impl Renderer {
         let mut config = self.config.clone();
         config.width = width;
         config.height = height;
-        let targets = Self::make_targets(&self.device, &config, self.samples);
+        // The world at the render scale, as on screen.
+        let s = |n: u32| ((n as f32 * self.render_scale).round() as u32).max(1);
+        let targets = Self::make_targets(&self.device, (s(width), s(height)), self.samples);
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("capture"),
             size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -1148,6 +1169,8 @@ impl Renderer {
         }
         let targets = targets.unwrap_or(&self.targets);
         let aspect = size.0 as f32 / size.1 as f32;
+        // The world's own size (smaller than the output with a render scale below 1).
+        let scene = targets.post.size();
         let cam = &self.camera;
         // The sun's view of the area around the player, for sprite shadows.
         let light_vp = shadow::Shadow::light_vp(cam.target, self.cast_dir, (cam.distance * 0.75).clamp(120.0, 600.0));
@@ -1174,7 +1197,7 @@ impl Renderer {
             },
             light_vp: light_vp.to_cols_array_2d(),
             shadow: [shadow_strength, 1.0 / shadow::SIZE as f32, self.post_settings.shadow_softness, 0.0],
-            screen: [size.0 as f32, size.1 as f32, 1.0 / size.0 as f32, 1.0 / size.1 as f32],
+            screen: [scene.0 as f32, scene.1 as f32, 1.0 / scene.0 as f32, 1.0 / scene.1 as f32],
             sprite_light: {
                 let p = &self.post_settings;
                 let on = if p.enabled { 1.0 } else { 0.0 };
@@ -1240,8 +1263,8 @@ impl Renderer {
             let sky_scale = if outdoor_sky { sky_scale * (1.0 - 0.78 * self.night_t) } else { sky_scale };
             w.update(&self.queue, &self.water_settings, self.lighting.diffuse, sky_scale);
             let s = self.water_screen.color.size();
-            if (s.width, s.height) != size {
-                self.water_screen = water::ScreenCopies::new(&self.device, &self.water_screen_layout, size.0, size.1);
+            if (s.width, s.height) != scene {
+                self.water_screen = water::ScreenCopies::new(&self.device, &self.water_screen_layout, scene.0, scene.1);
             }
         }
 

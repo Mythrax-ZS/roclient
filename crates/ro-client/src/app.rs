@@ -7186,6 +7186,7 @@ impl App {
         }
 
         r.post_settings = self.settings.visual.post();
+        r.set_render_scale(self.settings.visual.render_scale);
         // Catmull-Rom on magnified ground and model textures (the sprite shader never reads it).
         r.upscale_runtime = self.settings.upscale.runtime_bicubic();
         r.underwater = if self.world.as_ref().is_some_and(|w| w.submerged) { self.settings.visual.underwater } else { 0.0 };
@@ -7420,7 +7421,10 @@ impl App {
                     format!("build {:.1} ms  draw {:.1} ms", p.cpu, p.render),
                     self.ping.map_or("ping -".to_string(), |ms| if ms < 10.0 { format!("ping {ms:.1} ms") } else { format!("ping {ms:.0} ms") }),
                     format!("{map_name} {},{}  {} units  {} drawn", at.0, at.1, self.units.len(), r.actors.len()),
-                    format!("{w}x{h}  {}", r.adapter()),
+                    match r.scene_size() {
+                        (sw, sh) if (sw, sh) != (w, h) => format!("{w}x{h} (world {sw}x{sh})  {}", r.adapter()),
+                        _ => format!("{w}x{h}  {}", r.adapter()),
+                    },
                 ]
             });
             let out = self.egui_ctx.run_ui(input, |ui| {

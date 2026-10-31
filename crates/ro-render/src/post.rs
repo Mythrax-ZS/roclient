@@ -202,6 +202,11 @@ impl PostTargets {
             size: (w.max(1), h.max(1)),
         }
     }
+
+    /// The scene size these targets are for.
+    pub fn size(&self) -> (u32, u32) {
+        self.size
+    }
 }
 
 pub struct Post {
