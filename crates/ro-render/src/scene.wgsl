@@ -142,7 +142,7 @@ fn fs_main(in: VsOut) -> FsOut {
     let tilted = g.ambient.rgb + g.diffuse.rgb * max(dot(n, -g.light_dir.xyz), 0.0);
     let shade = clamp(tilted / max(g.ambient.rgb + g.diffuse.rgb * ndl, vec3(0.05)), vec3(0.5), vec3(1.5));
     let rgb = clamp(t.rgb * in.color * light * shade + lm.rgb, vec3(0.0), vec3(1.0));
-    let lit = srgb_to_linear(rgb) * sprite_shadow(in.world, select(1.0, sun_ray(in.world, flat), rt)) + srgb_to_linear(t.rgb * in.color) * point_light(in.world, n);
+    let lit = srgb_to_linear(rgb) * sprite_shadow(in.world, sun_ray(in.world, flat, 4u)) + srgb_to_linear(t.rgb * in.color) * point_light(in.world, n);
     return FsOut(vec4(lit, 1.0), vec4(distance(in.world, g.eye.xyz), 0.0, 0.0, 0.0));
 }
 
@@ -223,6 +223,6 @@ fn in_room(world: vec3<f32>) -> bool {
 }
 
 // RT-STUB: replaced by rt.wgsl where the GPU traces rays.
-fn sun_ray(world: vec3<f32>, n: vec3<f32>) -> f32 {
+fn sun_ray(world: vec3<f32>, n: vec3<f32>, rays: u32) -> f32 {
     return 1.0;
 }

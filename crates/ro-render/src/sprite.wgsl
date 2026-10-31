@@ -156,7 +156,7 @@ fn fs_main(in: VsOut) -> FsOut {
         let feet = in.anchor - normalize(vec3(g.light_dir.x, 0.0, g.light_dir.z) + vec3(1e-4, 0.0, 0.0)) * 6.0 + vec3(0.0, 1.0, 0.0);
         // Buildings and trees shade sprites too where shadows are ray traced (from the feet,
         // like the ground the sprite stands on).
-        let geometry = select(1.0, sun_ray(in.anchor + vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 0.0)), g.rt.w > 0.5);
+        let geometry = sun_ray(in.anchor + vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 0.0), 1u);
         let here = g.ambient.rgb + g.diffuse.rgb * up * mix(1.0, min(sun_visible(feet), geometry), g.shadow.x);
         let shade = here / max(full, vec3(0.05));
         rgb = rgb * mix(vec3(1.0), shade, k) + rgb * point_light(in.anchor + vec3(0.0, 8.0, 0.0)) * k;
@@ -195,6 +195,6 @@ fn in_room(world: vec3<f32>) -> bool {
 }
 
 // RT-STUB: replaced by rt.wgsl where the GPU traces rays.
-fn sun_ray(world: vec3<f32>, n: vec3<f32>) -> f32 {
+fn sun_ray(world: vec3<f32>, n: vec3<f32>, rays: u32) -> f32 {
     return 1.0;
 }
