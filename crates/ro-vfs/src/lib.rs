@@ -5,7 +5,9 @@ pub mod grf;
 
 pub use grf::Grf;
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// Normalized lookup key: backslashes, lowercase (ASCII only; Korean is case-less).
 pub fn normalize(path: &str) -> String {
@@ -21,9 +23,16 @@ pub struct Vfs {
     pub overlays: Vec<PathBuf>,
     pub loose: Option<PathBuf>,
     pub grfs: Vec<Grf>,
+    /// Every file in each overlay folder, then the loose folder, by lowercased `/` path:
+    /// the game's paths ignore case, Linux file names do not. Built on first use.
+    folders: OnceLock<Vec<HashMap<String, PathBuf>>>,
 }
 
 impl Vfs {
+    pub fn new(overlays: Vec<PathBuf>, loose: Option<PathBuf>, grfs: Vec<Grf>) -> Self {
+        Self { overlays, loose, grfs, folders: OnceLock::new() }
+    }
+
     /// The highest-priority copy of a file.
     pub fn read(&self, path: &str) -> anyhow::Result<Option<Vec<u8>>> {
         let mut found = None;
@@ -47,19 +56,14 @@ impl Vfs {
 
     /// Feeds each layer's copy to `each` in priority order until it returns false.
     fn layers(&self, path: &str, each: &mut dyn FnMut(Vec<u8>) -> bool) -> anyhow::Result<()> {
-        let rel = path.replace('\\', "/");
-        for root in &self.overlays {
-            let en = rel.get(..7).filter(|p| p.eq_ignore_ascii_case("System/")).map(|_| root.join(format!("SystemEN/{}", &rel[7..])));
-            if let Some(p) = en.into_iter().chain(std::iter::once(root.join(&rel))).find(|p| p.is_file()) {
+        let rel = path.replace('\\', "/").to_ascii_lowercase();
+        let folders = self.folders.get_or_init(|| self.overlays.iter().chain(&self.loose).map(|root| index(root)).collect());
+        for (i, files) in folders.iter().enumerate() {
+            let en = rel.strip_prefix("system/").filter(|_| i < self.overlays.len()).and_then(|r| files.get(&format!("systemen/{r}")));
+            if let Some(p) = en.or_else(|| files.get(&rel)) {
                 if !each(std::fs::read(p)?) {
                     return Ok(());
                 }
-            }
-        }
-        if let Some(root) = &self.loose {
-            let p = root.join(&rel);
-            if p.is_file() && !each(std::fs::read(p)?) {
-                return Ok(());
             }
         }
         for g in &self.grfs {
@@ -71,6 +75,24 @@ impl Vfs {
         }
         Ok(())
     }
+}
+
+/// Every file under `root`, keyed by its lowercased path relative to it with `/` separators.
+fn index(root: &Path) -> HashMap<String, PathBuf> {
+    let mut files = HashMap::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let path = e.path();
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                dirs.push(path);
+            } else if let Some(rel) = path.strip_prefix(root).ok().and_then(Path::to_str) {
+                files.insert(rel.replace('\\', "/").to_ascii_lowercase(), path.clone());
+            }
+        }
+    }
+    files
 }
 
 impl Vfs {

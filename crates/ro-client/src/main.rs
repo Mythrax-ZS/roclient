@@ -161,7 +161,7 @@ fn open_vfs(cfg: &Config) -> anyhow::Result<Option<ro_vfs::Vfs>> {
             overlays.push(path);
         }
     }
-    let mut vfs = ro_vfs::Vfs { overlays, loose: Some(dir.clone()), grfs: vec![] };
+    let mut vfs = ro_vfs::Vfs::new(overlays, Some(dir.clone()), vec![]);
     for name in &cfg.grfs {
         let path = dir.join(name);
         if path.is_file() {
