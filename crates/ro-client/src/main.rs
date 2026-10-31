@@ -1017,6 +1017,9 @@ struct App {
     windows: windows::Windows,
     icons: std::collections::HashMap<u32, egui::TextureHandle>,
     icons_tried: std::collections::HashSet<u32>,
+    /// Unidentified items' icons (their own look until identified), by item id.
+    unid_icons: std::collections::HashMap<u32, egui::TextureHandle>,
+    unid_tried: std::collections::HashSet<u32>,
     skill_icons: std::collections::HashMap<u16, egui::TextureHandle>,
     /// Floor item to pick up once we have walked next to it.
     pending_pickup: Option<u32>,
@@ -4334,19 +4337,22 @@ impl App {
         }
     }
 
-    /// Loads inventory icons not yet loaded into egui textures.
+    /// Loads inventory icons not yet loaded into egui textures: an item's own icon, and for
+    /// unidentified ones their unidentified look as well (kept apart, so identifying one swaps
+    /// the icon).
     fn load_icons(&mut self) {
+        let ids: Vec<u32> = self.inventory.items.values().map(|i| i.id).collect();
+        self.load_icons_for(&ids);
         let (Some(db), Some(vfs)) = (self.item_db.as_ref(), self.vfs.as_ref()) else { return };
-        let ids: Vec<(u32, bool)> = self.inventory.items.values().map(|i| (i.id, i.identified)).collect();
-        for (id, identified) in ids {
-            if self.icons.contains_key(&id) || !self.icons_tried.insert(id) {
+        let unid: Vec<u32> = self.inventory.items.values().filter(|i| !i.identified).map(|i| i.id).collect();
+        for id in unid {
+            if self.unid_icons.contains_key(&id) || !self.unid_tried.insert(id) {
                 continue;
             }
-            let Some(info) = db.get(id) else { continue };
-            let res = if identified || info.unidentified_resource.is_empty() { &info.resource } else { &info.unidentified_resource };
+            let Some(res) = db.get(id).map(|i| &i.unidentified_resource).filter(|r| !r.is_empty()) else { continue };
             let path = format!("data\\texture\\유저인터페이스\\item\\{res}.bmp");
             if let Some(tex) = load_texture(&self.egui_ctx, vfs, &path) {
-                self.icons.insert(id, tex);
+                self.unid_icons.insert(id, tex);
             }
         }
     }
@@ -7083,6 +7089,7 @@ impl App {
                 items: &items,
                 db: self.item_db.as_ref(),
                 icons: &self.icons,
+                unid_icons: &self.unid_icons,
                 skill_icons: &self.skill_icons,
                 stats: self.stats.as_ref(),
                 fourth_job: jobs::is_fourth(self.hud.status.job_id),
@@ -8095,6 +8102,8 @@ fn run() -> anyhow::Result<()> {
         windows: Default::default(),
         icons: Default::default(),
         icons_tried: Default::default(),
+        unid_icons: Default::default(),
+        unid_tried: Default::default(),
         skill_icons: Default::default(),
         pending_pickup: None,
         aiming: None,

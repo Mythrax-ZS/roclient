@@ -154,6 +154,8 @@ pub struct View<'a> {
     pub items: &'a [&'a InvItem],
     pub db: Option<&'a ItemDb>,
     pub icons: &'a HashMap<u32, egui::TextureHandle>,
+    /// Unidentified items' icons.
+    pub unid_icons: &'a HashMap<u32, egui::TextureHandle>,
     pub skill_icons: &'a HashMap<u16, egui::TextureHandle>,
     pub stats: Option<&'a Stats>,
     /// A 4th job: the Status window shows trait stats.
@@ -808,13 +810,24 @@ fn strip_colors(s: &str) -> String {
     out
 }
 
+impl View<'_> {
+    /// An inventory item's icon: its unidentified look until it is identified.
+    fn item_icon(&self, it: &InvItem) -> Option<&egui::TextureHandle> {
+        if it.identified {
+            self.icons.get(&it.id)
+        } else {
+            self.unid_icons.get(&it.id).or_else(|| self.icons.get(&it.id))
+        }
+    }
+}
+
 /// A square slot with the item icon (or a placeholder) and its amount.
-fn item_slot(ui: &mut egui::Ui, icons: &HashMap<u32, egui::TextureHandle>, it: &InvItem, size: f32) -> egui::Response {
+fn item_slot(ui: &mut egui::Ui, v: &View, it: &InvItem, size: f32) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     let hovered = resp.hovered();
     painter.rect_filled(rect, 4.0, if hovered { Color32::from_white_alpha(30) } else { Color32::from_white_alpha(12) });
-    if let Some(tex) = icons.get(&it.id) {
+    if let Some(tex) = v.item_icon(it) {
         let s = tex.ui_size().min(Vec2::splat(size - 6.0));
         painter.image(tex.id(), egui::Rect::from_center_size(rect.center(), s), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
     }
@@ -1055,7 +1068,7 @@ impl Windows {
                             if resp.hovered() {
                                 p.rect_filled(cell.shrink(1.0), 3.0, Color32::from_rgba_unmultiplied(120, 150, 230, 50));
                             }
-                            if let Some(t) = v.icons.get(&it.id) {
+                            if let Some(t) = v.item_icon(it) {
                                 p.image(t.id(), egui::Rect::from_center_size(cell.center(), t.ui_size().min(Vec2::splat(24.0))), uv, Color32::WHITE);
                             }
                             if it.amount > 1 {
@@ -1124,7 +1137,7 @@ impl Windows {
                     .collect();
                 egui::Grid::new("inv").spacing(Vec2::splat(4.0)).show(ui, |ui| {
                     for (i, it) in shown.iter().enumerate() {
-                        let resp = item_slot(ui, v.icons, it, 38.0);
+                        let resp = item_slot(ui, v, it, 38.0);
                         if let Some(a) = inventory_item_actions(resp, it, v) {
                             action = Some(a);
                         }
@@ -1202,7 +1215,7 @@ impl Windows {
 
                         let icon_c = egui::pos2(area.min.x + if left { 17.0 } else { 263.0 }, y);
                         let icon = egui::Rect::from_center_size(icon_c, Vec2::splat(24.0));
-                        if let Some(t) = v.icons.get(&it.id) {
+                        if let Some(t) = v.item_icon(it) {
                             p.image(t.id(), icon, uv, Color32::WHITE);
                         }
                         // The name over the faint slot label, cut to the column.
@@ -1297,7 +1310,7 @@ impl Windows {
                         used_acc.push(it.index);
                     }
                     p.rect_stroke(icon, 5.0, egui::Stroke::new(1.5, Color32::from_rgb(120, 200, 255)), egui::StrokeKind::Inside);
-                    match v.icons.get(&it.id) {
+                    match v.item_icon(it) {
                         Some(t) => {
                             p.image(t.id(), egui::Rect::from_center_size(icon.center(), Vec2::splat(28.0)), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
                         }
@@ -1672,7 +1685,7 @@ impl Windows {
                             for it in v.items.iter().filter(|it| it.kind == ro_game::items::kind::ETC && it.equipped == 0) {
                                 ui.horizontal(|ui| {
                                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::hover());
-                                    paint_icon(ui.painter(), rect, v.icons.get(&it.id), Color32::WHITE);
+                                    paint_icon(ui.painter(), rect, v.item_icon(it), Color32::WHITE);
                                     ui.label(format!("{} ({})", item_name(v.db, it), it.amount));
                                     let n = self.materials.entry(it.index).or_default();
                                     ui.add(egui::DragValue::new(n).range(0..=it.amount));
@@ -1756,7 +1769,7 @@ impl Windows {
                 for e in &equips {
                     let Some(it) = v.items.iter().find(|it| it.index == *e) else { continue };
                     ui.horizontal(|ui| {
-                        item_slot(ui, v.icons, it, 32.0).on_hover_ui(|ui| item_tooltip(ui, v.db, it));
+                        item_slot(ui, v, it, 32.0).on_hover_ui(|ui| item_tooltip(ui, v.db, it));
                         if ui.button(item_name(v.db, it)).clicked() {
                             action = Some(UiAction::InsertCard { card, equip: *e });
                             self.card_pick = None;
