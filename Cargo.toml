@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*", "tools/*"]
-exclude = ["tools/samurai_assets"]
+exclude = ["tools/samurai_assets", "vendor/android-activity"]
 
 [workspace.package]
 edition = "2021"
@@ -21,3 +21,7 @@ encoding_rs = "0.8"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 pollster = "0.4"
+
+# Android: android-activity with an input hook for game controllers (vendor/android-activity/TENSEIGA.md).
+[patch.crates-io]
+android-activity = { path = "vendor/android-activity" }

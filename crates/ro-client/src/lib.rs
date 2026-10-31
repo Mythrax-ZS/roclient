@@ -34,6 +34,8 @@ fn android_main(android: AndroidApp) {
     unpack_overlays(&android, &home);
     first_start(&home);
     std::env::set_var("ROCLIENT_CONFIG", home.join("config").join("local.toml"));
+    // Game controllers are read from the input events before winit sees them (gamepad.rs).
+    winit::platform::android::activity::set_input_filter(gamepad::android::input);
     let event_loop = match EventLoop::builder().with_android_app(android).build() {
         Ok(e) => e,
         Err(e) => {

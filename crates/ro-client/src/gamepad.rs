@@ -1,8 +1,11 @@
 //! Controller input through gilrs (XInput on Windows; evdev on Linux, where Steam Input
 //! presents the Steam Deck's controls as an Xbox pad). Each frame yields the stick and
-//! trigger state plus the buttons pressed since the last frame.
+//! trigger state plus the buttons pressed since the last frame. On Android, where gilrs
+//! finds nothing, controllers are read from the activity's input events instead ([`android`]).
 
-use gilrs::{Axis, Button, EventType, Gilrs};
+use gilrs::{Button, Gilrs};
+#[cfg(not(target_os = "android"))]
+use gilrs::{Axis, EventType};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
@@ -73,6 +76,8 @@ pub struct Pad {
     /// The physical left and right sticks as read, before any deadzone (the settings'
     /// stick preview).
     pub raw: [Vec2; 2],
+    /// Android: a controller has sent input (they are only known by their events).
+    feed: bool,
 }
 
 /// A stick's reading with a radial deadzone: nothing inside `inner`, full tilt from
@@ -96,7 +101,7 @@ impl Pad {
             id
         }));
         let detected = gilrs.as_ref().map_or(crate::padglyph::Style::Xbox, |g| family(g, active));
-        Self { gilrs, active, used: false, detected, rumble: None, rumble_now: (0.0, 0.0), tuning: Tuning::default(), raw: [Vec2::ZERO; 2] }
+        Self { gilrs, active, used: false, detected, rumble: None, rumble_now: (0.0, 0.0), tuning: Tuning::default(), raw: [Vec2::ZERO; 2], feed: false }
     }
 
     /// Runs the active pad's motors at these strengths (0..1): the heavy one and the light one.
@@ -129,7 +134,7 @@ impl Pad {
 
     /// A controller is connected.
     pub fn connected(&self) -> bool {
-        self.active.is_some()
+        self.active.is_some() || self.feed
     }
 
     /// The USB vendor and product ids of the pad in use, when the system reports them.
@@ -140,7 +145,7 @@ impl Pad {
 
     /// True once a controller has been used (the UI then shows button hints).
     pub fn in_use(&self) -> bool {
-        self.used && self.active.is_some()
+        self.used && self.connected()
     }
 
     /// The keyboard and mouse took over: hide the hints until the controller is touched again.
@@ -153,7 +158,37 @@ impl Pad {
 
     pub fn poll(&mut self) -> PadFrame {
         let mut frame = PadFrame::default();
-        let Some(g) = self.gilrs.as_mut() else { return frame };
+        let Some([lt, rt]) = self.read(&mut frame) else {
+            self.raw = [Vec2::ZERO; 2];
+            return frame;
+        };
+        let t = self.tuning;
+        let left = deadzone(self.raw[0], t.left_deadzone, t.outer_deadzone);
+        let right = deadzone(self.raw[1], t.right_deadzone, t.outer_deadzone);
+        let (walk, look) = if t.swap_sticks { (right, left) } else { (left, right) };
+        frame.left = walk;
+        let look = if look == Vec2::ZERO { look } else { look.normalize() * look.length().powf(t.curve.max(0.1)) };
+        let sign = |inv: bool| if inv { -1.0 } else { 1.0 };
+        frame.right = Vec2::new(look.x * t.turn_speed * sign(t.invert_turn), look.y * t.tilt_speed * sign(t.invert_tilt));
+        let held = t.trigger.clamp(0.05, 0.95);
+        frame.lt = lt > held;
+        frame.rt = rt > held;
+        // A stick only counts as picking up the controller when clearly pushed (with a small
+        // deadzone, resting drift would otherwise wake the controller hints).
+        if self.raw.iter().any(|v| v.length() > 0.35) && (frame.left != Vec2::ZERO || frame.right != Vec2::ZERO) {
+            if !self.used {
+                tracing::info!(left = ?frame.left, right = ?frame.right, "controller in use (sticks)");
+            }
+            self.used = true;
+        }
+        frame
+    }
+
+    /// The buttons pressed since the last frame into `frame`, the sticks as read into `raw`,
+    /// and the triggers' travel (0..1); None with no controller.
+    #[cfg(not(target_os = "android"))]
+    fn read(&mut self, frame: &mut PadFrame) -> Option<[f32; 2]> {
+        let g = self.gilrs.as_mut()?;
         let mut any = false;
         while let Some(ev) = g.next_event() {
             use gilrs::ev::filter::{axis_dpad_to_button, Filter};
@@ -183,31 +218,159 @@ impl Pad {
         if any {
             self.detected = family(g, self.active);
         }
-        let t = self.tuning;
-        let Some(pad) = self.active.map(|id| g.gamepad(id)) else {
-            self.raw = [Vec2::ZERO; 2];
-            return frame;
-        };
+        let pad = g.gamepad(self.active?);
         self.raw = [Vec2::new(pad.value(Axis::LeftStickX), pad.value(Axis::LeftStickY)), Vec2::new(pad.value(Axis::RightStickX), pad.value(Axis::RightStickY))];
-        let left = deadzone(self.raw[0], t.left_deadzone, t.outer_deadzone);
-        let right = deadzone(self.raw[1], t.right_deadzone, t.outer_deadzone);
-        let (walk, look) = if t.swap_sticks { (right, left) } else { (left, right) };
-        frame.left = walk;
-        let look = if look == Vec2::ZERO { look } else { look.normalize() * look.length().powf(t.curve.max(0.1)) };
-        let sign = |inv: bool| if inv { -1.0 } else { 1.0 };
-        frame.right = Vec2::new(look.x * t.turn_speed * sign(t.invert_turn), look.y * t.tilt_speed * sign(t.invert_tilt));
-        let trigger = |b: Button| pad.button_data(b).is_some_and(|d| d.value() > t.trigger.clamp(0.05, 0.95));
-        frame.lt = trigger(Button::LeftTrigger2);
-        frame.rt = trigger(Button::RightTrigger2);
-        // A stick only counts as picking up the controller when clearly pushed (with a small
-        // deadzone, resting drift would otherwise wake the controller hints).
-        if self.raw.iter().any(|v| v.length() > 0.35) && (frame.left != Vec2::ZERO || frame.right != Vec2::ZERO) {
+        let travel = |b: Button| pad.button_data(b).map_or(0.0, |d| d.value());
+        Some([travel(Button::LeftTrigger2), travel(Button::RightTrigger2)])
+    }
+
+    #[cfg(target_os = "android")]
+    fn read(&mut self, frame: &mut PadFrame) -> Option<[f32; 2]> {
+        let mut feed = android::FEED.lock().unwrap_or_else(|e| e.into_inner());
+        if !feed.seen {
+            return None;
+        }
+        if !self.feed {
+            tracing::info!("controller connected (Android input)");
+            self.feed = true;
+        }
+        frame.pressed = std::mem::take(&mut feed.pressed);
+        if let Some(b) = frame.pressed.first() {
             if !self.used {
-                tracing::info!(name = pad.name(), left = ?frame.left, right = ?frame.right, "controller in use (sticks)");
+                tracing::info!(button = ?b, "controller in use");
             }
             self.used = true;
         }
-        frame
+        self.raw = feed.sticks;
+        let travel = |i: usize| if feed.trigger_keys[i] { 1.0 } else { feed.triggers[i] };
+        Some([travel(0), travel(1)])
+    }
+}
+
+/// Android controllers: the activity hands each input event to [`android::input`] (installed
+/// with android-activity's `set_input_filter`, see vendor/android-activity) before winit sees
+/// it. Controller buttons, sticks, triggers and hats are taken for [`Pad::poll`]; touches,
+/// keyboards and the system keys go on to winit.
+#[cfg(target_os = "android")]
+pub mod android {
+    use super::{Button, Vec2};
+    use std::sync::Mutex;
+    use winit::platform::android::activity::input::{Axis, InputEvent, KeyAction, Keycode};
+
+    pub(super) struct Feed {
+        /// A controller has sent anything since start-up.
+        pub seen: bool,
+        /// Pressed since the last poll.
+        pub pressed: Vec<Button>,
+        /// Left and right sticks, up positive (as gilrs reads them).
+        pub sticks: [Vec2; 2],
+        /// Analog trigger travel, and the digital L2 / R2 keys held (pads without the axes).
+        pub triggers: [f32; 2],
+        pub trigger_keys: [bool; 2],
+        /// The hat's last direction (-1, 0, 1 per axis), whose changes press the D-pad.
+        hat: [i8; 2],
+    }
+
+    pub(super) static FEED: Mutex<Feed> = Mutex::new(Feed { seen: false, pressed: Vec::new(), sticks: [Vec2::ZERO; 2], triggers: [0.0; 2], trigger_keys: [false; 2], hat: [0; 2] });
+
+    // AINPUT_SOURCE_GAMEPAD's own bit, and the joystick class (sticks, triggers, hats).
+    const GAMEPAD: u32 = 0x400;
+    const JOYSTICK: u32 = 0x10;
+
+    /// The pad button an Android key is, for keys from a controller (the D-pad keys also come
+    /// from keyboards' arrows, which stay keys).
+    fn button(key: Keycode, source: u32) -> Option<Button> {
+        let pad = source & (GAMEPAD | JOYSTICK) != 0;
+        Some(match key {
+            Keycode::ButtonA => Button::South,
+            Keycode::ButtonB => Button::East,
+            Keycode::ButtonX => Button::West,
+            Keycode::ButtonY => Button::North,
+            Keycode::ButtonL1 => Button::LeftTrigger,
+            Keycode::ButtonR1 => Button::RightTrigger,
+            Keycode::ButtonL2 => Button::LeftTrigger2,
+            Keycode::ButtonR2 => Button::RightTrigger2,
+            Keycode::ButtonThumbl => Button::LeftThumb,
+            Keycode::ButtonThumbr => Button::RightThumb,
+            Keycode::ButtonStart => Button::Start,
+            Keycode::ButtonSelect => Button::Select,
+            Keycode::ButtonMode => Button::Mode,
+            Keycode::DpadUp if pad => Button::DPadUp,
+            Keycode::DpadDown if pad => Button::DPadDown,
+            Keycode::DpadLeft if pad => Button::DPadLeft,
+            Keycode::DpadRight if pad => Button::DPadRight,
+            _ => return None,
+        })
+    }
+
+    fn press(feed: &mut Feed, b: Button) {
+        // Presses wait for the next poll, which only runs in the world: keep a few, not all.
+        if feed.pressed.len() < 16 {
+            feed.pressed.push(b);
+        }
+    }
+
+    /// The input hook: true takes the event (a controller's), false leaves it to winit.
+    pub fn input(event: &InputEvent<'_>) -> bool {
+        match event {
+            InputEvent::KeyEvent(key) => {
+                let Some(b) = button(key.key_code(), key.source().into()) else { return false };
+                let mut feed = FEED.lock().unwrap_or_else(|e| e.into_inner());
+                feed.seen = true;
+                let trigger = match b {
+                    Button::LeftTrigger2 => Some(0),
+                    Button::RightTrigger2 => Some(1),
+                    _ => None,
+                };
+                match key.action() {
+                    KeyAction::Down => {
+                        if key.repeat_count() == 0 {
+                            press(&mut feed, b);
+                        }
+                        if let Some(i) = trigger {
+                            feed.trigger_keys[i] = true;
+                        }
+                    }
+                    KeyAction::Up => {
+                        if let Some(i) = trigger {
+                            feed.trigger_keys[i] = false;
+                        }
+                    }
+                    _ => {}
+                }
+                true
+            }
+            InputEvent::MotionEvent(motion) => {
+                let source: u32 = motion.source().into();
+                if source & JOYSTICK == 0 {
+                    return false;
+                }
+                let p = motion.pointer_at_index(0);
+                let a = |axis| p.axis_value(axis);
+                let mut feed = FEED.lock().unwrap_or_else(|e| e.into_inner());
+                feed.seen = true;
+                // Android's Y axes point down. The right stick is Z / RZ on most pads, RX / RY
+                // on some.
+                feed.sticks[0] = Vec2::new(a(Axis::X), -a(Axis::Y));
+                let (z, rz) = (a(Axis::Z), a(Axis::Rz));
+                feed.sticks[1] = if z != 0.0 || rz != 0.0 { Vec2::new(z, -rz) } else { Vec2::new(a(Axis::Rx), -a(Axis::Ry)) };
+                feed.triggers = [a(Axis::Ltrigger).max(a(Axis::Brake)), a(Axis::Rtrigger).max(a(Axis::Gas))];
+                // A D-pad reported as a hat: each new direction is a press, as with gilrs.
+                let hat = [a(Axis::HatX).round() as i8, a(Axis::HatY).round() as i8];
+                for (i, (minus, plus)) in [(Button::DPadLeft, Button::DPadRight), (Button::DPadUp, Button::DPadDown)].into_iter().enumerate() {
+                    if hat[i] != feed.hat[i] {
+                        match hat[i] {
+                            -1 => press(&mut feed, minus),
+                            1 => press(&mut feed, plus),
+                            _ => {}
+                        }
+                    }
+                }
+                feed.hat = hat;
+                true
+            }
+            _ => false,
+        }
     }
 }
 
