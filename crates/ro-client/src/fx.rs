@@ -220,6 +220,8 @@ fn skill_str(skill: u16) -> Option<&'static str> {
         140 => "venomdust",
         141 => "venomsplasher",
         153 => "cartrevolution",
+        // NPC_SELFDESTRUCTION (Marine Sphere, @nuke): the blast, not suicide.str's 3 s charge.
+        173 => "sui_explosion",
         215 => "strip_weapon",
         216 => "strip_shield",
         217 => "strip_armor",
