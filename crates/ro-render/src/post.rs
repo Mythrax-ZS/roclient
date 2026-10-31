@@ -471,8 +471,10 @@ impl Post {
             let dt = then.map_or(0.0, |t| (frame.time - t).max(0.0));
             let ease = |secs: f32| 1.0 - (-dt / secs).exp();
             let snap = if then.is_none() { 1.0 } else { 0.0 };
+            // The eye before (read) and after (written): neither slot may hold the one written.
             let mut prev = none;
             prev[0] = &self.adapted[now];
+            prev[5] = &self.adapted[now];
             pass(enc, &self.adapt, &self.meter[3], &self.adapted[next], [ease(ADAPT_TO_DARK), ease(ADAPT_TO_BRIGHT), snap, 0.0], prev);
             self.eye.set((next, Some(frame.time)));
         } else {
