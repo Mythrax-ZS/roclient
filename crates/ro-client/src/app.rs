@@ -577,7 +577,17 @@ fn inv_item(d: ro_net::ItemData) -> ro_game::items::InvItem {
 /// it shows as empty boxes.
 fn install_fallback_fonts(ctx: &egui::Context) {
     let dir = std::path::PathBuf::from(std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into())).join("Fonts");
-    let Some(data) = ["malgun.ttf", "gulim.ttc"].iter().find_map(|f| std::fs::read(dir.join(f)).ok()) else {
+    // Windows, then Android's and the usual Linux (SteamOS) CJK fonts.
+    let candidates = [
+        dir.join("malgun.ttf"),
+        dir.join("gulim.ttc"),
+        "/system/fonts/NotoSansCJK-Regular.ttc".into(),
+        "/system/fonts/NotoSansKR-Regular.otf".into(),
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc".into(),
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc".into(),
+        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc".into(),
+    ];
+    let Some(data) = candidates.iter().find_map(|f: &std::path::PathBuf| std::fs::read(f).ok()) else {
         tracing::warn!("no Korean system font found; Korean text will show as boxes");
         return;
     };

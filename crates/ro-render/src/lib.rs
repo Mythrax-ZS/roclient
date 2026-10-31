@@ -133,6 +133,8 @@ pub struct Renderer {
     surface: wgpu::Surface<'static>,
     /// Kept to make a new surface when the old one is lost (Android, after a resume).
     instance: wgpu::Instance,
+    /// Where frames are drawn when the surface can't take a second view format (see new).
+    relay: Option<wgpu::Texture>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -269,9 +271,24 @@ impl Renderer {
             config.format = srgb;
         }
         config.present_mode = wgpu::PresentMode::AutoVsync;
-        config.view_formats = vec![config.format.remove_srgb_suffix()];
         config.desired_maximum_frame_latency = 2;
+        // egui wants a non-sRGB view of the frame. Most drivers let the window surface have
+        // both views; where one can't (some phone GPUs), frames are drawn into a texture that
+        // can, and copied to the window.
+        let views = adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::SURFACE_VIEW_FORMATS);
+        let relayed = !views && config.format.is_srgb() && caps.usages.contains(wgpu::TextureUsages::COPY_DST);
+        if !views && !relayed {
+            // Neither: a plain (non-sRGB) surface. It runs, but the world shows darker.
+            config.format = config.format.remove_srgb_suffix();
+        }
+        if relayed {
+            config.usage |= wgpu::TextureUsages::COPY_DST;
+            tracing::info!("the window can't take a second view format: drawing through a texture");
+        } else if views {
+            config.view_formats = vec![config.format.remove_srgb_suffix()];
+        }
         surface.configure(&device, &config);
+        let relay = relayed.then(|| Self::make_relay(&device, &config));
 
         // The world renders into an HDR target (post::HDR_FORMAT); MSAA must suit that format.
         let supported = adapter.get_texture_format_features(post::HDR_FORMAT).flags;
@@ -539,6 +556,7 @@ impl Renderer {
         Ok(Self {
             surface,
             instance,
+            relay,
             device,
             queue,
             config,
@@ -898,6 +916,9 @@ impl Renderer {
         self.config.width = size.width.max(1);
         self.config.height = size.height.max(1);
         self.surface.configure(&self.device, &self.config);
+        if self.relay.is_some() {
+            self.relay = Some(Self::make_relay(&self.device, &self.config));
+        }
         self.targets = Self::make_targets(&self.device, &self.config, self.samples);
         Ok(())
     }
@@ -909,6 +930,9 @@ impl Renderer {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
+        if self.relay.is_some() {
+            self.relay = Some(Self::make_relay(&self.device, &self.config));
+        }
         self.targets = Self::make_targets(&self.device, &self.config, self.samples);
     }
 
@@ -930,6 +954,20 @@ impl Renderer {
         self.config.width as f32 / self.config.height as f32
     }
 
+    /// The texture frames are drawn into when the window surface can't take a second view.
+    fn make_relay(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::Texture {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("frame relay"),
+            size: wgpu::Extent3d { width: config.width, height: config.height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[config.format.remove_srgb_suffix()],
+        })
+    }
+
     pub fn frame(&mut self) -> anyhow::Result<()> {
         let tex = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -943,12 +981,21 @@ impl Renderer {
             }
         };
 
-        let view = tex.texture.create_view(&Default::default());
-        // egui blends in gamma space: give it a non-sRGB view of the same surface.
-        let ui_view = tex.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(self.config.format.remove_srgb_suffix()), ..Default::default() });
+        // egui blends in gamma space: give it a non-sRGB view of the same frame.
+        let target = self.relay.as_ref().unwrap_or(&tex.texture);
+        let view = target.create_view(&Default::default());
+        let ui_view = target.create_view(&wgpu::TextureViewDescriptor { format: Some(self.config.format.remove_srgb_suffix()), ..Default::default() });
         let cmd = self.encode(&view, &ui_view, None, self.size(), true);
-
-        self.queue.submit([cmd]);
+        match &self.relay {
+            Some(relay) => {
+                let mut enc = self.device.create_command_encoder(&Default::default());
+                enc.copy_texture_to_texture(relay.as_image_copy(), tex.texture.as_image_copy(), relay.size());
+                self.queue.submit([cmd, enc.finish()]);
+            }
+            None => {
+                self.queue.submit([cmd]);
+            }
+        }
         self.queue.present(tex);
         Ok(())
     }
