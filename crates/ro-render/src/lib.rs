@@ -497,23 +497,23 @@ impl Renderer {
         };
         let grid = pipeline("grid", include_str!("grid.wgsl"), &[Some(&globals_layout)], &[], None);
         let rt_layout = rt_needs.is_some().then(|| rt::layout(&device));
-        // With ray tracing, rt.wgsl's shadow ray replaces the stub at the end of the world and
-        // sprite shaders.
-        let with_rt = |src: &str| match &rt_layout {
-            Some(_) => format!("{}\n{}", include_str!("rt.wgsl"), &src[..src.find("// RT-STUB").expect("shader stub")]),
+        // With ray tracing, rt.wgsl's shadow and reflection rays replace the stubs at the end of
+        // the world, sprite and water shaders (bound as `group`).
+        let with_rt = |src: &str, group| match &rt_layout {
+            Some(_) => rt::join(src, group),
             None => src.to_string(),
         };
         let scene_pipeline = pipeline(
             "scene",
-            &with_rt(include_str!("scene.wgsl")),
+            &with_rt(include_str!("scene.wgsl"), 2),
             &[Some(&globals_layout), Some(&texture_layout), rt_layout.as_ref()],
             &[Some(scene::Vertex::layout())],
             None,
         );
         let water_pipeline = pipeline(
             "water",
-            include_str!("water.wgsl"),
-            &[Some(&globals_layout), Some(&water_layout), Some(&water_screen_layout)],
+            &with_rt(include_str!("water.wgsl"), 3),
+            &[Some(&globals_layout), Some(&water_layout), Some(&water_screen_layout), rt_layout.as_ref()],
             &[Some(water::Vertex::layout())],
             Some(wgpu::BlendState::ALPHA_BLENDING),
         );
@@ -562,7 +562,7 @@ impl Renderer {
         );
         let sprite_pipeline = pipeline(
             "sprite",
-            &with_rt(include_str!("sprite.wgsl")),
+            &with_rt(include_str!("sprite.wgsl"), 2),
             &[Some(&globals_layout), Some(&sprite_layout), rt_layout.as_ref()],
             &[Some(sprite::Vertex::layout())],
             Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
@@ -1418,6 +1418,9 @@ impl Renderer {
                 pass.set_pipeline(&self.water_pipeline);
                 pass.set_bind_group(1, &w.frames[w.frame(globals.params[0])], &[]);
                 pass.set_bind_group(2, &self.water_screen.bind, &[]);
+                if let Some(rt) = &self.rt_bind {
+                    pass.set_bind_group(3, rt, &[]);
+                }
                 pass.set_vertex_buffer(0, w.vertices.slice(..));
                 pass.draw(0..w.count, 0..1);
             }

@@ -23,6 +23,11 @@ struct Globals {
     sprite_light: vec4<f32>,
     lights: array<vec4<f32>, 64>,
     room: vec4<f32>,
+    water: vec4<f32>,
+    water_tint: vec4<f32>,
+    upscale: vec4<f32>,
+    // xyz: direction the sun's light travels for ray-traced shadows, w: 1 when they are on
+    rt: vec4<f32>,
 };
 
 struct Water {
@@ -446,6 +451,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if on(F_REFLECTION) {
         let r = reflect(-v, n);
         var refl = sky(vec3(r.x, max(r.y, 0.02), r.z));
+        // Ray traced (outdoors, ray-tracing GPUs): the map's buildings and trees, even off screen.
+        let traced = rt_reflect(p + n * 0.5, normalize(vec3(r.x, max(r.y, 0.02), r.z)));
+        refl = mix(refl, traced.rgb, traced.a);
         if on(F_SSR) && screen_ok {
             let hit = ssr(p + n * 0.5, r);
             refl = mix(refl, hit.rgb, hit.a);
@@ -521,4 +529,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         alpha *= edge;
     }
     return vec4(color, alpha);
+}
+
+// RT-STUB: replaced by rt.wgsl where the GPU traces rays.
+fn rt_reflect(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
+    return vec4(0.0);
 }

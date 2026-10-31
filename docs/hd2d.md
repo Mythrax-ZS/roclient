@@ -52,7 +52,14 @@ light through. The world shader's `sun_ray` (from `rt.wgsl`, joined in place of 
 end of `scene.wgsl`) casts four rays over a small sun disc (about 1.7°, turned from spot to spot) toward `shadow_dir()`, for soft edges,, the same sun the sprite shadows use.
 Where it's on, `lm.a` is ignored and the ray's result joins the sprite shadow, so both get
 the same darkness (Shadows). Sprites trace the same ray from their feet (`sprite.wgsl`), so
-characters darken when they walk into a building's shadow. It runs outdoors only. Interiors, dungeons and underwater keep
+characters darken when they walk into a building's shadow.
+
+Water reflections trace too (`rt_reflect`, the water shader's group 3). The reflected ray
+finds what it would see of the map, off screen included, and shades it from each triangle's
+info: a 128² copy of its texture (the same array the cut-out test reads), its vertex colour
+and the sun, with a one-ray shadow. Screen-space reflection still lies on top where it finds
+the scene, which keeps on-screen detail and sprites. The ray tracing has no lightmaps, so
+off-screen surfaces show no baked colour light. It runs outdoors only. Interiors, dungeons and underwater keep
 their hand-baked light. Setting: Ray-traced shadows (on by default except on Android).
 
 ### Tilt-shift depth of field
