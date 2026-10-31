@@ -950,6 +950,12 @@ impl Renderer {
         &self.adapter_name
     }
 
+    /// GPU memory this device has allocated and reserved from the driver (bytes), on Vulkan
+    /// and DX12. Not counted: the swapchain and the driver's own memory.
+    pub fn vram(&self) -> Option<(u64, u64)> {
+        self.device.generate_allocator_report().map(|r| (r.total_allocated_bytes, r.total_reserved_bytes))
+    }
+
     /// Sets the world's resolution as a share of the window's (see `render_scale`).
     pub fn set_render_scale(&mut self, scale: f32) {
         let scale = (scale.clamp(0.5, 2.0) * 20.0).round() / 20.0;

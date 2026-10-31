@@ -7427,6 +7427,9 @@ impl App {
             dots.extend(self.battle.team_dots().into_iter().map(|c| (c, egui::Color32::from_rgb(255, 160, 200))));
             let me = self.player.as_ref().map(|p| (p.walker.cell.0 as f32, p.walker.cell.1 as f32));
             let map_name = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
+            if self.settings.perf_overlay && self.perf.vram_due() {
+                self.perf.vram = r.vram();
+            }
             let perf_lines = self.settings.perf_overlay.then(|| {
                 let p = &self.perf;
                 let (w, h) = r.size();
@@ -7440,6 +7443,7 @@ impl App {
                         (sw, sh) if (sw, sh) != (w, h) => format!("{w}x{h} (world {sw}x{sh})  {}", r.adapter()),
                         _ => format!("{w}x{h}  {}", r.adapter()),
                     },
+                    p.vram.map_or("GPU memory -".to_string(), |(used, reserved)| format!("GPU memory {} MB ({} MB reserved)", used >> 20, reserved >> 20)),
                 ]
             });
             let out = self.egui_ctx.run_ui(input, |ui| {

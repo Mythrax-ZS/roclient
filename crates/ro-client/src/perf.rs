@@ -20,11 +20,15 @@ pub struct Perf {
     /// waiting for the display (ms).
     pub cpu: f32,
     pub render: f32,
+    /// GPU memory (allocated, reserved) in bytes, read once a second while the overlay shows.
+    pub vram: Option<(u64, u64)>,
+    /// A new second began since the last `vram_due`.
+    new_second: bool,
 }
 
 impl Default for Perf {
     fn default() -> Self {
-        Self { times: VecDeque::with_capacity(HISTORY), second: None, fps: 0.0, avg: 0.0, worst: 0.0, cpu: 0.0, render: 0.0 }
+        Self { times: VecDeque::with_capacity(HISTORY), second: None, fps: 0.0, avg: 0.0, worst: 0.0, cpu: 0.0, render: 0.0, vram: None, new_second: true }
     }
 }
 
@@ -50,7 +54,13 @@ impl Perf {
             self.avg = span * 1000.0 / *frames as f32;
             self.worst = *worst;
             self.second = Some((now, 0, 0.0));
+            self.new_second = true;
         }
+    }
+
+    /// True once a second: time to read the GPU memory again (the report walks every allocation).
+    pub fn vram_due(&mut self) -> bool {
+        std::mem::take(&mut self.new_second)
     }
 
     /// How long this frame took to build and to draw (ms).
