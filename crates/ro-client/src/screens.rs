@@ -269,6 +269,9 @@ impl Front {
             LoginFailed(msg) => {
                 self.busy = false;
                 self.message = Some((msg.clone(), true));
+                // As the original: the password box empties, so retyping it can't append to
+                // the hidden old one (registering fills it in for you).
+                self.pass.clear();
                 if !matches!(self.screen, Screen::Register) {
                     self.screen = Screen::Login;
                 }

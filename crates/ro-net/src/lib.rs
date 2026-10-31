@@ -45,7 +45,11 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 const KEEPALIVE: Duration = Duration::from_secs(10);
 
 async fn connect(addr: impl tokio::net::ToSocketAddrs + std::fmt::Display) -> anyhow::Result<Conn> {
-    let stream = TcpStream::connect(&addr).await.with_context(|| format!("connect {addr}"))?;
+    // An unreachable address (a server advertising an old LAN IP) fails instead of hanging.
+    let stream = match tokio::time::timeout(TIMEOUT, TcpStream::connect(&addr)).await {
+        Err(_) => bail!("connect {addr}: no answer"),
+        Ok(s) => s.with_context(|| format!("connect {addr}"))?,
+    };
     stream.set_nodelay(true)?;
     Ok(Framed::new(stream, RoCodec::new(ServerTable)))
 }
