@@ -1,13 +1,16 @@
-//! Sun shadows for sprites. Characters, monsters and NPCs are drawn into a depth map from
-//! the sun as alpha-tested upright cards; the ground and models sample it (scene.wgsl), so
-//! sprites cast silhouette shadows onto the world. Static geometry does not cast here: RO
-//! maps already bake its shadows into the lightmaps.
+//! Shadows of sprites. Characters, monsters and NPCs are drawn into a depth map from the sun
+//! (and, in a map of their own each, from the torches nearest the player) as alpha-tested
+//! upright cards; the ground and models sample it (scene.wgsl), so sprites cast silhouette
+//! shadows onto the world. Static geometry does not cast here: RO maps already bake its
+//! shadows into the lightmaps (or they are ray traced, rt.rs).
 
 use glam::{camera::rh, Mat4, Vec3};
 
 use crate::sprite::Vertex;
 
 pub const SIZE: u32 = 2048;
+/// Each torch's shadow map.
+pub const TORCH_SIZE: u32 = 1024;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 #[repr(C)]
@@ -15,6 +18,8 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 struct Uniform {
     light_vp: [[f32; 4]; 4],
     right: [f32; 4],
+    /// xyz a torch's position, w 1 to turn each card toward it (else all face along `right`).
+    light: [f32; 4],
 }
 
 pub struct Shadow {
@@ -26,11 +31,12 @@ pub struct Shadow {
 }
 
 impl Shadow {
-    pub fn new(device: &wgpu::Device, sprite_layout: &wgpu::BindGroupLayout) -> Self {
+    /// A `size`² shadow map.
+    pub fn new(device: &wgpu::Device, sprite_layout: &wgpu::BindGroupLayout, size: u32) -> Self {
         let view = device
             .create_texture(&wgpu::TextureDescriptor {
-                label: Some("sun shadow map"),
-                size: wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 },
+                label: Some("shadow map"),
+                size: wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -100,6 +106,14 @@ impl Shadow {
         rh::proj::directx::orthographic(-radius, radius, -radius, radius, 1.0, 4000.0) * rh::view::look_at_mat4(eye, center, up)
     }
 
+    /// A torch's view-projection: from `light` toward `target`, wide enough for the sprites
+    /// around it, out to the light's `range`.
+    pub fn torch_vp(light: Vec3, target: Vec3, range: f32) -> Mat4 {
+        let dir = (target - light).try_normalize().unwrap_or(Vec3::NEG_Y);
+        let up = if dir.y.abs() > 0.99 { Vec3::Z } else { Vec3::Y };
+        rh::proj::directx::perspective(120f32.to_radians(), 1.0, 1.0, range.max(10.0) * 1.5) * rh::view::look_at_mat4(light, light + dir, up)
+    }
+
     /// Draws the sprite casters (`draws`: sheet bind group per vertex range).
     pub fn record<'a>(
         &self,
@@ -107,13 +121,14 @@ impl Shadow {
         enc: &mut wgpu::CommandEncoder,
         light_vp: Mat4,
         right: Vec3,
+        light: Option<Vec3>,
         units_per_pixel: f32,
         vertices: Option<&wgpu::Buffer>,
         draws: impl Iterator<Item = (&'a wgpu::BindGroup, std::ops::Range<u32>)>,
     ) {
-        queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&Uniform { light_vp: light_vp.to_cols_array_2d(), right: right.extend(units_per_pixel).to_array() }));
+        queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&Uniform { light_vp: light_vp.to_cols_array_2d(), right: right.extend(units_per_pixel).to_array(), light: light.map_or([0.0; 4], |l| l.extend(1.0).to_array()) }));
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("sun shadows"),
+            label: Some("sprite shadows"),
             color_attachments: &[],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.view,

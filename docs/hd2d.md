@@ -41,6 +41,17 @@ The sun keeps the map's bearing (RSW longitude) but its height comes from
 `sun_elevation` (35° by default). RO's own light is often nearly vertical, which hides
 shadows under the sprite.
 
+### Torch shadows
+
+The two torches nearest the player (RSW light sources, closest first, fading in within a
+third of their range) each get a 1024² sprite shadow map (`Renderer.torches`, `TORCHES`).
+They're drawn like the sun's, but in perspective from the torch (`Shadow::torch_vp`, 120°),
+each card turned toward it. RO hangs its lights high, so a torch casts from at most
+`TORCH_HEIGHT` (2.5 cells) above the player, and shadows stretch across the floor instead
+of pooling at the feet. The world shader's `torch_shadows` darkens by Shadows × the light's
+falloff there, so the shadow also shows on torchlight baked into the lightmaps. Night
+doesn't weaken it. Works on every GPU.
+
 ### Ray-traced sun shadows
 
 Baked lightmap shadows point one way, so they go wrong once the sun moves, and models never
@@ -124,7 +135,6 @@ the same names).
 
 ### Ideas beyond this
 
-- Per-light shadow maps for the brightest torches.
 - Light flicker on fire-coloured sources, and small additive glow sprites on light positions.
 - Baked per-vertex AO for models (cheaper and steadier than screen-space AO).
 - Nearest-neighbour sprite sampling at high zoom.

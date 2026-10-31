@@ -28,12 +28,19 @@ struct Globals {
     upscale: vec4<f32>,
     // xyz: direction the sun's light travels, w: ray tracing on (bits: 1 shadows, 2 reflections)
     rt: vec4<f32>,
+    // Torches whose light sprites shadow: shadow-map view-projections, (position, range), and
+    // x/y each one's strength (0 none), z texel size.
+    torch_vp: array<mat4x4<f32>, 2>,
+    torch: array<vec4<f32>, 2>,
+    torch_k: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var shadow_map: texture_depth_2d;
 @group(0) @binding(2) var shadow_samp: sampler_comparison;
 @group(0) @binding(3) var room_mask: texture_2d<f32>;
+@group(0) @binding(4) var torch_map0: texture_depth_2d;
+@group(0) @binding(5) var torch_map1: texture_depth_2d;
 @group(1) @binding(0) var tex: texture_2d<f32>;
 @group(1) @binding(1) var samp: sampler;
 @group(1) @binding(2) var lightmap: texture_2d<f32>;
@@ -142,7 +149,7 @@ fn fs_main(in: VsOut) -> FsOut {
     let tilted = g.ambient.rgb + g.diffuse.rgb * max(dot(n, -g.light_dir.xyz), 0.0);
     let shade = clamp(tilted / max(g.ambient.rgb + g.diffuse.rgb * ndl, vec3(0.05)), vec3(0.5), vec3(1.5));
     let rgb = clamp(t.rgb * in.color * light * shade + lm.rgb, vec3(0.0), vec3(1.0));
-    let lit = srgb_to_linear(rgb) * sprite_shadow(in.world, sun_ray(in.world, flat, 4u)) + srgb_to_linear(t.rgb * in.color) * point_light(in.world, n);
+    let lit = (srgb_to_linear(rgb) * sprite_shadow(in.world, sun_ray(in.world, flat, 4u)) + srgb_to_linear(t.rgb * in.color) * point_light(in.world, n)) * torch_shadows(in.world);
     return FsOut(vec4(lit, 1.0), vec4(distance(in.world, g.eye.xyz), 0.0, 0.0, 0.0));
 }
 
@@ -192,6 +199,35 @@ fn sprite_shadow(world: vec3<f32>, sun: f32) -> f32 {
     }
     lit = min(lit / 25.0, sun);
     return 1.0 - g.shadow.x * (1.0 - lit);
+}
+
+// How much the nearest torches still light `world` past the sprites standing in their way
+// (1 unshadowed): each shadow is as strong as that torch's light is here, so it shows on
+// baked torchlight too.
+fn torch_shadows(world: vec3<f32>) -> f32 {
+    return torch_shadow(0, torch_map0, world) * torch_shadow(1, torch_map1, world);
+}
+
+fn torch_shadow(i: i32, map: texture_depth_2d, world: vec3<f32>) -> f32 {
+    let k = select(g.torch_k.y, g.torch_k.x, i == 0);
+    let l = g.torch[i];
+    let near = saturate(1.0 - distance(world, l.xyz) / max(l.w, 1.0));
+    let lp = g.torch_vp[i] * vec4(world, 1.0);
+    if k <= 0.0 || near <= 0.0 || lp.w <= 0.0 {
+        return 1.0;
+    }
+    let ndc = lp.xyz / lp.w;
+    let uv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if any(uv < vec2(0.0)) || any(uv > vec2(1.0)) || ndc.z > 1.0 {
+        return 1.0;
+    }
+    var lit = 0.0;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            lit += textureSampleCompareLevel(map, shadow_samp, uv + vec2(f32(x), f32(y)) * g.torch_k.z * 1.5, ndc.z);
+        }
+    }
+    return 1.0 - k * sqrt(near) * (1.0 - lit / 9.0);
 }
 
 // Light from the map's light sources (torches, lamps): smooth falloff to their range,

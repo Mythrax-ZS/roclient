@@ -68,7 +68,17 @@ struct Globals {
     upscale: [f32; 4],
     /// Ray tracing: xyz the direction sunlight travels, w what is on (bits: 1 shadows, 2 reflections).
     rt: [f32; 4],
+    /// The torches whose light sprites shadow (`TORCHES`): view-projections of their shadow
+    /// maps, (position, range), and x/y each one's shadow strength (0 none), z texel size.
+    torch_vp: [[[f32; 4]; 4]; TORCHES],
+    torch: [[f32; 4]; TORCHES],
+    torch_k: [f32; 4],
 }
+
+/// Torches near the player that cast sprite shadows, each with a shadow map.
+const TORCHES: usize = 2;
+/// Highest a torch casts sprite shadows from, above the player (world units: 2.5 cells).
+const TORCH_HEIGHT: f32 = 25.0;
 
 /// One frame of tessellated egui output.
 /// A registered 3D model texture.
@@ -159,6 +169,8 @@ pub struct Renderer {
     /// Ray-traced shadows (GPUs with ray queries): the world shader's group 2 layout, and the
     /// map's acceleration structure bound to it.
     rt_layout: Option<wgpu::BindGroupLayout>,
+    /// Shadow maps of the torches nearest the player (`TORCHES`).
+    torches: [shadow::Shadow; TORCHES],
     rt_bind: Option<wgpu::BindGroup>,
     sky: sky::Sky,
     sky_profile: Option<SkyProfile>,
@@ -367,6 +379,27 @@ impl Renderer {
                     },
                     count: None,
                 },
+                // Torch shadow maps (sprites seen from the nearest torches).
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -539,10 +572,11 @@ impl Renderer {
             ],
         });
         // The sun shadow map is bound with the globals so world shaders can sample it.
-        let shadow = shadow::Shadow::new(&device, &sprite_layout);
+        let shadow = shadow::Shadow::new(&device, &sprite_layout, shadow::SIZE);
+        let torches = [(); TORCHES].map(|_| shadow::Shadow::new(&device, &sprite_layout, shadow::TORCH_SIZE));
         let particles = particle::Particles::new(&device, &globals_layout, &sprite_layout, samples);
         let room_mask = room_mask_view(&device, &queue, 1, 1, &[255]);
-        let globals_bind = globals_bind_group(&device, &globals_layout, &globals, &shadow, &room_mask);
+        let globals_bind = globals_bind_group(&device, &globals_layout, &globals, &shadow, &torches, &room_mask);
         let effect_pipeline = pipeline(
             "effect",
             include_str!("effect.wgsl"),
@@ -638,6 +672,7 @@ impl Renderer {
             models: vec![],
             post,
             shadow,
+            torches,
             post_settings: PostSettings::default(),
             point_lights: vec![],
             night: false,
@@ -769,7 +804,7 @@ impl Renderer {
             None => room_mask_view(&self.device, &self.queue, 1, 1, &[255]),
         };
         self.room = mask.map(|(w, h, _)| (w, h));
-        self.globals_bind = globals_bind_group(&self.device, &self.globals_layout, &self.globals, &self.shadow, &view);
+        self.globals_bind = globals_bind_group(&self.device, &self.globals_layout, &self.globals, &self.shadow, &self.torches, &view);
     }
 
     /// Uploads a texture for code-drawn effects (light columns, ground circles).
@@ -1224,6 +1259,29 @@ impl Renderer {
         // The sun's view of the area around the player, for sprite shadows.
         let light_vp = shadow::Shadow::light_vp(cam.target, self.cast_dir, (cam.distance * 0.75).clamp(120.0, 600.0));
         let shadow_strength = if self.post_settings.enabled { self.post_settings.shadow_strength } else { 0.0 };
+        // The strongest torches around the player, each with a shadow strength that fades in
+        // as the player nears it. Not faded at night (`day_post`): that's when torches matter.
+        let torches: Vec<(&PointLight, f32)> = {
+            let strength = if day_post.enabled { day_post.shadow_strength * day_post.point_lights.min(1.0) } else { 0.0 };
+            let mut near: Vec<_> = self
+                .point_lights
+                .iter()
+                .map(|l| {
+                    let reach = (1.0 - l.pos.distance(cam.target) / l.range.max(1.0)).clamp(0.0, 1.0);
+                    // Nearest first: a dim torch beside the player shadows more than a bright
+                    // one far off (closeness ranks, strength is the same for all).
+                    (l, (reach * 3.0).min(1.0) * strength + reach * 1e-3)
+                })
+                .filter(|(_, k)| *k > 0.0)
+                .collect();
+            near.sort_by(|a, b| b.1.total_cmp(&a.1));
+            near.truncate(TORCHES);
+            near
+        };
+        // Cast from at most TORCH_HEIGHT above the player: RO hangs its lights high, which
+        // would leave only a pool at the feet (the same reason the sun is lowered).
+        let cast_from = |l: &PointLight| glam::Vec3::new(l.pos.x, l.pos.y.min(cam.target.y + TORCH_HEIGHT), l.pos.z);
+        let torch_vps: Vec<glam::Mat4> = torches.iter().map(|(l, _)| shadow::Shadow::torch_vp(cast_from(l), cam.target, l.range)).collect();
         // The point lights nearest the camera target, flattened into (pos, range), (colour, 0).
         let lights: Vec<[f32; 4]> = {
             let mut near: Vec<&PointLight> = self.point_lights.iter().collect();
@@ -1269,6 +1327,9 @@ impl Renderer {
                 let c = self.water_settings.scatter_color;
                 [c[0], c[1], c[2], 0.0]
             },
+            torch_vp: std::array::from_fn(|i| torch_vps.get(i).map_or([[0.0; 4]; 4], |m| m.to_cols_array_2d())),
+            torch: std::array::from_fn(|i| torches.get(i).map_or([0.0; 4], |(l, _)| l.pos.extend(l.range).to_array())),
+            torch_k: [torches.first().map_or(0.0, |t| t.1), torches.get(1).map_or(0.0, |t| t.1), 1.0 / shadow::TORCH_SIZE as f32, 0.0],
             upscale: [if self.upscale_runtime { 1.0 } else { 0.0 }, if self.post_settings.enabled { self.post_settings.relief } else { 0.0 }, 0.0, 0.0],
             // Outdoors only: interiors and dungeons keep their hand-baked light and shadow.
             rt: {
@@ -1306,7 +1367,14 @@ impl Renderer {
             let sun = self.cast_dir;
             let right = glam::Vec3::new(-sun.z, 0.0, sun.x).try_normalize().unwrap_or(glam::Vec3::X);
             let casters = sprite_draws.iter().filter(|(s, _)| !blobs.contains(s)).map(|(s, r)| (&self.sheets[*s].bind, r.clone()));
-            self.shadow.record(&self.queue, &mut enc, light_vp, right, CELL / sprite::PIXELS_PER_CELL, sprite_buffer.as_ref(), casters);
+            self.shadow.record(&self.queue, &mut enc, light_vp, right, None, CELL / sprite::PIXELS_PER_CELL, sprite_buffer.as_ref(), casters);
+        }
+        // Torch shadows: the same casters, each card facing the torch.
+        for (i, ((light, _), vp)) in torches.iter().zip(&torch_vps).enumerate() {
+            let away = cam.target - light.pos;
+            let right = glam::Vec3::new(-away.z, 0.0, away.x).try_normalize().unwrap_or(glam::Vec3::X);
+            let casters = sprite_draws.iter().filter(|(s, _)| !blobs.contains(s)).map(|(s, r)| (&self.sheets[*s].bind, r.clone()));
+            self.torches[i].record(&self.queue, &mut enc, *vp, right, Some(cast_from(light)), CELL / sprite::PIXELS_PER_CELL, sprite_buffer.as_ref(), casters);
         }
 
         // Water: this frame's settings, mesh density and screen-copy size.
@@ -1615,7 +1683,7 @@ fn room_mask_view(device: &wgpu::Device, queue: &wgpu::Queue, w: u32, h: u32, ce
     tex.create_view(&Default::default())
 }
 
-fn globals_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, shadow: &shadow::Shadow, room: &wgpu::TextureView) -> wgpu::BindGroup {
+fn globals_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, shadow: &shadow::Shadow, torches: &[shadow::Shadow; TORCHES], room: &wgpu::TextureView) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("globals"),
         layout,
@@ -1624,6 +1692,8 @@ fn globals_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, glo
             wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&shadow.view) },
             wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&shadow.compare) },
             wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(room) },
+            wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&torches[0].view) },
+            wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&torches[1].view) },
         ],
     })
 }
