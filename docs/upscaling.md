@@ -65,6 +65,10 @@ targets the whole frame, not textures. Offline neural upscaling works best as an
 pack: the VFS `overlays` already let a folder replace any texture at any resolution, and
 UVs are normalised, so an ESRGAN-processed pack drops in without code changes. Set
 `quality = "fast"` for such a pack, so it is filtered at run time but not resampled again.
+`tools/texpack` builds one with realesrgan-ncnn-vulkan, with seamless wrap padding for tiling
+ground and crisp colour-keyed cut-outs. Prontera (217 textures) takes about 25 s on an RTX 5070
+Ti and about 250 MB as PNG. Compared with Lanczos-3, it gives cleaner, sharper mortar and
+edges but smooths away the painted grain.
 
 ## 3. Configuration (`config/settings.toml`)
 

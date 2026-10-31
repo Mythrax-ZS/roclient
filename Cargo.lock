@@ -3185,6 +3185,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "texpack"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "image",
+ "ro-formats",
+ "ro-vfs",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"

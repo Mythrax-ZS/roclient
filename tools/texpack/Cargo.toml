@@ -1,0 +1,10 @@
+[package]
+name = "texpack"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+ro-vfs = { path = "../../crates/ro-vfs" }
+ro-formats = { path = "../../crates/ro-formats" }
+anyhow.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
