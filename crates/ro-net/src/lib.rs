@@ -43,6 +43,8 @@ type Conn = Framed<TcpStream, RoCodec<ServerTable>>;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const KEEPALIVE: Duration = Duration::from_secs(10);
+/// The map server answers every keepalive; this long without a packet, it is gone.
+const SILENCE: Duration = Duration::from_secs(30);
 
 async fn connect(addr: impl tokio::net::ToSocketAddrs + std::fmt::Display) -> anyhow::Result<Conn> {
     // An unreachable address (a server advertising an old LAN IP) fails instead of hanging.
@@ -1002,9 +1004,13 @@ impl MapSession {
         events: &std::sync::mpsc::Sender<Event>,
     ) -> anyhow::Result<MapExit> {
         let mut keepalive = tokio::time::interval(KEEPALIVE);
+        let mut heard = tokio::time::Instant::now();
         loop {
             tokio::select! {
                 _ = keepalive.tick() => {
+                    if heard.elapsed() > SILENCE {
+                        bail!("the map server stopped answering");
+                    }
                     let tick = self.tick();
                     self.send(CzRequestTime { client_tick: tick }).await?;
                 }
@@ -1076,6 +1082,7 @@ impl MapSession {
                 },
                 f = self.conn.next() => {
                     let Some(f) = f else { bail!("map server closed the connection") };
+                    heard = tokio::time::Instant::now();
                     let Frame::Packet { opcode, data } = f? else { continue };
                     tracing::trace!(opcode = format_args!("{opcode:#06x}"), len = data.len(), "packet");
                     let event = match opcode {

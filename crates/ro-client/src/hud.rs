@@ -96,6 +96,8 @@ pub struct Hud {
     pub missing_links: Vec<u32>,
     /// An item link the player clicked, for the game to open.
     pub clicked_link: Option<crate::itemlink::Link>,
+    /// A link clicked in an NPC dialog (<NAVI>, <URL>, item), for the game to follow.
+    pub dialog_link: Option<crate::npcmarkup::Action>,
     input: String,
     /// Enter focuses the chat box; Enter again sends, Escape leaves.
     want_focus: bool,
@@ -173,6 +175,24 @@ fn bar(ui: &mut egui::Ui, label: &str, value: i64, max: i64, color: Color32, sho
             .corner_radius(CornerRadius::same(4))
             .text(RichText::new(text).size(11.0).color(Color32::WHITE)),
     );
+}
+
+/// An item link as the original shows it: <+7 Name [slots]>. An unknown id is noted in
+/// `missing` for the game to name.
+fn link_label(names: &std::collections::HashMap<u32, (String, u8)>, missing: &mut Vec<u32>, link: &crate::itemlink::Link) -> String {
+    match names.get(&link.id) {
+        Some((name, slots)) => {
+            let refine = if link.refine > 0 { format!("+{} ", link.refine) } else { String::new() };
+            let slots = if link.equip && *slots > 0 { format!(" [{slots}]") } else { String::new() };
+            format!("<{refine}{name}{slots}>")
+        }
+        None => {
+            if !missing.contains(&link.id) {
+                missing.push(link.id);
+            }
+            format!("<Item #{}>", link.id)
+        }
+    }
 }
 
 impl Hud {
@@ -465,20 +485,8 @@ impl Hud {
                                             ui.label(RichText::new(t).size(12.5).color(color));
                                         }
                                         crate::itemlink::Piece::Item(link) => {
-                                            let name = match self.link_names.get(&link.id) {
-                                                Some((name, slots)) => {
-                                                    let refine = if link.refine > 0 { format!("+{} ", link.refine) } else { String::new() };
-                                                    let slots = if link.equip && *slots > 0 { format!(" [{slots}]") } else { String::new() };
-                                                    format!("<{refine}{name}{slots}>")
-                                                }
-                                                None => {
-                                                    if !self.missing_links.contains(&link.id) {
-                                                        self.missing_links.push(link.id);
-                                                    }
-                                                    format!("<Item #{}>", link.id)
-                                                }
-                                            };
-                                            let r = ui.add(egui::Label::new(RichText::new(name).size(12.5).color(Color32::from_rgb(120, 200, 255))).sense(egui::Sense::click()));
+                                            let name = link_label(&self.link_names, &mut self.missing_links, &link);
+                                            let r = ui.add(egui::Label::new(RichText::new(name).size(12.5).color(LINK_COLOR)).sense(egui::Sense::click()));
                                             let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
                                             if r.clicked() {
                                                 self.clicked_link = Some(link);
@@ -606,25 +614,39 @@ pub struct Cutin {
     pub position: u8,
 }
 
-/// NPC text with ^RRGGBB colour codes. ^000000 means "default colour".
-pub(crate) fn npc_text(text: &str, size: f32) -> egui::text::LayoutJob {
-    let default = if crate::classic::ink(Color32::WHITE) == Color32::WHITE { Color32::from_rgb(230, 230, 230) } else { Color32::BLACK };
-    let mut job = egui::text::LayoutJob::default();
-    let mut color = default;
-    let mut rest = text;
-    while let Some(i) = rest.find('^') {
-        let code = rest.get(i + 1..i + 7).filter(|c| c.chars().all(|ch| ch.is_ascii_hexdigit()));
-        let Some(code) = code else {
-            job.append(&rest[..i + 1], 0.0, egui::TextFormat::simple(FontId::proportional(size), color));
-            rest = &rest[i + 1..];
-            continue;
-        };
-        job.append(&rest[..i], 0.0, egui::TextFormat::simple(FontId::proportional(size), color));
-        let v = u32::from_str_radix(code, 16).unwrap_or(0);
-        color = if v == 0 { default } else { Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8) };
-        rest = &rest[i + 7..];
+/// The colour NPC text starts in (and ^000000 returns to).
+fn npc_default_color() -> Color32 {
+    if crate::classic::ink(Color32::WHITE) == Color32::WHITE { Color32::from_rgb(230, 230, 230) } else { Color32::BLACK }
+}
+
+/// Links without a colour of their own.
+const LINK_COLOR: Color32 = Color32::from_rgb(120, 200, 255);
+
+/// One span's look; links are underlined.
+fn span_format(s: &crate::npcmarkup::Span, size: f32) -> egui::TextFormat {
+    let color = s.color.unwrap_or(if s.link.is_some() { LINK_COLOR } else { npc_default_color() });
+    let mut f = egui::TextFormat::simple(FontId::proportional(size * s.scale), color);
+    if s.link.is_some() {
+        f.underline = egui::Stroke::new(1.0, color);
     }
-    job.append(rest, 0.0, egui::TextFormat::simple(FontId::proportional(size), color));
+    f
+}
+
+/// What an item link shows when the item's name isn't known here.
+fn span_text(s: &crate::npcmarkup::Span) -> std::borrow::Cow<'_, str> {
+    match &s.link {
+        Some(crate::npcmarkup::Action::Item(link)) if s.text.is_empty() => format!("<Item #{}>", link.id).into(),
+        _ => s.text.as_str().into(),
+    }
+}
+
+/// NPC text with its markup (colours, font tags, links drawn but not clickable; see
+/// `npcmarkup`).
+pub(crate) fn npc_text(text: &str, size: f32) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    for s in crate::npcmarkup::parse(text) {
+        job.append(&span_text(&s), 0.0, span_format(&s, size));
+    }
     job
 }
 
@@ -704,7 +726,34 @@ impl Hud {
                     ui.allocate_ui_with_layout(Vec2::new(width, min_h), egui::Layout::top_down(h).with_main_align(v).with_main_justify(min_h > 0.0 && v != egui::Align::Min), |ui| {
                         ui.set_min_height(min_h);
                         for line in &d.lines {
-                            ui.label(npc_text(line, 14.0));
+                            let spans = crate::npcmarkup::parse(line);
+                            if !crate::npcmarkup::has_links(&spans) {
+                                ui.label(npc_text(line, 14.0));
+                                continue;
+                            }
+                            // Links: <NAVI> guides there, <URL> opens the page, items show their description.
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                for s in &spans {
+                                    let text = match &s.link {
+                                        Some(crate::npcmarkup::Action::Item(link)) => link_label(&self.link_names, &mut self.missing_links, link),
+                                        _ => s.text.clone(),
+                                    };
+                                    let mut job = egui::text::LayoutJob::default();
+                                    job.append(&text, 0.0, span_format(s, 14.0));
+                                    match &s.link {
+                                        Some(a) if !matches!(a, crate::npcmarkup::Action::Tip(_)) => {
+                                            let r = ui.add(egui::Label::new(job).sense(egui::Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand);
+                                            if r.clicked() {
+                                                self.dialog_link = Some(a.clone());
+                                            }
+                                        }
+                                        _ => {
+                                            ui.label(job);
+                                        }
+                                    }
+                                }
+                            });
                         }
                     });
                 });

@@ -53,6 +53,7 @@ mod enchant;
 mod market;
 mod customdata;
 mod navigation;
+mod npcmarkup;
 mod grade;
 mod buffs;
 mod chatrooms;
@@ -3988,35 +3989,50 @@ impl App {
             }
             // Back at character select: clear the world; the screens take over again.
             LeftGame => {
-                self.leave_character();
-                self.units.clear();
-                self.devotions.clear();
-                self.ground_units.clear();
-                self.traps.clear();
-                self.graffiti.clear();
-                self.floor.clear();
-                self.warps.clear();
-                self.player = None;
-                self.walk_speed = None;
-                self.world = None;
-                self.walk_goal = None;
-                self.attack = None;
-                self.dialog = None;
-                self.esc_menu = false;
+                self.leave_world();
                 let user = self.settings.last_id.clone();
                 let mut front = screens::Front::new(user, true);
                 front.screen = screens::Screen::Loading;
                 self.front = Some(front);
-                if let (Some(a), Some(v)) = (self.audio.as_mut(), self.vfs.as_ref()) {
-                    a.title(v);
-                }
             }
             // Login and character-select replies (handled by the screens above).
-            LoginFailed(_) | Servers(_) | Characters { .. } | CharCreated(_) | CharCreateFailed(_) | CharDeleteStarted { .. } | CharDeleted { .. } | CharDeleteCanceled { .. } | CharNameOk(_) | CharRenamed(_) | CharMoved { .. } | CharsBlocked(_) | Pin(_) => {}
+            LoginFailed(_) | Servers(_) | Characters { .. } | CharCreated(_) | CharCreateFailed(_) | CharDeleteStarted { .. } | CharDeleteCanceled { .. } | CharDeleted { .. } | CharNameOk(_) | CharRenamed(_) | CharMoved { .. } | CharsBlocked(_) | Pin(_) => {}
+            // Leaving the game: the connection closing is expected.
+            Disconnected(reason) if self.quit_asked.is_some() => tracing::info!("disconnected: {reason}"),
+            // Lost in game (server restart, dropped network): as the original, "Disconnected
+            // from Server." and back to the login screen.
             Disconnected(reason) => {
                 tracing::error!("disconnected: {reason}");
-                self.status = Some(format!("disconnected: {reason}"));
+                self.leave_world();
+                let user = self.settings.last_id.clone();
+                let mut front = screens::Front::new(user.clone(), !user.is_empty());
+                front.event(&LoginFailed(msgstr::get(2, &[]).unwrap_or_else(|| "Disconnected from Server.".into())));
+                self.front = Some(front);
+                self.net = Some(ro_net::spawn_session(self.session.clone()));
             }
+        }
+    }
+
+    /// Out of the game world (to character select or the login screen): what belonged to the
+    /// map and character goes, and the title music plays.
+    fn leave_world(&mut self) {
+        self.leave_character();
+        self.units.clear();
+        self.devotions.clear();
+        self.ground_units.clear();
+        self.traps.clear();
+        self.graffiti.clear();
+        self.floor.clear();
+        self.warps.clear();
+        self.player = None;
+        self.walk_speed = None;
+        self.world = None;
+        self.walk_goal = None;
+        self.attack = None;
+        self.dialog = None;
+        self.esc_menu = false;
+        if let (Some(a), Some(v)) = (self.audio.as_mut(), self.vfs.as_ref()) {
+            a.title(v);
         }
     }
 
@@ -7337,6 +7353,17 @@ impl App {
                 for id in std::mem::take(&mut self.hud.missing_links) {
                     let named = self.item_db.as_ref().and_then(|d| d.get(id)).map(|i| (i.name.clone(), i.slots));
                     self.hud.link_names.insert(id, named.unwrap_or_else(|| (format!("Item #{id}"), 0)));
+                }
+                // Links in NPC dialogs: <NAVI> plans the route in the Navigation window, as the original.
+                match self.hud.dialog_link.take() {
+                    Some(npcmarkup::Action::Navi { map, x, y }) => {
+                        self.navi.ensure_loaded(self.vfs.as_ref());
+                        let label = self.navi.map_name(&map).map_or_else(|| format!("{map} {x}, {y}"), |n| format!("{n} {x}, {y}"));
+                        self.navi.go(&map, Some((x, y)), label);
+                    }
+                    Some(npcmarkup::Action::Url(url)) => npcmarkup::open_url(&url),
+                    Some(npcmarkup::Action::Item(link)) => self.hud.clicked_link = Some(link),
+                    Some(npcmarkup::Action::Tip(_)) | None => {}
                 }
                 if let (Some(link), Some(vfs)) = (self.hud.clicked_link.take(), self.vfs.as_ref()) {
                     self.item_info.show_item(&self.egui_ctx, vfs, self.item_db.as_ref(), link.id, link.refine, link.cards);
