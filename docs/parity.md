@@ -79,6 +79,7 @@ epute*.bson)
 - [x] ZC_BAN_LIST
 
 ## Found while testing
+- [x] NPCs drawn with a monster sprite (object type 12, e.g. the Twin Flames fox Kohaku) were not clickable and had no name
 - [x] `specialeffect` (ZC_NOTIFY_EFFECT2): 110 EF_* ids matched to STR files, plus the most-used code-drawn ones (heal, grand cross, steal, bash, ...) shown with their skill effect; the hit sparks and screen quake still missing
 - [x] NPC classes whose sprite iRO lacks (e.g. 10243 4_m_drzonda01, Zonda teleporters) get a stand-in body so they stay usable
 - Note: `setnpcdisplay` to a monster class makes rAthena send class 0 (a Novice); the original client shows the same

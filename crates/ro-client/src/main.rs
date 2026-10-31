@@ -715,6 +715,12 @@ enum Pose {
     Cast,
 }
 
+/// Whether a unit object type is an NPC: 1 / 6, or 12 for an NPC drawn with a monster
+/// sprite (rAthena sends that type since 2017-07-26 clients).
+fn is_npc(kind: u8) -> bool {
+    matches!(kind, 1 | 6 | 12)
+}
+
 /// Keep one clock for the action actually drawn. Movement can temporarily override a
 /// timed pose, so its fitted attack rate must not accelerate the walking frames.
 fn animation_time(previous_action: usize, action: (usize, bool), time_ms: f32, dt: f32, pose_rate: f32) -> f32 {
@@ -804,7 +810,7 @@ impl Mob {
         }
         match self.kind {
             0 => Some(egui::Color32::WHITE),
-            1 | 6 => Some(egui::Color32::from_rgb(160, 225, 255)),
+            k if is_npc(k) => Some(egui::Color32::from_rgb(160, 225, 255)),
             5 if hovered && self.dying.is_none() => Some(egui::Color32::WHITE),
             _ => None,
         }
@@ -4457,7 +4463,7 @@ impl App {
         match self.pick_unit().and_then(|id| self.units.get(&id)).map(|m| m.kind) {
             Some(5) => ATTACK,
             Some(0) if self.pick_unit().is_some_and(|id| self.is_enemy_player(id)) => ATTACK,
-            Some(1 | 6) => TALK,
+            Some(k) if is_npc(k) => TALK,
             _ if self.pick_floor_item().is_some() => PICK_UP,
             _ => ARROW,
         }
@@ -5139,7 +5145,7 @@ impl App {
         let mut v: Vec<(i32, u32)> = self
             .units
             .iter()
-            .filter(|(_, m)| m.dying.is_none() && m.actor.alpha > 0.01 && if players { m.kind == 0 } else { m.kind == 5 || (matches!(m.kind, 1 | 6) && !m.name.is_empty()) })
+            .filter(|(_, m)| m.dying.is_none() && m.actor.alpha > 0.01 && if players { m.kind == 0 } else { m.kind == 5 || (is_npc(m.kind) && !m.name.is_empty()) })
             .map(|(id, m)| ((m.walker.cell.0 - me.0).pow(2) + (m.walker.cell.1 - me.1).pow(2), *id))
             .filter(|(d, _)| *d <= PAD_REACH * PAD_REACH)
             .collect();
@@ -7121,7 +7127,7 @@ impl App {
                         0 if party.contains(m.name.as_str()) => egui::Color32::from_rgb(255, 130, 200),
                         0 => egui::Color32::from_rgb(120, 180, 255),
                         5 => egui::Color32::from_rgb(230, 60, 50),
-                        1 | 6 => egui::Color32::from_rgb(90, 220, 90),
+                        k if is_npc(k) => egui::Color32::from_rgb(90, 220, 90),
                         _ => return None,
                     };
                     Some(((m.walker.cell.0 as f32, m.walker.cell.1 as f32), color))
@@ -7886,7 +7892,7 @@ impl ApplicationHandler for App {
                 let unit = self.pick_unit().and_then(|id| self.units.get(&id).map(|m| (id, m.kind)));
                 match unit {
                     // NPCs: talk (walking over first if needed).
-                    Some((id, 1 | 6)) => {
+                    Some((id, k)) if is_npc(k) => {
                         self.walk_goal = None;
                         self.attack = None;
                         self.talk(id);
