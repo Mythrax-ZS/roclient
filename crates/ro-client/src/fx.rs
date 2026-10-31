@@ -122,13 +122,34 @@ pub fn ground_str(kind: u32) -> Option<&'static str> {
         0x85 => "pneuma1",
         0x88 => "firepillar",
         0x8e => "quagmire",
-        0x8f => "blastmine",
-        0x90 => "skidtrap",
         0x92 => "venomdust",
-        0x93 => "landmine",
-        0x95 => "sandman",
-        0x97 => "freezing",
-        0x98 => "claymore",
+        _ => return None,
+    })
+}
+
+/// Traps (ZC_SKILL_ENTRY unit types) are small models on their cell, not effects: the
+/// original's trap RSMs, under data\model\.
+pub fn trap_model(kind: u32) -> Option<&'static str> {
+    Some(match kind {
+        0x8f => "외부소품\\트랩03_3", // Blast Mine
+        0x90 => "외부소품\\트랩02",   // Skid Trap
+        0x91 => "외부소품\\트랩01",   // Ankle Snare
+        0x93 => "외부소품\\트랩03",   // Land Mine
+        0x94 => "외부소품\\트랩03_6", // Shockwave Trap
+        0x95 => "외부소품\\트랩03_4", // Sandman
+        0x96 => "외부소품\\트랩03_5", // Flasher
+        0x97 => "외부소품\\트랩03_2", // Freezing Trap
+        0x98 => "외부소품\\트랩04",   // Claymore Trap
+        0x99 => "외부소품\\트랩05",   // Talkie Box
+        0xd2 => "event\\3차트랩_변화01", // Magenta Trap
+        0xd3 => "event\\3차트랩_변수01", // Cobalt Trap
+        0xd4 => "event\\3차트랩_변지01", // Maize Trap
+        0xd5 => "event\\3차트랩_변풍01", // Verdure Trap
+        0xd6 => "event\\3차트랩_화01", // Firing Trap
+        0xd7 => "event\\3차트랩_수01", // Icebound Trap
+        0xd8 => "event\\3차트랩_풍01", // Electric Shocker
+        0xd9 => "event\\3차트랩_지01", // Cluster Bomb
+        0xe5 => "event\\3차트랩_가시01", // Thorn Trap
         _ => return None,
     })
 }

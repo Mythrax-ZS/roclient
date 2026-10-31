@@ -20,7 +20,7 @@ use wgpu::util::DeviceExt;
 
 pub use camera::{Camera, CELL};
 pub use ro_formats::image::Rgba;
-pub use scene::{SceneBuilder, SceneMesh, Vertex as ModelVertex};
+pub use scene::{rsm_at, SceneBuilder, SceneMesh, Vertex as ModelVertex};
 pub use upscale::{is_sprite_path, AssetClass, Quality as UpscaleQuality, UpscaleSettings, Upscaler};
 pub use water::{flag as water_flag, Foam, WaterMesh, WaterQuality, WaterSettings};
 pub use effect::{AuraLayer, AuraStyle, ProcFx, Shape, TenseigaPart, TexId};
@@ -73,6 +73,7 @@ struct Globals {
 pub struct ModelTexId(pub usize);
 
 /// Triangles of a posed 3D model sharing one texture (world space, y-up).
+#[derive(Clone)]
 pub struct ModelDraw {
     pub texture: ModelTexId,
     pub vertices: Vec<ModelVertex>,

@@ -1043,6 +1043,10 @@ struct App {
     devotions: std::collections::HashMap<u32, Vec<u32>>,
     /// Ground skill units' cells (for Talkie Box messages), and Graffiti texts on them.
     ground_units: std::collections::HashMap<u32, (u16, u16)>,
+    /// Traps on the ground (their models, placed), by unit id; and the trap models loaded,
+    /// by path.
+    traps: std::collections::HashMap<u32, Vec<ro_render::ModelDraw>>,
+    trap_models: std::collections::HashMap<&'static str, Option<std::rc::Rc<(ro_formats::rsm::Rsm, Vec<Option<ro_render::ModelTexId>>)>>>,
     graffiti: std::collections::HashMap<u32, String>,
     /// `showdigit`: (type, value, ms since shown).
     digit: Option<(u8, i32, f32)>,
@@ -1742,6 +1746,7 @@ impl App {
                 self.units.clear();
                 self.devotions.clear();
                 self.ground_units.clear();
+                self.traps.clear();
                 self.graffiti.clear();
                 self.floor.clear();
                 self.warps.clear();
@@ -3267,7 +3272,13 @@ impl App {
             GroundEffect { id, cell, kind } => {
                 tracing::debug!(id, ?cell, kind = format_args!("{kind:#x}"), "ground effect");
                 self.ground_units.insert(id, cell);
-                if let (Some(name), Some(pos)) = (fx::ground_str(kind), self.cell_pos(cell)) {
+                if let (Some(path), Some(pos)) = (fx::trap_model(kind), self.cell_pos(cell)) {
+                    let draws = self.trap_draws(path, pos);
+                    self.traps.insert(id, draws);
+                } else if let (0x87, Some(pos)) = (kind, self.cell_pos(cell)) {
+                    // A Fire Pillar waiting to go off (EF_FIREPILLARON): a red column for 5 s.
+                    self.proc_fx("magic_red.tga", ro_render::Shape::Column { radius: 1.0, height: 3.0 }, pos, [1.0; 3], 5000.0);
+                } else if let (Some(name), Some(pos)) = (fx::ground_str(kind), self.cell_pos(cell)) {
                     self.stop_fx(id);
                     self.play_fx_tagged(name, pos, id);
                 } else {
@@ -3276,6 +3287,7 @@ impl App {
             }
             GroundEffectGone(id) => {
                 self.stop_fx(id);
+                self.traps.remove(&id);
                 self.ground_units.remove(&id);
                 self.graffiti.remove(&id);
             }
@@ -3879,6 +3891,7 @@ impl App {
                 self.units.clear();
                 self.devotions.clear();
                 self.ground_units.clear();
+                self.traps.clear();
                 self.graffiti.clear();
                 self.floor.clear();
                 self.warps.clear();
@@ -3895,6 +3908,7 @@ impl App {
                 self.units.clear();
                 self.devotions.clear();
                 self.ground_units.clear();
+                self.traps.clear();
                 self.graffiti.clear();
                 self.floor.clear();
                 self.warps.clear();
@@ -4873,6 +4887,34 @@ impl App {
     }
 
     /// Plays an STR effect; a non-zero `tag` loops it until `stop_fx(tag)`.
+    /// A trap's model standing at `pos` (loaded once per model).
+    fn trap_draws(&mut self, path: &'static str, pos: glam::Vec3) -> Vec<ro_render::ModelDraw> {
+        let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return vec![] };
+        let model = self
+            .trap_models
+            .entry(path)
+            .or_insert_with(|| {
+                let file = format!("data\\model\\{path}.rsm");
+                let rsm = vfs.read(&file).ok().flatten().and_then(|d| ro_formats::rsm::Rsm::parse(&d).inspect_err(|e| tracing::warn!(%file, "{e:#}")).ok())?;
+                let textures = rsm
+                    .textures
+                    .iter()
+                    .map(|t| {
+                        let p = format!("data\\texture\\{t}");
+                        let img = vfs.read(&p).ok().flatten().and_then(|d| ro_formats::image::decode(&d, &p).ok())?;
+                        Some(r.add_model_texture(&img))
+                    })
+                    .collect();
+                Some(std::rc::Rc::new((rsm, textures)))
+            })
+            .clone();
+        let Some(model) = model else { return vec![] };
+        ro_render::rsm_at(&model.0, pos)
+            .into_iter()
+            .filter_map(|(t, vertices)| Some(ro_render::ModelDraw { texture: (*model.1.get(t)?)?, vertices }))
+            .collect()
+    }
+
     fn play_fx_tagged(&mut self, name: &'static str, pos: glam::Vec3, tag: u32) {
         let (Some(r), Some(vfs)) = (self.renderer.as_mut(), self.vfs.as_ref()) else { return };
         if let Some(asset) = self.fx.get(r, vfs, name) {
@@ -6746,6 +6788,7 @@ impl App {
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         r.actors.clear();
         r.models.clear();
+        r.models.extend(self.traps.values().flatten().cloned());
         r.warps = self
             .warps
             .values()
@@ -8117,6 +8160,8 @@ fn run() -> anyhow::Result<()> {
         shouts: Default::default(),
         devotions: Default::default(),
         ground_units: Default::default(),
+        traps: Default::default(),
+        trap_models: Default::default(),
         graffiti: Default::default(),
         digit: None,
         pvp_rank: None,

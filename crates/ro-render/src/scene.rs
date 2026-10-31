@@ -317,47 +317,13 @@ impl<'a> SceneBuilder<'a> {
             * Mat4::from_rotation_y(inst.rot[1].to_radians())
             * Mat4::from_scale(Vec3::from(inst.scale));
 
-        let matrices = if rsm.is_rsm2() { node_matrices_v2(rsm) } else { node_matrices(rsm) };
         let white = self.atlas.white();
         let tex: Vec<usize> = rsm.textures.iter().map(|t| self.texture(t)).collect();
-
-        for (node, m) in rsm.nodes.iter().zip(matrices) {
-            let full = world * m;
-            let normal_m = Mat3::from_mat4(full).inverse().transpose();
-            let pos: Vec<Vec3> = node.vertices.iter().map(|&v| full.transform_point3(Vec3::from(v))).collect();
-
-            let face_normal = |f: &ro_formats::rsm::Face| {
-                let [a, b, c] = f.vertices.map(|i| node.vertices.get(i as usize).copied().map(Vec3::from).unwrap_or(Vec3::ZERO));
-                (normal_m * (b - a).cross(c - a)).normalize_or(Vec3::NEG_Y)
-            };
-            // Smooth shading: average normals per (vertex, smoothing group).
-            let mut smooth: HashMap<(u16, i32), Vec3> = HashMap::new();
-            if rsm.shade_type == 2 {
-                for f in &node.faces {
-                    let n = face_normal(f);
-                    for &vi in &f.vertices {
-                        *smooth.entry((vi, f.smooth_group)).or_default() += n;
-                    }
-                }
-            }
-
-            for f in &node.faces {
-                let Some(&t) = node.textures.get(f.texture as usize).and_then(|&i| usize::try_from(i).ok()).and_then(|i| tex.get(i)) else {
-                    continue;
-                };
-                let flat = face_normal(f);
-                let mut tri = [Vertex { pos: [0.0; 3], normal: [0.0; 3], uv: [0.0; 2], lightmap_uv: white, color: [1.0; 3] }; 3];
-                for k in 0..3 {
-                    let vi = f.vertices[k];
-                    let Some(&p) = pos.get(vi as usize) else { continue };
-                    let n = smooth.get(&(vi, f.smooth_group)).map_or(flat, |n| n.normalize_or(flat));
-                    tri[k].pos = flip(p);
-                    tri[k].normal = flip(n);
-                    tri[k].uv = node.tex_coords.get(f.tex_coords[k] as usize).copied().unwrap_or_default();
-                }
+        model_triangles(rsm, world, white, |t, tri| {
+            if let Some(&t) = tex.get(t) {
                 self.per_tex[t].extend(tri);
             }
-        }
+        });
     }
 
     pub fn finish(self) -> SceneMesh {
@@ -520,6 +486,60 @@ impl SceneMesh {
         let far = h[2] + (h[3] - h[2]) * tx;
         near + (far - near) * tz
     }
+}
+
+/// Triangles of an RSM placed by `world` (RO space, y down; output y up), each with the index
+/// of its texture in `rsm.textures`.
+fn model_triangles(rsm: &Rsm, world: Mat4, lightmap_uv: [f32; 2], mut out: impl FnMut(usize, [Vertex; 3])) {
+    let matrices = if rsm.is_rsm2() { node_matrices_v2(rsm) } else { node_matrices(rsm) };
+    for (node, m) in rsm.nodes.iter().zip(matrices) {
+        let full = world * m;
+        let normal_m = Mat3::from_mat4(full).inverse().transpose();
+        let pos: Vec<Vec3> = node.vertices.iter().map(|&v| full.transform_point3(Vec3::from(v))).collect();
+
+        let face_normal = |f: &ro_formats::rsm::Face| {
+            let [a, b, c] = f.vertices.map(|i| node.vertices.get(i as usize).copied().map(Vec3::from).unwrap_or(Vec3::ZERO));
+            (normal_m * (b - a).cross(c - a)).normalize_or(Vec3::NEG_Y)
+        };
+        // Smooth shading: average normals per (vertex, smoothing group).
+        let mut smooth: HashMap<(u16, i32), Vec3> = HashMap::new();
+        if rsm.shade_type == 2 {
+            for f in &node.faces {
+                let n = face_normal(f);
+                for &vi in &f.vertices {
+                    *smooth.entry((vi, f.smooth_group)).or_default() += n;
+                }
+            }
+        }
+
+        for f in &node.faces {
+            let Some(t) = node.textures.get(f.texture as usize).and_then(|&i| usize::try_from(i).ok()) else {
+                continue;
+            };
+            let flat = face_normal(f);
+            let mut tri = [Vertex { pos: [0.0; 3], normal: [0.0; 3], uv: [0.0; 2], lightmap_uv, color: [1.0; 3] }; 3];
+            for k in 0..3 {
+                let vi = f.vertices[k];
+                let Some(&p) = pos.get(vi as usize) else { continue };
+                let n = smooth.get(&(vi, f.smooth_group)).map_or(flat, |n| n.normalize_or(flat));
+                tri[k].pos = flip(p);
+                tri[k].normal = flip(n);
+                tri[k].uv = node.tex_coords.get(f.tex_coords[k] as usize).copied().unwrap_or_default();
+            }
+            out(t, tri);
+        }
+    }
+}
+
+/// An RSM standing at `pos` (world, y up), unanimated: triangles per index into
+/// `rsm.textures`, lit like the 3D monsters (no lightmap). Traps are drawn this way.
+pub fn rsm_at(rsm: &Rsm, pos: Vec3) -> Vec<(usize, Vec<Vertex>)> {
+    let mut out: Vec<(usize, Vec<Vertex>)> = Vec::new();
+    model_triangles(rsm, Mat4::from_translation(Vec3::new(pos.x, -pos.y, pos.z)), [0.5, 0.5], |t, tri| match out.iter_mut().find(|(i, _)| *i == t) {
+        Some((_, v)) => v.extend(tri),
+        None => out.push((t, tri.to_vec())),
+    });
+    out
 }
 
 /// GPU-side scene.
