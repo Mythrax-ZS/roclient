@@ -5,6 +5,7 @@
 
 use glam::Vec3;
 
+use crate::scene::Heights;
 use crate::CELL;
 
 #[repr(C)]
@@ -218,7 +219,7 @@ const AURA_TICK_MS: f32 = 25.0;
 /// roBrowser's scale from the original's aura units to cells.
 const AURA_UNIT: f32 = 0.22 * CELL;
 
-fn aura(layer: AuraLayer, seed: u32, style: AuraStyle, pos: Vec3, time_ms: f32, eye: Vec3, out: &mut Vec<Vertex>) {
+fn aura(layer: AuraLayer, seed: u32, style: AuraStyle, pos: Vec3, time_ms: f32, eye: Vec3, ground: Option<&Heights>, out: &mut Vec<Vertex>) {
     let ticks = time_ms / AURA_TICK_MS;
     match layer {
         AuraLayer::Shade => {
@@ -226,8 +227,7 @@ fn aura(layer: AuraLayer, seed: u32, style: AuraStyle, pos: Vec3, time_ms: f32, 
             // Breathes with the ground stars.
             let half = 2.4 * CELL * (1.0 + 0.05 * (ticks / 120.0 * std::f32::consts::TAU).sin());
             let v = |x: f32, z: f32, u: f32, vv: f32| Vertex { pos: (pos + Vec3::new(x, 0.08, z)).into(), uv: [u, vv], color };
-            let (a, b, c, d) = (v(-half, -half, 0.0, 0.0), v(half, -half, 1.0, 0.0), v(half, half, 1.0, 1.0), v(-half, half, 0.0, 1.0));
-            out.extend([a, b, c, a, c, d]);
+            drape(out, [v(-half, -half, 0.0, 0.0), v(half, -half, 1.0, 0.0), v(half, half, 1.0, 1.0), v(-half, half, 0.0, 1.0)], ground, 0.25);
         }
         AuraLayer::Swirl => {
             const DIVISIONS: usize = 21;
@@ -267,8 +267,7 @@ fn aura(layer: AuraLayer, seed: u32, style: AuraStyle, pos: Vec3, time_ms: f32, 
                 let corner = |x: f32, z: f32| pos + Vec3::new(x * c - z * s, 0.1, x * s + z * c);
                 let color = colors[i];
                 let v = |p: Vec3, u: f32, vv: f32| Vertex { pos: p.into(), uv: [u, vv], color };
-                let (a, b, cc, d) = (v(corner(-half, -half), 0.0, 0.0), v(corner(half, -half), 1.0, 0.0), v(corner(half, half), 1.0, 1.0), v(corner(-half, half), 0.0, 1.0));
-                out.extend([a, b, cc, a, cc, d]);
+                drape(out, [v(corner(-half, -half), 0.0, 0.0), v(corner(half, -half), 1.0, 0.0), v(corner(half, half), 1.0, 1.0), v(corner(-half, half), 0.0, 1.0)], ground, 0.35);
             }
         }
         AuraLayer::Sparkles => {
@@ -303,6 +302,31 @@ fn aura(layer: AuraLayer, seed: u32, style: AuraStyle, pos: Vec3, time_ms: f32, 
                 let (p0, p1, p2, p3) = (v(centre - a - b, 0.0, 1.0), v(centre + a - b, 1.0, 1.0), v(centre + a + b, 1.0, 0.0), v(centre - a + b, 0.0, 0.0));
                 out.extend([p0, p1, p2, p0, p2, p3]);
             }
+        }
+    }
+}
+
+/// A flat quad (corners in order around it) laid over the ground as a 12x12 grid, `lift`
+/// above it, so bumps don't poke through it and dips don't leave it hanging. Without a map
+/// it stays flat.
+fn drape(out: &mut Vec<Vertex>, q: [Vertex; 4], ground: Option<&Heights>, lift: f32) {
+    let Some(ground) = ground else {
+        out.extend([q[0], q[1], q[2], q[0], q[2], q[3]]);
+        return;
+    };
+    const N: usize = 12;
+    let at = |i: usize, j: usize| {
+        let (s, t) = (i as f32 / N as f32, j as f32 / N as f32);
+        let w = [(1.0 - s) * (1.0 - t), s * (1.0 - t), s * t, (1.0 - s) * t];
+        let mix = |f: fn(&Vertex) -> [f32; 3]| [0, 1, 2].map(|k| (0..4).map(|n| f(&q[n])[k] * w[n]).sum::<f32>());
+        let [x, _, z] = mix(|v| v.pos);
+        let [u, vv, _] = mix(|v| [v.uv[0], v.uv[1], 0.0]);
+        Vertex { pos: [x, ground.at(x, z) + lift, z], uv: [u, vv], color: q[0].color }
+    };
+    for j in 0..N {
+        for i in 0..N {
+            let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
+            out.extend([a, b, c, a, c, d]);
         }
     }
 }
@@ -481,13 +505,14 @@ pub struct ProcFx {
 }
 
 impl ProcFx {
-    pub fn vertices(&self, eye: Vec3, out: &mut Vec<Vertex>) {
+    /// `ground`: the map's surface, which ground-hugging layers are laid over.
+    pub fn vertices(&self, eye: Vec3, ground: Option<&Heights>, out: &mut Vec<Vertex>) {
         let t = (self.time_ms / self.duration_ms.max(1.0)).clamp(0.0, 1.0);
         // Quick fade in, long fade out.
         let fade = (t / 0.1).min(1.0) * ((1.0 - t) / 0.5).min(1.0);
         let color = [self.color[0], self.color[1], self.color[2], fade];
         match self.shape {
-            Shape::Aura { layer, seed, style } => aura(layer, seed, style, self.pos, self.time_ms, eye, out),
+            Shape::Aura { layer, seed, style } => aura(layer, seed, style, self.pos, self.time_ms, eye, ground, out),
             Shape::Tenseiga { part, solid } => tenseiga(part, solid, self.pos, t, self.color, eye, out),
             Shape::Column { radius, height } => {
                 let h = height * CELL * (t / 0.3).min(1.0);
@@ -594,5 +619,25 @@ impl ProcFx {
                 out.extend([a, b, cc, a, cc, d]);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod drape_tests {
+    use super::*;
+
+    #[test]
+    fn drapes_over_the_drawn_ground() {
+        // One 10-unit tile: corners 0, 10 (x), 20 (z), 30 (both), split along 0 to 3.
+        let ground = Heights::from_corners(1, 1, 10.0, vec![[0.0, 10.0, 20.0, 30.0]]);
+        assert_eq!(ground.at(5.0, 0.0), 5.0);
+        assert_eq!(ground.at(5.0, 5.0), 15.0);
+        // Off the diagonal each half is its own plane: (8, 2) lies on corners 0, 1 and 3.
+        assert!((ground.at(8.0, 2.0) - (8.0 + 2.0 * 2.0)).abs() < 1e-4);
+        let v = |x: f32, z: f32| Vertex { pos: [x, 99.0, z], uv: [x / 10.0, z / 10.0], color: [1.0; 4] };
+        let mut out = vec![];
+        drape(&mut out, [v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)], Some(&ground), 0.5);
+        assert_eq!(out.len(), 12 * 12 * 6);
+        assert!(out.iter().all(|p| (p.pos[1] - ground.at(p.pos[0], p.pos[2]) - 0.5).abs() < 1e-4));
     }
 }

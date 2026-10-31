@@ -169,6 +169,8 @@ pub struct Renderer {
     /// Ray-traced shadows (GPUs with ray queries): the world shader's group 2 layout, and the
     /// map's acceleration structure bound to it.
     rt_layout: Option<wgpu::BindGroupLayout>,
+    /// The map's ground surface (for effects laid over it).
+    ground: scene::Heights,
     /// Shadow maps of the torches nearest the player (`TORCHES`).
     torches: [shadow::Shadow; TORCHES],
     rt_bind: Option<wgpu::BindGroup>,
@@ -636,6 +638,7 @@ impl Renderer {
             grid,
             scene_pipeline,
             rt_bind,
+            ground: Default::default(),
             rt_layout,
             sky,
             sky_profile: None,
@@ -698,6 +701,7 @@ impl Renderer {
 
     /// Replaces the world. `images[i]` is `mesh.textures[i]` (None if missing).
     pub fn set_scene(&mut self, mesh: &SceneMesh, images: Vec<Option<Rgba>>, lighting: Lighting) {
+        self.ground = mesh.ground.clone();
         if let Some(layout) = &self.rt_layout {
             let refs: Vec<Option<&Rgba>> = images.iter().map(Option::as_ref).collect();
             self.rt_bind = Some(rt::build(&self.device, &self.queue, layout, &mesh.vertices, &mesh.ranges, &refs));
@@ -828,7 +832,7 @@ impl Renderer {
                 continue;
             }
             let start = vertices.len() as u32;
-            p.vertices(self.camera.eye(), &mut vertices);
+            p.vertices(self.camera.eye(), self.scene.as_ref().map(|_| &self.ground), &mut vertices);
             draws.push((p.tex.0, p.shades(), start..vertices.len() as u32));
         }
         if vertices.is_empty() {

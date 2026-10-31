@@ -184,10 +184,15 @@ pub struct SceneMesh {
     /// `textures[..ground_textures]` belong to the ground (GND); the rest to models (RSM).
     pub ground_textures: usize,
     lightmap: Rgba,
+    pub ground: Heights,
+}
+
+/// The ground's surface: y-up heights per cube corner.
+#[derive(Clone, Default)]
+pub struct Heights {
     width: u32,
     height: u32,
     zoom: f32,
-    /// y-up heights per cube corner.
     heights: Vec<[f32; 4]>,
 }
 
@@ -341,10 +346,7 @@ impl<'a> SceneBuilder<'a> {
             textures: self.textures,
             ground_textures: self.ground_textures,
             lightmap: self.atlas.image,
-            width: g.width,
-            height: g.height,
-            zoom: g.zoom,
-            heights: g.cubes.iter().map(|c| c.heights.map(|h| -h)).collect(),
+            ground: Heights { width: g.width, height: g.height, zoom: g.zoom, heights: g.cubes.iter().map(|c| c.heights.map(|h| -h)).collect() },
         }
     }
 }
@@ -475,6 +477,22 @@ fn node_matrices(rsm: &Rsm) -> Vec<Mat4> {
 impl SceneMesh {
     /// Ground height (y-up) under a world position, bilinear within the cube's top.
     pub fn height_at(&self, wx: f32, wz: f32) -> f32 {
+        self.ground.at(wx, wz)
+    }
+}
+
+impl Heights {
+    #[cfg(test)]
+    pub fn from_corners(width: u32, height: u32, zoom: f32, heights: Vec<[f32; 4]>) -> Self {
+        Self { width, height, zoom, heights }
+    }
+
+    /// Height (y-up) under a world position on the cube's top, as drawn: two triangles split
+    /// along the corner 0 to 3 diagonal (`ground_quad`); 0 off the map.
+    pub fn at(&self, wx: f32, wz: f32) -> f32 {
+        if self.zoom <= 0.0 {
+            return 0.0;
+        }
         let (fx, fz) = (wx / self.zoom, wz / self.zoom);
         let (cx, cz) = (fx.floor(), fz.floor());
         if cx < 0.0 || cz < 0.0 || cx as u32 >= self.width || cz as u32 >= self.height {
@@ -482,9 +500,11 @@ impl SceneMesh {
         }
         let h = self.heights[(cz as u32 * self.width + cx as u32) as usize];
         let (tx, tz) = (fx - cx, fz - cz);
-        let near = h[0] + (h[1] - h[0]) * tx;
-        let far = h[2] + (h[3] - h[2]) * tx;
-        near + (far - near) * tz
+        if tx >= tz {
+            h[0] + (h[1] - h[0]) * tx + (h[3] - h[1]) * tz
+        } else {
+            h[0] + (h[2] - h[0]) * tz + (h[3] - h[2]) * tx
+        }
     }
 }
 
