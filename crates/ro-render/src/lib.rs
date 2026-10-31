@@ -5,6 +5,7 @@ mod scene;
 mod effect;
 mod particle;
 mod fx;
+pub mod model3d;
 mod post;
 mod shadow;
 mod sky;
@@ -19,7 +20,7 @@ use wgpu::util::DeviceExt;
 
 pub use camera::{Camera, CELL};
 pub use ro_formats::image::Rgba;
-pub use scene::{SceneBuilder, SceneMesh};
+pub use scene::{SceneBuilder, SceneMesh, Vertex as ModelVertex};
 pub use upscale::{is_sprite_path, AssetClass, Quality as UpscaleQuality, UpscaleSettings, Upscaler};
 pub use water::{flag as water_flag, Foam, WaterMesh, WaterQuality, WaterSettings};
 pub use effect::{AuraLayer, AuraStyle, ProcFx, Shape, TenseigaPart, TexId};
@@ -67,6 +68,16 @@ struct Globals {
 }
 
 /// One frame of tessellated egui output.
+/// A registered 3D model texture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ModelTexId(pub usize);
+
+/// Triangles of a posed 3D model sharing one texture (world space, y-up).
+pub struct ModelDraw {
+    pub texture: ModelTexId,
+    pub vertices: Vec<ModelVertex>,
+}
+
 pub struct UiFrame {
     pub primitives: Vec<egui::ClippedPrimitive>,
     pub textures: egui::TexturesDelta,
@@ -170,6 +181,13 @@ pub struct Renderer {
     fx_pipeline: wgpu::RenderPipeline,
     fx_assets: Vec<fx::FxAsset>,
     effect_textures: Vec<wgpu::BindGroup>,
+    /// Textures of the 3D monster models (Granny), in the scene's bind group layout, and the
+    /// flat lightmap they share (models are lit by the sun and lamps, not the map's lightmap).
+    model_textures: Vec<wgpu::BindGroup>,
+    model_lightmap: wgpu::TextureView,
+    /// Posed 3D model triangles to draw this frame (world space, y-up); the client rebuilds
+    /// the list every frame.
+    pub models: Vec<ModelDraw>,
     post: post::Post,
     shadow: shadow::Shadow,
     /// The HD-2D look (bloom, tilt-shift, grading); `enabled = false` for the classic look.
@@ -514,6 +532,7 @@ impl Renderer {
         let water_detail = scene::upload_texture(&device, &queue, &water::detail_texture(), true);
         let post = post::Post::new(&device, config.format);
         let sky = sky::Sky::new(&device, samples);
+        let model_lightmap = scene::upload_texture(&device, &queue, &Rgba { width: 1, height: 1, pixels: vec![0, 0, 0, 255] }, false);
         Ok(Self {
             surface,
             device,
@@ -557,6 +576,9 @@ impl Renderer {
             fx_pipeline,
             fx_assets: vec![],
             effect_textures: vec![],
+            model_textures: vec![],
+            model_lightmap,
+            models: vec![],
             post,
             shadow,
             post_settings: PostSettings::default(),
@@ -744,6 +766,22 @@ impl Renderer {
             ],
         }));
         TexId(self.effect_textures.len() - 1)
+    }
+
+    /// Registers a 3D model texture (see `models`).
+    pub fn add_model_texture(&mut self, img: &Rgba) -> ModelTexId {
+        let view = scene::upload_texture(&self.device, &self.queue, img, true);
+        self.model_textures.push(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("model texture"),
+            layout: &self.texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.repeat_sampler) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.model_lightmap) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.lightmap_sampler) },
+            ],
+        }));
+        ModelTexId(self.model_textures.len() - 1)
     }
 
     /// Whether a sheet draws anything in action group `group` (facing south).
@@ -1193,6 +1231,29 @@ impl Renderer {
                 None => {
                     pass.set_pipeline(&self.grid);
                     pass.draw(0..6, 0..1);
+                }
+            }
+            // 3D monsters (opaque, lit like the map's models).
+            if self.models.iter().any(|m| !m.vertices.is_empty()) {
+                let mut verts = Vec::new();
+                let mut draws = Vec::new();
+                for m in &self.models {
+                    let start = verts.len() as u32;
+                    verts.extend_from_slice(&m.vertices);
+                    draws.push((m.texture.0, start..verts.len() as u32));
+                }
+                let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("models"),
+                    contents: bytemuck::cast_slice(&verts),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                pass.set_pipeline(&self.scene_pipeline);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                for (tex, range) in draws {
+                    if let Some(bind) = self.model_textures.get(tex) {
+                        pass.set_bind_group(1, bind, &[]);
+                        pass.draw(range, 0..1);
+                    }
                 }
             }
             // Transparent passes after all opaque geometry.

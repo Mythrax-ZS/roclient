@@ -36,6 +36,11 @@ impl Vertex {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SheetId(pub(crate) usize);
 
+impl SheetId {
+    /// No sheet: draws nothing (a 3D monster's actor keeps only its shadow).
+    pub const NONE: SheetId = SheetId(usize::MAX);
+}
+
 /// RO actor directions, counter-clockwise from south as the ACT files order them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {

@@ -47,6 +47,7 @@ mod storesearch;
 mod stylist;
 mod lapine;
 mod mapfix;
+mod models3d;
 mod reform;
 mod enchant;
 mod market;
@@ -1259,6 +1260,8 @@ struct App {
     look_tables: ro_game::looks::LookTables,
     /// Loaded actor templates by sprite key (None: not available, don't retry).
     sprites: std::collections::HashMap<String, Option<ro_render::Actor>>,
+    /// Classes drawn as 3D models (the original's Granny monsters), loaded once each.
+    models3d: std::collections::HashMap<i16, Option<std::rc::Rc<models3d::Loaded>>>,
     /// When the current map became ready (for --capture-after).
     ready_at: Option<std::time::Instant>,
     last_tick: std::time::Instant,
@@ -1407,6 +1410,17 @@ impl App {
             return a.clone();
         }
         let (r, vfs) = (self.renderer.as_mut()?, self.vfs.as_ref()?);
+        // Classes the original draws as 3D models: the model replaces the body sprite.
+        if models3d::is_model(&name) {
+            let loaded = models3d::load(vfs, r, &name).inspect_err(|e| tracing::warn!(job, "3D model {name}: {e:#}")).ok().map(std::rc::Rc::new);
+            let actor = loaded.is_some().then(|| {
+                let shadow = self.sprites.get("shadow").cloned().flatten().and_then(|a| a.shadow);
+                ro_render::Actor { pos: Default::default(), body: ro_render::SheetId::NONE, head: None, headgear: vec![], weapon: vec![], shadow, action: 0, dir: ro_render::Dir::S, time_ms: 0.0, once: false, alpha: 1.0, scale: 1.0, tint: [1.0; 3] }
+            });
+            self.models3d.insert(job, loaded);
+            self.sprites.insert(key, actor.clone());
+            return actor;
+        }
         let read = |base: &str| -> Option<(ro_formats::spr::Spr, ro_formats::act::Act)> {
             let spr = vfs.read(&format!("{base}.spr")).ok().flatten()?;
             let act = vfs.read(&format!("{base}.act")).ok().flatten()?;
@@ -2480,10 +2494,11 @@ impl App {
                     }
                 } else if reason == 1 {
                     // Died: play the death animation, then remove.
+                    let death_3d = self.units.get(&id).and_then(|m| self.models3d.get(&m.class)).and_then(|l| l.as_ref()).map(|l| l.death_ms());
                     if let Some(m) = self.units.get_mut(&id) {
                         m.walker.stop_at(m.walker.cell);
                         m.set_pose(Pose::Dead, f32::MAX);
-                        m.dying = Some(1500.0);
+                        m.dying = Some(death_3d.map_or(1500.0, |ms| ms.max(500.0)));
                     }
                 } else {
                     self.units.remove(&id);
@@ -6718,6 +6733,7 @@ impl App {
         let hovered_item = self.pick_floor_item();
         let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) else { return };
         r.actors.clear();
+        r.models.clear();
         r.warps = self
             .warps
             .values()
@@ -6776,6 +6792,9 @@ impl App {
                 let level = m.kind == 0 && m.level >= AURA_LEVEL;
                 let custom = self.hat_auras.get(&id).copied().or_else(|| saga::look(m.class).and_then(|l| l.aura));
                 m.aura_ms = auras.push(r, custom, level, &a, m.aura_ms + dt, id);
+                if let Some(Some(model)) = self.models3d.get(&m.class).filter(|_| a.alpha > 0.1 && w.shows_cell(m.walker.cell.0, m.walker.cell.1)) {
+                    r.models.extend(model.draws(&a, m.walker.dir as usize));
+                }
                 r.actors.push(a);
             }
             // Ambient map effects (RSW emitters, EF_* ids): torches loop in place; bubbles and
@@ -8218,6 +8237,7 @@ fn run() -> anyhow::Result<()> {
         sense: Default::default(),
         look_tables: Default::default(),
         sprites: Default::default(),
+        models3d: Default::default(),
         ready_at: None,
         last_tick: std::time::Instant::now(),
         capture: arg("--capture").map(|p| {

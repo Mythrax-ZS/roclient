@@ -2692,6 +2692,7 @@ dependencies = [
  "egui-wgpu",
  "flate2",
  "glam",
+ "image",
  "naga",
  "ro-formats",
  "serde",

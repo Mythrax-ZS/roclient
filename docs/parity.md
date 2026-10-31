@@ -61,6 +61,7 @@ epute*.bson)
 - [x] ZC_PET_ACT (pettalktable.xml lines in chat, emotions)
 - [x] ZC_SUMMON_HP_INIT / UPDATE, ZC_HO_PAR_CHANGE2, ZC_HOSKILLINFO_UPDATE (summon bar tested with ABR Battle Warrior)
 - [x] Elementals (ZC_EL_INIT, ZC_EL_PAR_CHANGE): companion window tab + HP bar
+- [x] 3D monsters (Granny .gr2: Sword / Bow / Soldier Guardians, Emperium, guild flag, treasure box): models, wavelet textures and move / attack / damage / dead clips, skinned on the CPU (seen in Thor's Volcano); were invisible
 
 ## Social
 - [x] Guild emblems in the guild window: BMP, GIF or PNG (with alpha) up to 256x256 from the Emblem folder, uploaded to and downloaded from the web server (/emblem/*, CZ_REQ_ADD_NEW_EMBLEM) as 2019+ clients do; 24x24 BMPs over the game connection when there is no web server

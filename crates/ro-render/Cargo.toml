@@ -19,3 +19,4 @@ egui-wgpu = "0.37"
 [dev-dependencies]
 # Same naga as wgpu: validates the WGSL in tests and translates it (examples/shaderxlate).
 naga = { version = "30.0.1", features = ["wgsl-in", "glsl-out", "hlsl-out", "spv-out"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
