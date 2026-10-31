@@ -8,7 +8,8 @@ use crate::reader::Reader;
 pub struct Gat {
     pub width: u32,
     pub height: u32,
-    /// Cell type: 0 walkable, 1 blocked, 3 walkable water, 5 cliff (blocked, shootable).
+    /// Cell type: 0 walkable, 1 blocked, 3 walkable water, 5 cliff (blocked, shootable); see
+    /// `walkable` for the rest.
     pub cells: Vec<u32>,
     /// Corner heights per cell, RO space (y down), corners (x,y), (x+1,y), (x,y+1), (x+1,y+1).
     /// Unlike the GND these include walkable model surfaces such as stairs and bridges.
@@ -39,11 +40,13 @@ impl Gat {
         }
     }
 
+    /// As the server reads cells (rAthena's map cache keeps the low byte; map_gat2cell walks
+    /// 0, 2, 3, 4 and 6). Newer maps flag cells in the high bits (0x80000000) or use type 6.
     pub fn walkable(&self, x: i32, y: i32) -> bool {
         if x < 0 || y < 0 || x as u32 >= self.width || y as u32 >= self.height {
             return false;
         }
-        matches!(self.cells[(y as u32 * self.width + x as u32) as usize], 0 | 3)
+        matches!(self.cells[(y as u32 * self.width + x as u32) as usize] as u8, 0 | 2 | 3 | 4 | 6)
     }
 
     /// Surface height (RO space, y down) at a fractional cell position; cell (x, y) spans

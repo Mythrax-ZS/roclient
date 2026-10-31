@@ -181,6 +181,20 @@ pub fn weapon_kind(sprite: Option<&str>) -> &'static str {
 
 /// Skills whose sound file does not follow a naming pattern (file stems in wav\effect).
 const SKILL_SOUNDS: &[(&str, &str)] = &[
+    // Samurai (custom): the game ships no sounds of their own, so each borrows a fitting one.
+    ("SAM_HEAVENS_SEVERANCE", "assasin_sonicblow"),
+    ("SAM_KUSANAGI_GUARD", "ef_endure"),
+    ("SAM_MOONLIT_REFLECTION", "knight_autocounter"),
+    ("SAM_BLADE_HARMONY", "knight_twohandquicken"),
+    ("SAM_BLOOD_COVENANT", "black_overthrust"),
+    ("SAM_MURAMASAS_CURSE", "ef_devil"),
+    ("SAM_ASHEN_WIND_SLASH", "knight_brandish_spear"),
+    ("SAM_WRATH_UNBOUND", "knight_bowling_bash"),
+    ("SAM_SEVER_HEAVENS_LIES", "ef_bash"),
+    ("SAM_LIGHT_AND_SHADOW", "assasin_sonicblow"),
+    ("SAM_UNCHAINED_WILL", "ef_detoxication"),
+    ("SAM_FORGE_OF_TEN_SOULS", "priest_gloria"),
+    ("SAM_DESTINYS_SEVERANCE", "ef_magnumbreak"),
     ("SM_BASH", "ef_bash"),
     ("SM_MAGNUM", "ef_magnumbreak"),
     ("SM_ENDURE", "ef_endure"),
