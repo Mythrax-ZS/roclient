@@ -1593,7 +1593,9 @@ impl Renderer {
                     gradient: 0.7 + profile.haze * 0.4,
                     height_offset: (50f32.to_radians() - cam.pitch) * 0.3 / 0.82,
                 }),
-                sun_uv: (sun.w > 0.0).then(|| [sun.x / sun.w * 0.5 + 0.5, 0.5 - sun.y / sun.w * 0.5]),
+                // No sky, no sun shafts: in caves and rooms the march would streak the
+                // brightest thing on screen (an aura, a spell) down the walls.
+                sun_uv: (outdoor_sky && sun.w > 0.0).then(|| [sun.x / sun.w * 0.5 + 0.5, 0.5 - sun.y / sun.w * 0.5]),
                 underwater: self.underwater,
                 time: self.started.elapsed().as_secs_f32(),
                 eye: cam.eye(),
