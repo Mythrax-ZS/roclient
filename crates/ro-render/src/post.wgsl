@@ -26,6 +26,8 @@ struct Params {
     water: vec4<f32>,
     // Eye position (world)
     eye: vec4<f32>,
+    // Auto exposure: x strength (0 off), y log2 neutral luminance, zw exposure range
+    adapt: vec4<f32>,
     inv_vp: mat4x4<f32>,
 };
 
@@ -37,6 +39,8 @@ struct Params {
 @group(0) @binding(5) var info: texture_2d<f32>;
 @group(0) @binding(6) var ao_tex: texture_2d<f32>;
 @group(0) @binding(7) var rays_tex: texture_2d<f32>;
+// The eye's adapted log2 luminance (1x1), for auto exposure.
+@group(0) @binding(8) var adapted_tex: texture_2d<f32>;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -302,7 +306,7 @@ fn fs_composite(in: VsOut) -> @location(0) vec4<f32> {
         c += vec3(0.55, 0.75, 0.8) * marine_snow(p.eye.xyz, dir, p.depth.x * 0.35, min(open_len, p.depth.x * 1.3), secs) * 0.2 * uw;
     }
 
-    c *= p.grade.x;
+    c *= p.grade.x * auto_exposure();
     // Warm highlights / cool shadows, like a storybook print.
     let luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
     let warm = vec3(1.0 + 0.08 * p.grade.w, 1.0 + 0.02 * p.grade.w, 1.0 - 0.10 * p.grade.w);
@@ -369,4 +373,39 @@ fn fs_rays(in: VsOut) -> @location(0) vec4<f32> {
         decay *= 0.93;
     }
     return vec4(sum / f32(steps), 1.0);
+}
+
+// Auto exposure. The meter: the scene's log2 luminance, four taps per texel of a 64x64
+// target (the sky counts as neutral, so looking up at clouds doesn't darken the town; black
+// counts as merely dark, so the void around a dungeon doesn't blow the exposure up).
+@fragment
+fn fs_lum(in: VsOut) -> @location(0) vec4<f32> {
+    let o = p.texel.xy;
+    var sum = 0.0;
+    for (var i = 0; i < 4; i++) {
+        let uv = in.uv + vec2(select(-o.x, o.x, (i & 1) == 1), select(-o.y, o.y, i >= 2));
+        let c = textureSample(src, samp, uv).rgb;
+        let sky = p.sky.w > 0.0 && textureSample(info, samp, uv).x >= 50000.0;
+        sum += select(log2(max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 0.01)), p.adapt.y, sky);
+    }
+    return vec4(sum * 0.25, 0.0, 0.0, 1.0);
+}
+
+// The eye: eased from what it was (`blurred`) toward the metered scene (`src`), slower when
+// the scene went dark (texel.x) than when it went bright (texel.y); texel.z 1 snaps.
+@fragment
+fn fs_adapt(in: VsOut) -> @location(0) vec4<f32> {
+    let now = textureSample(src, samp, vec2(0.5)).r;
+    let before = textureSample(blurred, samp, vec2(0.5)).r;
+    let rate = select(p.texel.x, p.texel.y, now > before);
+    return vec4(select(mix(before, now, rate), now, p.texel.z > 0.5), 0.0, 0.0, 1.0);
+}
+
+// The exposure the eye's state asks for: toward neutral by the strength, within range.
+fn auto_exposure() -> f32 {
+    if p.adapt.x <= 0.0 {
+        return 1.0;
+    }
+    let eye = textureSample(adapted_tex, samp, vec2(0.5)).r;
+    return clamp(exp2((p.adapt.y - eye) * p.adapt.x), p.adapt.z, p.adapt.w);
 }

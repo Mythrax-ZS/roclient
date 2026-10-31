@@ -1461,6 +1461,10 @@ impl Renderer {
                 amb.lerp(glam::Vec3::new(0.85, 0.88, 0.95), 0.6).powf(2.2)
             };
             post::FrameInfo {
+                light_ratio: {
+                    let lum = |c: [f32; 3]| c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11;
+                    (lum(self.lighting.diffuse) + lum(self.lighting.ambient)) / (lum(day_light.diffuse) + lum(day_light.ambient)).max(1e-3)
+                },
                 focus: cam.distance,
                 fog_color: fog.to_array(),
                 sky: self.sky_profile.as_ref().filter(|_| outdoor_sky).map(|profile| post::SkyFog {

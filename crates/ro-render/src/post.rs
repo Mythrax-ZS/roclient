@@ -44,6 +44,9 @@ pub struct PostSettings {
     pub god_rays: f32,
     /// Ambient occlusion in creases and under overhangs.
     pub ambient_occlusion: f32,
+    /// 0..1: how far exposure follows the scene's brightness, as eyes adapt (brighter in a
+    /// dark dungeon, a little darker on bright snow). 0 is a fixed exposure.
+    pub auto_exposure: f32,
     /// Sprites snap to whole screen pixels (crisp pixel art).
     pub pixel_snap: bool,
 }
@@ -58,6 +61,7 @@ impl Default for PostSettings {
             dof_band: 0.16,
             vignette: 0.45,
             exposure: 1.0,
+            auto_exposure: 0.0,
             contrast: 1.12,
             saturation: 1.1,
             warmth: 0.35,
@@ -103,6 +107,9 @@ struct Params {
     water: [f32; 4],
     /// Eye position (world), for rebuilding world positions from depth.
     eye: [f32; 4],
+    /// Auto exposure: x strength (0 off), y log2 of the luminance the eye settles to as
+    /// neutral, z / w the exposure's range.
+    adapt: [f32; 4],
     /// Inverse view-projection.
     inv_vp: [[f32; 4]; 4],
 }
@@ -127,8 +134,11 @@ pub struct FrameInfo {
     pub sun_uv: Option<[f32; 2]>,
     /// 0..1: the underwater look (absorption, caustics, shafts, drifting particles).
     pub underwater: f32,
-    /// Seconds, for the underwater animation.
+    /// Seconds, for the underwater animation (and the eye's adaptation).
     pub time: f32,
+    /// The map's light now against its daylight (below 1 at night), so auto exposure
+    /// leaves night dark instead of adapting it away.
+    pub light_ratio: f32,
     pub eye: glam::Vec3,
     pub inv_view_proj: glam::Mat4,
 }
@@ -232,11 +242,30 @@ pub struct Post {
     composite: wgpu::RenderPipeline,
     /// Plain copy to the output when post-processing is off.
     copy: wgpu::RenderPipeline,
+    /// Auto exposure: the scene's log luminance at 64x64, averaged down to one texel (a
+    /// geometric mean, which a few bright lights can't swing), then eased into one of
+    /// `adapted` (alternating: one is read while the other is written).
+    lum: wgpu::RenderPipeline,
+    adapt: wgpu::RenderPipeline,
+    meter: [wgpu::TextureView; 4],
+    adapted: [wgpu::TextureView; 2],
+    /// Which of `adapted` holds the eye's state, and when it was last updated (None:
+    /// never, so the first frame takes the scene as it is).
+    eye: std::cell::Cell<(usize, Option<f32>)>,
     /// One uniform buffer per pass (each has its own texel size / direction).
     uniforms: Vec<wgpu::Buffer>,
 }
 
-const PASSES: usize = 12;
+const PASSES: usize = 17;
+
+/// The luminance the eye treats as neutral (exposure 1): a daylit town (Prontera's scene
+/// averages about this, so towns keep their look and dark maps open up).
+const NEUTRAL_LUMINANCE: f32 = 0.125;
+/// Seconds for the eye to settle: opening up in the dark is slower than closing down.
+const ADAPT_TO_DARK: f32 = 2.5;
+const ADAPT_TO_BRIGHT: f32 = 0.8;
+/// How far auto exposure may brighten and darken.
+const EXPOSURE_RANGE: (f32, f32) = (0.6, 2.0);
 
 impl Post {
     pub fn new(device: &wgpu::Device, output: wgpu::TextureFormat) -> Self {
@@ -271,6 +300,7 @@ impl Post {
                 tex(5),
                 tex(6),
                 tex(7),
+                tex(8),
             ],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("post"), source: wgpu::ShaderSource::Wgsl(include_str!("post.wgsl").into()) });
@@ -311,7 +341,14 @@ impl Post {
                 })
             })
             .collect();
+        let meter = [64, 16, 4, 1].map(|n| target(device, "exposure meter", n, n, HDR_FORMAT));
+        let adapted = [0, 1].map(|_| target(device, "adapted exposure", 1, 1, HDR_FORMAT));
         Self {
+            lum: pipe("fs_lum", HDR_FORMAT),
+            adapt: pipe("fs_adapt", HDR_FORMAT),
+            meter,
+            adapted,
+            eye: std::cell::Cell::new((0, None)),
             down: pipe("fs_down", HDR_FORMAT),
             bright: pipe("fs_bright", HDR_FORMAT),
             blur: pipe("fs_blur", HDR_FORMAT),
@@ -357,11 +394,12 @@ impl Post {
             ao: [s.ambient_occlusion, 14.0 * h / 1080.0, 0.0, 0.0],
             water: [if s.enabled { frame.underwater } else { 0.0 }, frame.time, w / h, 0.0],
             eye: frame.eye.extend(1.0).to_array(),
+            adapt: [s.auto_exposure, (NEUTRAL_LUMINANCE * frame.light_ratio.max(0.05)).log2(), EXPOSURE_RANGE.0, EXPOSURE_RANGE.1],
             inv_vp: frame.inv_view_proj.to_cols_array_2d(),
             ..Default::default()
         };
         let mut n = 0;
-        let mut pass = |enc: &mut wgpu::CommandEncoder, pipe: &wgpu::RenderPipeline, src: &wgpu::TextureView, dst: &wgpu::TextureView, texel: [f32; 4], extra: [&wgpu::TextureView; 5]| {
+        let mut pass = |enc: &mut wgpu::CommandEncoder, pipe: &wgpu::RenderPipeline, src: &wgpu::TextureView, dst: &wgpu::TextureView, texel: [f32; 4], extra: [&wgpu::TextureView; 6]| {
             let buf = &self.uniforms[n];
             n += 1;
             queue.write_buffer(buf, 0, bytemuck::bytes_of(&Params { texel, ..base }));
@@ -378,6 +416,7 @@ impl Post {
                     wgpu::BindGroupEntry { binding: 5, resource: view(extra[2]) },
                     wgpu::BindGroupEntry { binding: 6, resource: view(extra[3]) },
                     wgpu::BindGroupEntry { binding: 7, resource: view(extra[4]) },
+                    wgpu::BindGroupEntry { binding: 8, resource: view(extra[5]) },
                 ],
             });
             let mut rp = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -395,7 +434,7 @@ impl Post {
             rp.draw(0..3, 0..1);
         };
         // Textures a pass does not read: any valid view of the right kind.
-        let none = [&t.hdr, &t.hdr, &t.info, &t.hdr, &t.hdr];
+        let none = [&t.hdr, &t.hdr, &t.info, &t.hdr, &t.hdr, &self.adapted[0]];
         // Into the window: a plain bilinear sample when scaling up; when supersampling, four
         // taps a quarter of a window pixel out, which average each pixel's block of scene.
         let scaled = t.size != out_size;
@@ -421,8 +460,26 @@ impl Post {
         pass(enc, &self.blur, &t.dof[1], &t.dof[0], [qw, qh, 0.0, qh], none);
         // Ambient occlusion from the depth info, at half size.
         pass(enc, &self.ao, &t.hdr, &t.ao, full, none);
+        // Auto exposure: meter the scene, then ease the eye toward it.
+        let (now, then) = self.eye.get();
+        let next = 1 - now;
+        if s.auto_exposure > 0.0 {
+            pass(enc, &self.lum, &t.hdr, &self.meter[0], [0.25 / 64.0, 0.25 / 64.0, 0.0, 0.0], none);
+            for (i, n) in [64.0, 16.0, 4.0].into_iter().enumerate() {
+                pass(enc, &self.down, &self.meter[i], &self.meter[i + 1], [1.0 / n, 1.0 / n, 0.0, 0.0], none);
+            }
+            let dt = then.map_or(0.0, |t| (frame.time - t).max(0.0));
+            let ease = |secs: f32| 1.0 - (-dt / secs).exp();
+            let snap = if then.is_none() { 1.0 } else { 0.0 };
+            let mut prev = none;
+            prev[0] = &self.adapted[now];
+            pass(enc, &self.adapt, &self.meter[3], &self.adapted[next], [ease(ADAPT_TO_DARK), ease(ADAPT_TO_BRIGHT), snap, 0.0], prev);
+            self.eye.set((next, Some(frame.time)));
+        } else {
+            self.eye.set((now, None));
+        }
         let graded = if scaled { &t.graded } else { out };
-        pass(enc, &self.composite, &t.hdr, graded, full, [&t.dof[0], &t.bloom[0], &t.info, &t.ao, &t.rays]);
+        pass(enc, &self.composite, &t.hdr, graded, full, [&t.dof[0], &t.bloom[0], &t.info, &t.ao, &t.rays, &self.adapted[self.eye.get().0]]);
         if scaled {
             pass(enc, &self.copy, &t.graded, out, resample, none);
         }
