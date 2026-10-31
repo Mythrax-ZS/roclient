@@ -7321,6 +7321,18 @@ impl App {
             }
             let ppp = window.scale_factor() as f32 * self.ui_scale;
             input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size.0 as f32, size.1 as f32) / ppp));
+            // Android: the on-screen keyboard shrinks the activity's content rect, not the
+            // window (NativeActivity's adjustResize), so the interface fits above it: the login
+            // form, a dialog or the chat being typed in stays in view. The world still fills
+            // the screen.
+            #[cfg(target_os = "android")]
+            {
+                use winit::platform::android::WindowExtAndroid;
+                let visible = window.content_rect().bottom;
+                if visible > 0 && (visible as u32) < size.1 {
+                    input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size.0 as f32, visible as f32) / ppp));
+                }
+            }
             self.egui_ctx.set_pixels_per_point(ppp);
             let mut sent = None;
             let mut answer = None;

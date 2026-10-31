@@ -17,6 +17,9 @@ const HAIR_COLORS: std::ops::RangeInclusive<u16> = 0..=8;
 /// Doram have fewer hair styles.
 const DORAM_HAIR: u16 = 10;
 const SLOTS_PER_PAGE: u8 = 3;
+/// The login form puts the cursor in the ID (or password) box, as the original. Not on
+/// touch screens, where a focused box raises the on-screen keyboard over the form unasked.
+const AUTO_FOCUS: bool = cfg!(not(target_os = "android"));
 
 /// The PIN code prompt, answered with the mouse on a shuffled keypad as in the original.
 struct PinPad {
@@ -206,11 +209,11 @@ impl Front {
                 egui::TextEdit::singleline(s).password(pw).frame(egui::Frame::NONE).text_color(crate::classic::TEXT).font(egui::FontId::proportional(12.0)).margin(egui::Margin::symmetric(2, 1))
             }
             let id = ui.put(field(30.0), edit(&mut self.user, false));
-            if self.user.is_empty() && !ui.ctx().memory(|m| m.focused().is_some()) {
+            if AUTO_FOCUS && self.user.is_empty() && !ui.ctx().memory(|m| m.focused().is_some()) {
                 id.request_focus();
             }
             let pw = ui.put(field(62.0), edit(&mut self.pass, true));
-            if !self.user.is_empty() && self.pass.is_empty() && !ui.ctx().memory(|m| m.focused().is_some()) {
+            if AUTO_FOCUS && !self.user.is_empty() && self.pass.is_empty() && !ui.ctx().memory(|m| m.focused().is_some()) {
                 pw.request_focus();
             }
             let image_button = |ui: &mut egui::Ui, name: &str, hover: &str, at: egui::Pos2, salt: &str| {
@@ -449,13 +452,13 @@ impl Front {
                     egui::Grid::new("login").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                         ui.label("ID");
                         let id = ui.add(egui::TextEdit::singleline(&mut self.user).desired_width(200.0));
-                        if self.user.is_empty() {
+                        if AUTO_FOCUS && self.user.is_empty() {
                             id.request_focus();
                         }
                         ui.end_row();
                         ui.label("Password");
                         let pw = ui.add(egui::TextEdit::singleline(&mut self.pass).password(true).desired_width(200.0));
-                        if !self.user.is_empty() && self.pass.is_empty() && !ui.ctx().memory(|m| m.focused().is_some()) {
+                        if AUTO_FOCUS && !self.user.is_empty() && self.pass.is_empty() && !ui.ctx().memory(|m| m.focused().is_some()) {
                             pw.request_focus();
                         }
                         ui.end_row();
