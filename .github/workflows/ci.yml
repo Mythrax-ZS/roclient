@@ -37,6 +37,8 @@ jobs:
           Copy-Item "$t/tenseiga.exe","$t/grfdump.exe" dist/tenseiga/
           Copy-Item config/example.toml dist/tenseiga/config/
           Copy-Item README.md dist/tenseiga/
+          # The Samurai sprites, icons and quest text; the client finds them beside itself.
+          Copy-Item -Recurse overlays dist/tenseiga/
           Compress-Archive -Path dist/tenseiga/* -DestinationPath tenseiga-windows-x86_64.zip
       - uses: actions/upload-artifact@v4
         with:
@@ -59,6 +61,8 @@ jobs:
           mkdir -p AppDir/usr/bin AppDir/usr/share/tenseiga
           cp target/release/tenseiga target/release/grfdump AppDir/usr/bin/
           cp config/example.toml README.md AppDir/usr/share/tenseiga/
+          # The Samurai sprites, icons and quest text, at the AppImage root (the client searches upward from usr/bin).
+          cp -r overlays AppDir/
           cp packaging/AppRun AppDir/AppRun
           chmod +x AppDir/AppRun
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20250213-2/linuxdeploy-x86_64.AppImage
