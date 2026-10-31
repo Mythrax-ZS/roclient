@@ -15,7 +15,8 @@ pub struct Splash {
     title: Option<egui::TextureHandle>,
     grade: Option<egui::TextureHandle>,
     loading_names: Vec<String>,
-    loading: Option<(egui::TextureHandle, f64)>,
+    /// The loading screen, and when it was first drawn.
+    loading: Option<(egui::TextureHandle, Option<f64>)>,
     started: Option<f64>,
 }
 
@@ -91,14 +92,17 @@ impl Splash {
         let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos() as usize);
         let path = &self.loading_names[seed % self.loading_names.len()];
         if let Some(tex) = load(ctx, vfs, path) {
-            self.loading = Some((tex, ctx.input(|i| i.time)));
+            self.loading = Some((tex, None));
         }
     }
 
     /// Draws the loading screen (`done` once the map is in). Returns false once it has faded away.
     pub fn loading(&mut self, ctx: &egui::Context, done: bool) -> bool {
-        let Some((tex, since)) = &self.loading else { return false };
+        let Some((tex, since)) = &mut self.loading else { return false };
         let now = ctx.input(|i| i.time);
+        // Timed from its first frame: the map loads in one go before anything is drawn, so a
+        // slow load (big texture packs) would otherwise use up the showing time unseen.
+        let since = *since.get_or_insert(now);
         // The map loads in one go; the bar fills over the screen's minimum showing time.
         let progress = if done { ((now - since) / 0.6) as f32 } else { 0.1 };
         // Stay at least a moment so it doesn't just flash, then fade out once loaded.
