@@ -42,7 +42,9 @@ use ro_proto::social::*;
 type Conn = Framed<TcpStream, RoCodec<ServerTable>>;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
-const KEEPALIVE: Duration = Duration::from_secs(10);
+/// Each keepalive (CZ_REQUEST_TIME) is answered with ZC_NOTIFY_TIME, which also times the round
+/// trip (the performance overlay's ping).
+const KEEPALIVE: Duration = Duration::from_secs(3);
 /// The map server answers every keepalive; this long without a packet, it is gone.
 const SILENCE: Duration = Duration::from_secs(30);
 
@@ -198,6 +200,8 @@ pub struct MapSession {
     inventory_extra: Option<u16>,
     /// Macro detector captcha being received: (expected size, zlib bytes so far).
     captcha: Option<(usize, Vec<u8>)>,
+    /// When the last keepalive went out, until ZC_NOTIFY_TIME answers it (the ping).
+    ping_sent: Option<Instant>,
 }
 
 pub async fn enter_map(zone: &ZoneServer, auth: &AcceptLogin) -> anyhow::Result<MapSession> {
@@ -211,7 +215,7 @@ pub async fn enter_map(zone: &ZoneServer, auth: &AcceptLogin) -> anyhow::Result<
             Frame::Packet { opcode: id::ZC_ACCEPT_ENTER, data } => {
                 let spawn = parse_accept_enter(&data);
                 conn.send(CzLoadEndAck).await?;
-                return Ok(MapSession { conn, spawn, started, inventory_extra, captcha: None });
+                return Ok(MapSession { conn, spawn, started, inventory_extra, captcha: None, ping_sent: None });
             }
             Frame::Packet { opcode: id::ZC_REFUSE_ENTER, data } => bail!("map server refused, error {}", data[2]),
             Frame::Packet { opcode: id::SC_NOTIFY_BAN, data } => bail!("disconnected by map server, code {}", data[2]),
@@ -224,6 +228,8 @@ pub async fn enter_map(zone: &ZoneServer, auth: &AcceptLogin) -> anyhow::Result<
 /// What the UI hears from a running session.
 #[derive(Debug, Clone)]
 pub enum Event {
+    /// The map server's round trip (ms), timed on each keepalive.
+    Ping(f32),
     /// Entered a map with this character.
     Entered { map: String, x: u16, y: u16, dir: u8, account_id: u32, character: CharInfo, font: u16 },
     /// ZC_NOTIFY_FONT: a character's name font changed (us included).
@@ -1012,6 +1018,7 @@ impl MapSession {
                         bail!("the map server stopped answering");
                     }
                     let tick = self.tick();
+                    self.ping_sent = Some(Instant::now());
                     self.send(CzRequestTime { client_tick: tick }).await?;
                 }
                 cmd = commands.recv() => match cmd {
@@ -1626,6 +1633,8 @@ impl MapSession {
                         0x0ab2 if data.len() >= 7 => Some(Event::PartyDead { id: l(&data, 2), dead: data[6] != 0 }),
                         0x07fd if data.len() >= 9 => parse_item_obtained(&data),
                         0x0ada if data.len() >= 32 => Some(Event::RefineBroadcast { who: ro_proto::packets::get_fixed_str(&mut &data[2..26], 24), item: l(&data, 26), level: data[30] as i8, ok: data[31] != 0 }),
+                        // The keepalive's answer: its round trip is the ping.
+                        id::ZC_NOTIFY_TIME => self.ping_sent.take().map(|t| Event::Ping(t.elapsed().as_secs_f32() * 1000.0)),
                         // ZC_PING_LIVE: answer like the original client, so the link counts as alive.
                         0x0b1d => {
                             self.send(Bare(0x0b1c)).await?;

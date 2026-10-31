@@ -45,6 +45,7 @@ const GAME: &[(&str, &str)] = &[
     ("Esc", "Game menu; cancels a skill being aimed"),
     ("Insert", "Sit down or stand up"),
     ("Ctrl+Tab", "Minimap on or off"),
+    ("F10", "Performance overlay on or off (frame rate, frame times, ping)"),
     ("F11", "Full screen on or off"),
     ("Print Screen", "Screenshot, saved in the ScreenShot folder"),
     ("Scroll Lock", "Screenshot"),

@@ -42,6 +42,8 @@ pub struct Settings {
     pub macros: Vec<String>,
     /// Screenshots (Print Screen) include the interface; off, they show the world alone.
     pub screenshot_ui: bool,
+    /// The performance overlay (F10): frame rate, frame times, ping.
+    pub perf_overlay: bool,
     /// Borderless full screen (F11).
     pub fullscreen: bool,
     /// Experience gained from monsters in the chat (the original's "Experience message" chat
@@ -70,7 +72,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false, pad_style: Default::default(), vibration: 1.0, touchpad: true, light_bar: true, dualsense_hd: true, vibration_test: false, pad_tuning: Default::default(), pad_live: None }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, perf_overlay: false, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false, pad_style: Default::default(), vibration: 1.0, touchpad: true, light_bar: true, dualsense_hd: true, vibration_test: false, pad_tuning: Default::default(), pad_live: None }
     }
 }
 
@@ -226,6 +228,9 @@ impl Settings {
         section(ui, "Interface");
         ui.label("Window");
         ui.checkbox(&mut self.fullscreen, "Full screen (F11)");
+        ui.end_row();
+        ui.label("Performance");
+        ui.checkbox(&mut self.perf_overlay, "Frame rate, frame times and ping (F10)");
         ui.end_row();
         ui.label("UI scale");
         // Applied on release, so the slider doesn't move under the pointer while dragging.

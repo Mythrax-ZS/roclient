@@ -135,6 +135,8 @@ pub struct Renderer {
     instance: wgpu::Instance,
     /// Where frames are drawn when the surface can't take a second view format (see new).
     relay: Option<wgpu::Texture>,
+    /// The GPU and graphics API in use ("Adreno (TM) 740 (Vulkan)"), for the performance overlay.
+    adapter_name: String,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -557,6 +559,7 @@ impl Renderer {
             surface,
             instance,
             relay,
+            adapter_name: format!("{} ({:?})", info.name, info.backend),
             device,
             queue,
             config,
@@ -934,6 +937,11 @@ impl Renderer {
             self.relay = Some(Self::make_relay(&self.device, &self.config));
         }
         self.targets = Self::make_targets(&self.device, &self.config, self.samples);
+    }
+
+    /// The GPU and graphics API in use.
+    pub fn adapter(&self) -> &str {
+        &self.adapter_name
     }
 
     pub fn size(&self) -> (u32, u32) {

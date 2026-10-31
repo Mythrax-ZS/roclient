@@ -57,6 +57,7 @@ mod emblem;
 mod emotes;
 mod settings;
 mod padglyph;
+mod perf;
 mod haptics;
 mod hidpad;
 mod shortcuts;
@@ -1325,6 +1326,9 @@ struct App {
     left_down: bool,
     cursor: Option<(f64, f64)>,
     fps: FpsCounter,
+    /// The performance overlay's measurements (F10), and the map server's last round trip.
+    perf: perf::Perf,
+    ping: Option<f32>,
     egui_ctx: egui::Context,
     egui_state: Option<egui_winit::State>,
     hud: hud::Hud,
@@ -2669,6 +2673,7 @@ impl App {
                 let text = msgstr::get(id, &[&g, &t]).unwrap_or_else(|| format!("[Point] You have been rewarded with {g} {en} points. Your point total is {t}."));
                 self.hud.push_chat(ro_net::ChatKind::System, text);
             }
+            Ping(ms) => self.ping = Some(ms),
             MannerResult(result) => {
                 let text = match result {
                     0 => Some(msgstr::get(854, &[]).unwrap_or_else(|| "A manner point has been successfully aligned.".into())),
@@ -4025,6 +4030,7 @@ impl App {
     /// map and character goes, and the title music plays.
     fn leave_world(&mut self) {
         self.leave_character();
+        self.ping = None;
         self.units.clear();
         self.devotions.clear();
         self.ground_units.clear();
@@ -4119,6 +4125,11 @@ impl App {
             // Shortcut bar: F1-F9 use the first row on show; F12 shows one to four
             // rows or hides the bar.
             // F11: full screen on or off (borderless, at the desktop's resolution).
+            // F10: the performance overlay on or off.
+            Key::Named(NamedKey::F10) => {
+                self.settings.perf_overlay = !self.settings.perf_overlay;
+                self.settings.save();
+            }
             Key::Named(NamedKey::F11) => {
                 self.settings.fullscreen = !self.settings.fullscreen;
                 self.settings.save();
@@ -6093,6 +6104,7 @@ impl App {
         let now = std::time::Instant::now();
         let dt = (now - self.last_tick).as_secs_f32() * 1000.0;
         self.last_tick = now;
+        self.perf.frame(dt);
         if self.front.is_none() {
             self.pad_tick(dt);
             self.feedback_tick(dt);
@@ -7387,7 +7399,22 @@ impl App {
             dots.extend(self.battle.team_dots().into_iter().map(|c| (c, egui::Color32::from_rgb(255, 160, 200))));
             let me = self.player.as_ref().map(|p| (p.walker.cell.0 as f32, p.walker.cell.1 as f32));
             let map_name = self.world.as_ref().map(|w| w.name.clone()).unwrap_or_default();
+            let perf_lines = self.settings.perf_overlay.then(|| {
+                let p = &self.perf;
+                let (w, h) = r.size();
+                let at = self.player.as_ref().map(|p| p.walker.cell).unwrap_or_default();
+                vec![
+                    format!("{:.0} fps  {:.1} ms (slowest {:.1})", p.fps, p.avg, p.worst),
+                    format!("build {:.1} ms  draw {:.1} ms", p.cpu, p.render),
+                    self.ping.map_or("ping -".to_string(), |ms| if ms < 10.0 { format!("ping {ms:.1} ms") } else { format!("ping {ms:.0} ms") }),
+                    format!("{map_name} {},{}  {} units  {} drawn", at.0, at.1, self.units.len(), r.actors.len()),
+                    format!("{w}x{h}  {}", r.adapter()),
+                ]
+            });
             let out = self.egui_ctx.run_ui(input, |ui| {
+                if let Some(lines) = &perf_lines {
+                    self.perf.show(ui.ctx(), lines);
+                }
                 // The game cursor on every screen (its own top layer, so draw order does not matter).
                 if let (Some(c), Some((x, y)), false) = (self.cursor_sprite.as_ref(), self.cursor, self.screenshot) {
                     let time = ui.ctx().input(|i| i.time);
@@ -7951,8 +7978,12 @@ ui.ctx(), &self.icons, |id| db.map_or_else(|| format!("item {id}"), |d| d.name(i
                 }
                 Err(e) => tracing::error!("screenshot: {e:#}"),
             }
-        } else if let Err(e) = r.frame() {
-            tracing::error!("frame: {e:#}");
+        } else {
+            let drawing = std::time::Instant::now();
+            if let Err(e) = r.frame() {
+                tracing::error!("frame: {e:#}");
+            }
+            self.perf.split((drawing - self.last_tick).as_secs_f32() * 1000.0, drawing.elapsed().as_secs_f32() * 1000.0);
         }
         if let Some(fps) = self.fps.tick() {
             let (w, h) = r.size();
@@ -8129,7 +8160,7 @@ impl ApplicationHandler for App {
         }
         // Login / character screens: the world takes no input.
         let front_blocks = self.front.is_some() && matches!(event, WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::KeyboardInput { .. });
-        let function_key = matches!(&event, WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key: winit::keyboard::Key::Named(k), .. }, .. } if hotkey_slot(*k).is_some() || matches!(*k, winit::keyboard::NamedKey::F11 | winit::keyboard::NamedKey::F12));
+        let function_key = matches!(&event, WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key: winit::keyboard::Key::Named(k), .. }, .. } if hotkey_slot(*k).is_some() || matches!(*k, winit::keyboard::NamedKey::F10 | winit::keyboard::NamedKey::F11 | winit::keyboard::NamedKey::F12));
         let ui_used = ui_used && !function_key;
         if (ui_used || front_blocks) && !matches!(event, WindowEvent::Resized(_) | WindowEvent::CloseRequested | WindowEvent::ScaleFactorChanged { .. }) {
             return;
@@ -8522,6 +8553,8 @@ fn start(event_loop: Option<EventLoop<()>>) -> anyhow::Result<()> {
         left_down: false,
         cursor: None,
         fps: FpsCounter::default(),
+        perf: perf::Perf::default(),
+        ping: None,
         egui_ctx: egui::Context::default(),
         egui_state: None,
         hud: hud::Hud::default(),
