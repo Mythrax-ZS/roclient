@@ -49,6 +49,9 @@ pub struct PostSettings {
     pub auto_exposure: f32,
     /// Depth in texels of the relief read from ground and model textures (0 flat).
     pub relief: f32,
+    /// Outdoors, the sun's shadows from all map geometry are ray traced (GPUs with ray
+    /// queries; ignored elsewhere), in place of the shadows baked into the lightmaps.
+    pub ray_traced_shadows: bool,
     /// Sprites snap to whole screen pixels (crisp pixel art).
     pub pixel_snap: bool,
 }
@@ -65,6 +68,7 @@ impl Default for PostSettings {
             exposure: 1.0,
             auto_exposure: 0.0,
             relief: 0.0,
+            ray_traced_shadows: false,
             contrast: 1.12,
             saturation: 1.1,
             warmth: 0.35,

@@ -7,6 +7,7 @@ mod particle;
 mod fx;
 pub mod model3d;
 mod post;
+mod rt;
 mod shadow;
 mod sky;
 mod sky_profile;
@@ -65,6 +66,8 @@ struct Globals {
     water_tint: [f32; 4],
     /// x: 1 to filter magnified world textures with Catmull-Rom (texture upscaling).
     upscale: [f32; 4],
+    /// Ray-traced shadows: xyz the direction sunlight travels, w 1 when on.
+    rt: [f32; 4],
 }
 
 /// One frame of tessellated egui output.
@@ -153,6 +156,10 @@ pub struct Renderer {
     room: Option<(u32, u32)>,
     grid: wgpu::RenderPipeline,
     scene_pipeline: wgpu::RenderPipeline,
+    /// Ray-traced shadows (GPUs with ray queries): the world shader's group 2 layout, and the
+    /// map's acceleration structure bound to it.
+    rt_layout: Option<wgpu::BindGroupLayout>,
+    rt_bind: Option<wgpu::BindGroup>,
     sky: sky::Sky,
     sky_profile: Option<SkyProfile>,
     texture_layout: wgpu::BindGroupLayout,
@@ -266,7 +273,16 @@ impl Renderer {
         let info = adapter.get_info();
         tracing::info!(backend = ?info.backend, name = %info.name, "adapter");
 
-        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await?;
+        let rt_needs = rt::device_needs(&adapter);
+        let (device, queue) = adapter
+            .request_device(&match rt_needs.clone() {
+                // SAFETY: ray queries are experimental in wgpu; only the world shader's shadow
+                // ray uses them, and only where the adapter reports support.
+                Some((features, limits)) => wgpu::DeviceDescriptor { required_features: features, required_limits: limits, experimental_features: unsafe { wgpu::ExperimentalFeatures::enabled() }, ..Default::default() },
+                None => wgpu::DeviceDescriptor::default(),
+            })
+            .await?;
+        tracing::info!(ray_tracing = rt_needs.is_some(), "device");
         let size = window.inner_size();
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
@@ -480,10 +496,18 @@ impl Renderer {
             })
         };
         let grid = pipeline("grid", include_str!("grid.wgsl"), &[Some(&globals_layout)], &[], None);
+        let rt_layout = rt_needs.is_some().then(|| rt::layout(&device));
+        // With ray tracing, rt.wgsl's shadow ray replaces the stub at the end of scene.wgsl.
+        let scene_src = include_str!("scene.wgsl");
+        let scene_src = match &rt_layout {
+            Some(_) => format!("{}
+{}", include_str!("rt.wgsl"), &scene_src[..scene_src.find("// RT-STUB").expect("scene.wgsl stub")]),
+            None => scene_src.to_string(),
+        };
         let scene_pipeline = pipeline(
             "scene",
-            include_str!("scene.wgsl"),
-            &[Some(&globals_layout), Some(&texture_layout)],
+            &scene_src,
+            &[Some(&globals_layout), Some(&texture_layout), rt_layout.as_ref()],
             &[Some(scene::Vertex::layout())],
             None,
         );
@@ -559,6 +583,8 @@ impl Renderer {
         let post = post::Post::new(&device, config.format);
         let sky = sky::Sky::new(&device, samples);
         let model_lightmap = scene::upload_texture(&device, &queue, &Rgba { width: 1, height: 1, pixels: vec![0, 0, 0, 255] }, false);
+        // Something to bind before the first map.
+        let rt_bind = rt_layout.as_ref().map(|l| rt::build(&device, &queue, l, &[], &[], &[]));
         Ok(Self {
             surface,
             instance,
@@ -576,6 +602,8 @@ impl Renderer {
             room: None,
             grid,
             scene_pipeline,
+            rt_bind,
+            rt_layout,
             sky,
             sky_profile: None,
             texture_layout,
@@ -636,6 +664,10 @@ impl Renderer {
 
     /// Replaces the world. `images[i]` is `mesh.textures[i]` (None if missing).
     pub fn set_scene(&mut self, mesh: &SceneMesh, images: Vec<Option<Rgba>>, lighting: Lighting) {
+        if let Some(layout) = &self.rt_layout {
+            let refs: Vec<Option<&Rgba>> = images.iter().map(Option::as_ref).collect();
+            self.rt_bind = Some(rt::build(&self.device, &self.queue, layout, &mesh.vertices, &mesh.ranges, &refs));
+        }
         self.scene = Some(scene::Scene::upload(
             &self.device,
             &self.queue,
@@ -1239,6 +1271,11 @@ impl Renderer {
                 [c[0], c[1], c[2], 0.0]
             },
             upscale: [if self.upscale_runtime { 1.0 } else { 0.0 }, if self.post_settings.enabled { self.post_settings.relief } else { 0.0 }, 0.0, 0.0],
+            // Outdoors only: interiors and dungeons keep their hand-baked light and shadow.
+            rt: {
+                let on = self.rt_bind.is_some() && self.post_settings.enabled && self.post_settings.ray_traced_shadows && self.room.is_none() && self.underwater <= 0.0 && self.sky_profile.is_some();
+                self.shadow_dir().normalize_or_zero().extend(if on { 1.0 } else { 0.0 }).to_array()
+            },
         };
         self.queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         let outdoor_sky = self.scene.is_some() && self.room.is_none() && self.underwater <= 0.0 && self.sky_profile.is_some();
@@ -1329,6 +1366,9 @@ impl Renderer {
                 self.sky.draw(&mut pass);
             }
             pass.set_bind_group(0, &self.globals_bind, &[]);
+            if let Some(rt) = &self.rt_bind {
+                pass.set_bind_group(2, rt, &[]);
+            }
             match &self.scene {
                 Some(t) => {
                     pass.set_pipeline(&self.scene_pipeline);

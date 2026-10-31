@@ -25,6 +25,7 @@ storybook colour grading. The original look remains one toggle away.
 | HDR target and post chain | `crates/ro-render/src/post.rs`, `post.wgsl` | Fullscreen-triangle passes; quarter-resolution blurs keep the cost low |
 | Sun shadows for sprites | `shadow.rs`, `shadow.wgsl` | Sprites only. RO maps already bake building shadows into lightmaps, so static geometry does not cast |
 | Shadow receiving | `scene.wgsl` (`sprite_shadow`) | 5×5 PCF with a comparison sampler; strength and softness from globals |
+| Ray-traced sun shadows | `rt.rs`, `rt.wgsl` | Outdoors on GPUs with ray queries: all map geometry casts toward the sun, replacing the lightmaps' baked shadows |
 | Look settings | `PostSettings` (renderer), `settings::Visual` (client) | Saved in `settings.toml`, edited live in Settings → Visual |
 
 ### Sprite shadows
@@ -39,6 +40,19 @@ shadow.
 The sun keeps the map's bearing (RSW longitude) but its height comes from
 `sun_elevation` (35° by default). RO's own light is often nearly vertical, which hides
 shadows under the sprite.
+
+### Ray-traced sun shadows
+
+Baked lightmap shadows point one way, so they go wrong once the sun moves, and models never
+receive them. With ray queries (`Features::EXPERIMENTAL_RAY_QUERY`, Vulkan or DX12; not
+requested on Android), `rt.rs` puts the map's ground and models in one BLAS when it loads.
+Opaque triangles form one geometry. Triangles with colour-keyed textures form a second,
+non-opaque one, whose 256² alpha masks sit in a texture array, so leaves and railings let
+light through. The world shader's `sun_ray` (from `rt.wgsl`, joined in place of the stub at the
+end of `scene.wgsl`) casts one ray toward `shadow_dir()`, the same sun the sprite shadows use.
+Where it's on, `lm.a` is ignored and the ray's result joins the sprite shadow, so both get
+the same darkness (Shadows). It runs outdoors only. Interiors, dungeons and underwater keep
+their hand-baked light. Setting: Ray-traced shadows (on by default except on Android).
 
 ### Tilt-shift depth of field
 

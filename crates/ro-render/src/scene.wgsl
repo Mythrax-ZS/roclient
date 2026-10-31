@@ -26,6 +26,8 @@ struct Globals {
     water_tint: vec4<f32>,
     // x: 1 to filter magnified textures with Catmull-Rom (texture upscaling)
     upscale: vec4<f32>,
+    // xyz: direction the sun's light travels for ray-traced shadows, w: 1 when they are on
+    rt: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -132,13 +134,15 @@ fn fs_main(in: VsOut) -> FsOut {
     let flat = normalize(in.normal);
     let n = relief(flat, in.uv, ddx, ddy, dwx, dwy, size);
     let ndl = max(dot(flat, -g.light_dir.xyz), 0.0);
-    let light = clamp(g.ambient.rgb + g.diffuse.rgb * ndl, vec3(0.0), vec3(1.0)) * lm.a;
+    // Ray-traced shadows replace the lightmap's baked ones (which can't follow the sun).
+    let rt = g.rt.w > 0.5;
+    let light = clamp(g.ambient.rgb + g.diffuse.rgb * ndl, vec3(0.0), vec3(1.0)) * select(lm.a, 1.0, rt);
     // Relief as a ratio of the tilted surface's light to the flat one's, so it shows on maps
     // whose light already saturates (the clamp above would swallow it).
     let tilted = g.ambient.rgb + g.diffuse.rgb * max(dot(n, -g.light_dir.xyz), 0.0);
     let shade = clamp(tilted / max(g.ambient.rgb + g.diffuse.rgb * ndl, vec3(0.05)), vec3(0.5), vec3(1.5));
     let rgb = clamp(t.rgb * in.color * light * shade + lm.rgb, vec3(0.0), vec3(1.0));
-    let lit = srgb_to_linear(rgb) * sprite_shadow(in.world) + srgb_to_linear(t.rgb * in.color) * point_light(in.world, n);
+    let lit = srgb_to_linear(rgb) * sprite_shadow(in.world, select(1.0, sun_ray(in.world, flat), rt)) + srgb_to_linear(t.rgb * in.color) * point_light(in.world, n);
     return FsOut(vec4(lit, 1.0), vec4(distance(in.world, g.eye.xyz), 0.0, 0.0, 0.0));
 }
 
@@ -164,9 +168,10 @@ fn relief(n: vec3<f32>, uv: vec2<f32>, ddx: vec2<f32>, ddy: vec2<f32>, dwx: vec3
     return normalize(abs(det) * n - grad);
 }
 
-// How lit a point is by the sun with only sprites as casters: 1 lit, 1 - strength fully
-// shadowed. A 5x5 PCF kernel (scaled by softness) gives soft, painterly edges.
-fn sprite_shadow(world: vec3<f32>) -> f32 {
+// How lit a point is by the sun: 1 lit, 1 - strength fully shadowed. Sprites cast through the
+// shadow map, where a 5x5 PCF kernel (scaled by softness) gives soft, painterly edges; `sun`
+// is what the map's own geometry lets through (ray traced, else 1).
+fn sprite_shadow(world: vec3<f32>, sun: f32) -> f32 {
     if g.shadow.x <= 0.0 {
         return 1.0;
     }
@@ -174,7 +179,7 @@ fn sprite_shadow(world: vec3<f32>) -> f32 {
     let ndc = lp.xyz / lp.w;
     let uv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
     if any(uv < vec2(0.0)) || any(uv > vec2(1.0)) || ndc.z > 1.0 {
-        return 1.0;
+        return 1.0 - g.shadow.x * (1.0 - sun);
     }
     let step = g.shadow.y * max(g.shadow.z, 0.5);
     var lit = 0.0;
@@ -185,7 +190,7 @@ fn sprite_shadow(world: vec3<f32>) -> f32 {
             lit += textureSampleCompareLevel(shadow_map, shadow_samp, uv + vec2(f32(x), f32(y)) * step, ndc.z - 0.0001);
         }
     }
-    lit /= 25.0;
+    lit = min(lit / 25.0, sun);
     return 1.0 - g.shadow.x * (1.0 - lit);
 }
 
@@ -215,4 +220,9 @@ fn in_room(world: vec3<f32>) -> bool {
         return false;
     }
     return textureLoad(room_mask, cell, 0).r > 0.5;
+}
+
+// RT-STUB: replaced by rt.wgsl where the GPU traces rays.
+fn sun_ray(world: vec3<f32>, n: vec3<f32>) -> f32 {
+    return 1.0;
 }
