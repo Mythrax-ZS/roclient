@@ -107,7 +107,8 @@ pub struct Visual {
     pub pixel_snap: bool,
     /// Strength of the underwater look on submerged maps (caustics, murk, shafts, motes).
     pub underwater: f32,
-    /// The world's resolution as a share of the screen's (0.5..1); the interface stays sharp.
+    /// The world's resolution as a share of the screen's (0.5..2): lower is faster, above 100%
+    /// supersamples (the smoothest edges). The interface stays sharp either way.
     pub render_scale: f32,
     /// Picks the render scale from the screen: about a million world pixels (a 1080p phone
     /// at 70%, a 1440p one at 50%), full resolution on smaller screens. On by default on
@@ -416,7 +417,7 @@ impl Settings {
         // Applied on release, so the world isn't rebuilt at every step of a drag.
         ui.horizontal(|ui| {
             let mut scale = self.visual.render_scale;
-            let slider = ui.add_enabled(!self.visual.render_auto, egui::Slider::new(&mut scale, 0.5..=1.0).step_by(0.05).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
+            let slider = ui.add_enabled(!self.visual.render_auto, egui::Slider::new(&mut scale, 0.5..=2.0).step_by(0.05).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
             if slider.drag_stopped() || (slider.changed() && !slider.dragged()) {
                 self.visual.render_scale = scale;
             }

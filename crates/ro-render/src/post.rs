@@ -152,6 +152,10 @@ pub struct PostTargets {
     /// grading runs per scene pixel and one plain pass scales the result up.
     graded: wgpu::TextureView,
     size: (u32, u32),
+    /// The bloom / depth-of-field / AO chain's half and quarter sizes: of the scene, or of
+    /// the window when supersampling, so blur radii stay the same on screen.
+    half: (u32, u32),
+    quarter: (u32, u32),
 }
 
 /// A render target that can also be copied from (the water reads the opaque scene).
@@ -186,8 +190,10 @@ fn target(device: &wgpu::Device, label: &str, w: u32, h: u32, format: wgpu::Text
 }
 
 impl PostTargets {
-    pub fn new(device: &wgpu::Device, w: u32, h: u32, output: wgpu::TextureFormat) -> Self {
-        let (hw, hh, qw, qh) = (w / 2, h / 2, w / 4, h / 4);
+    /// Targets for a `w`x`h` scene shown in an `out`-sized window.
+    pub fn new(device: &wgpu::Device, w: u32, h: u32, out: (u32, u32), output: wgpu::TextureFormat) -> Self {
+        let (bw, bh) = (w.min(out.0), h.min(out.1));
+        let (hw, hh, qw, qh) = ((bw / 2).max(1), (bh / 2).max(1), (bw / 4).max(1), (bh / 4).max(1));
         let hdr = |label, w, h| target(device, label, w, h, HDR_FORMAT);
         let (hdr_tex, hdr_view) = copyable(device, "hdr scene", w, h, HDR_FORMAT);
         let (info_tex, info_view) = copyable(device, "depth info", w, h, INFO_FORMAT);
@@ -204,6 +210,8 @@ impl PostTargets {
             rays: hdr("god rays", qw, qh),
             graded: target(device, "graded", w, h, output),
             size: (w.max(1), h.max(1)),
+            half: (hw, hh),
+            quarter: (qw, qh),
         }
     }
 
@@ -317,8 +325,9 @@ impl Post {
         }
     }
 
-    /// Runs the chain from `t.hdr` (and `t.info`) into `out`; `scaled` when `out` is larger
-    /// than the targets (a render scale below 1).
+    /// Runs the chain from `t.hdr` (and `t.info`) into `out`, `out_size` pixels: when that
+    /// differs from the scene (a render scale), grading runs at the scene's size and a last
+    /// pass scales it into `out`.
     #[allow(clippy::too_many_arguments)]
     pub fn record(
         &self,
@@ -329,7 +338,7 @@ impl Post {
         out: &wgpu::TextureView,
         s: &PostSettings,
         frame: &FrameInfo,
-        scaled: bool,
+        out_size: (u32, u32),
     ) {
         let (w, h) = (t.size.0 as f32, t.size.1 as f32);
         let base = Params {
@@ -387,13 +396,17 @@ impl Post {
         };
         // Textures a pass does not read: any valid view of the right kind.
         let none = [&t.hdr, &t.hdr, &t.info, &t.hdr, &t.hdr];
+        // Into the window: a plain bilinear sample when scaling up; when supersampling, four
+        // taps a quarter of a window pixel out, which average each pixel's block of scene.
+        let scaled = t.size != out_size;
+        let resample = if t.size.0 > out_size.0 { [0.25 / out_size.0 as f32, 0.25 / out_size.1 as f32, 0.0, 0.0] } else { [0.0; 4] };
         if !s.enabled {
-            pass(enc, &self.copy, &t.hdr, out, [0.0; 4], none);
+            pass(enc, &self.copy, &t.hdr, out, resample, none);
             return;
         }
         let full = [1.0 / w, 1.0 / h, 0.0, 0.0];
-        let (hw, hh) = (2.0 / w, 2.0 / h);
-        let (qw, qh) = (4.0 / w, 4.0 / h);
+        let (hw, hh) = (1.0 / t.half.0 as f32, 1.0 / t.half.1 as f32);
+        let (qw, qh) = (1.0 / t.quarter.0 as f32, 1.0 / t.quarter.1 as f32);
         // Bloom: bright pass to half, down to quarter, blur twice.
         pass(enc, &self.bright, &t.hdr, &t.half_bloom, full, none);
         pass(enc, &self.down, &t.half_bloom, &t.bloom[0], [hw, hh, 0.0, 0.0], none);
@@ -411,7 +424,7 @@ impl Post {
         let graded = if scaled { &t.graded } else { out };
         pass(enc, &self.composite, &t.hdr, graded, full, [&t.dof[0], &t.bloom[0], &t.info, &t.ao, &t.rays]);
         if scaled {
-            pass(enc, &self.copy, &t.graded, out, [0.0; 4], none);
+            pass(enc, &self.copy, &t.graded, out, resample, none);
         }
     }
 }

@@ -137,8 +137,9 @@ pub struct Renderer {
     relay: Option<wgpu::Texture>,
     /// The GPU and graphics API in use ("Adreno (TM) 740 (Vulkan)"), for the performance overlay.
     adapter_name: String,
-    /// The world's resolution as a share of the window's (0.5..1): the scene and its effects
-    /// render smaller and the last pass scales them up; the interface stays sharp.
+    /// The world's resolution as a share of the window's (0.5..2): below 1 the scene and its
+    /// effects render smaller and the last pass scales them up; above 1 they render larger and
+    /// it averages them down (supersampling). The interface stays at the window's resolution.
     render_scale: f32,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -552,7 +553,7 @@ impl Renderer {
         );
 
         let ui_renderer = egui_wgpu::Renderer::new(&device, config.format.remove_srgb_suffix(), Default::default());
-        let targets = Self::make_targets(&device, (config.width, config.height), samples, config.format);
+        let targets = Self::make_targets(&device, (config.width, config.height), (config.width, config.height), samples, config.format);
         let water_screen = water::ScreenCopies::new(&device, &water_screen_layout, config.width, config.height);
         let water_detail = scene::upload_texture(&device, &queue, &water::detail_texture(), true);
         let post = post::Post::new(&device, config.format);
@@ -891,7 +892,8 @@ impl Renderer {
         });
     }
 
-    fn make_targets(device: &wgpu::Device, (width, height): (u32, u32), samples: u32, output: wgpu::TextureFormat) -> Targets {
+    /// Targets for a `width`x`height` scene shown in an `out`-sized window.
+    fn make_targets(device: &wgpu::Device, (width, height): (u32, u32), out: (u32, u32), samples: u32, output: wgpu::TextureFormat) -> Targets {
         let size = wgpu::Extent3d { width: width.max(1), height: height.max(1), depth_or_array_layers: 1 };
         let tex = |label, format| {
             device
@@ -911,7 +913,7 @@ impl Renderer {
             depth: tex("depth", DEPTH_FORMAT),
             msaa: (samples > 1).then(|| tex("msaa", post::HDR_FORMAT)),
             msaa_info: (samples > 1).then(|| tex("msaa info", post::INFO_FORMAT)),
-            post: post::PostTargets::new(device, width, height, output),
+            post: post::PostTargets::new(device, width, height, out, output),
         }
     }
 
@@ -926,7 +928,7 @@ impl Renderer {
         if self.relay.is_some() {
             self.relay = Some(Self::make_relay(&self.device, &self.config));
         }
-        self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples, self.config.format);
+        self.targets = Self::make_targets(&self.device, self.scene_size(), self.size(), self.samples, self.config.format);
         Ok(())
     }
 
@@ -940,7 +942,7 @@ impl Renderer {
         if self.relay.is_some() {
             self.relay = Some(Self::make_relay(&self.device, &self.config));
         }
-        self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples, self.config.format);
+        self.targets = Self::make_targets(&self.device, self.scene_size(), self.size(), self.samples, self.config.format);
     }
 
     /// The GPU and graphics API in use.
@@ -950,17 +952,28 @@ impl Renderer {
 
     /// Sets the world's resolution as a share of the window's (see `render_scale`).
     pub fn set_render_scale(&mut self, scale: f32) {
-        let scale = (scale.clamp(0.5, 1.0) * 20.0).round() / 20.0;
+        let scale = (scale.clamp(0.5, 2.0) * 20.0).round() / 20.0;
         if scale != self.render_scale {
             self.render_scale = scale;
-            self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples, self.config.format);
+            self.targets = Self::make_targets(&self.device, self.scene_size(), self.size(), self.samples, self.config.format);
         }
     }
 
     /// The size the world renders at.
     pub fn scene_size(&self) -> (u32, u32) {
-        let s = |n: u32| ((n as f32 * self.render_scale).round() as u32).max(1);
-        (s(self.config.width), s(self.config.height))
+        self.scene_size_for(self.config.width, self.config.height)
+    }
+
+    /// The world's size for a `width`x`height` output. Supersampling stops at about a 4K
+    /// frame's pixels (with MSAA a pixel costs ~100 bytes of targets) and the GPU's largest
+    /// texture.
+    fn scene_size_for(&self, width: u32, height: u32) -> (u32, u32) {
+        const MAX_PIXELS: f32 = 3840.0 * 2160.0;
+        let (w, h) = (width.max(1) as f32, height.max(1) as f32);
+        let largest = self.device.limits().max_texture_dimension_2d as f32;
+        let cap = (MAX_PIXELS / (w * h)).sqrt().min(largest / w).min(largest / h).max(1.0);
+        let scale = self.render_scale.min(cap);
+        (((w * scale).round() as u32).max(1), ((h * scale).round() as u32).max(1))
     }
 
     pub fn size(&self) -> (u32, u32) {
@@ -1038,8 +1051,7 @@ impl Renderer {
         config.width = width;
         config.height = height;
         // The world at the render scale, as on screen.
-        let s = |n: u32| ((n as f32 * self.render_scale).round() as u32).max(1);
-        let targets = Self::make_targets(&self.device, (s(width), s(height)), self.samples, config.format);
+        let targets = Self::make_targets(&self.device, self.scene_size_for(width, height), (width, height), self.samples, config.format);
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("capture"),
             size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -1463,7 +1475,7 @@ impl Renderer {
                 inv_view_proj: vp.inverse(),
             }
         };
-        self.post.record(&self.device, &self.queue, &mut enc, &targets.post, view, &self.post_settings, &frame, scene != size);
+        self.post.record(&self.device, &self.queue, &mut enc, &targets.post, view, &self.post_settings, &frame, size);
 
         // The previous frame has been submitted by now; its freed UI textures can go.
         for id in std::mem::take(&mut self.ui_free) {
