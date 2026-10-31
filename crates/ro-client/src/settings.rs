@@ -68,11 +68,16 @@ pub struct Settings {
     /// The connected controller's sticks as read, for the preview (not saved).
     #[serde(skip)]
     pub pad_live: Option<[glam::Vec2; 2]>,
+    /// Where the HUD elements sit and how big they are (Arrange; see hudlayout).
+    pub hud_layout: crate::hudlayout::Layout,
+    /// Arrange was pressed: the game opens the layout editor (not saved).
+    #[serde(skip)]
+    pub arrange: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, perf_overlay: false, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false, pad_style: Default::default(), vibration: 1.0, touchpad: true, light_bar: true, dualsense_hd: true, vibration_test: false, pad_tuning: Default::default(), pad_live: None }
+        Self { bgm_volume: 0.5, sfx_volume: 0.7, ui_scale: 1.0, minimap: true, perf_overlay: false, hud_layout: Default::default(), arrange: false, menu_collapsed: false, classic_ui: true, last_id: String::new(), visual: Visual::default(), upscale: ro_render::UpscaleSettings::default(), bgm_off: false, sfx_off: false, effects_off: false, aura_off: false, aura_simple: false, battle_mode: false, battle_keys: crate::windows::BATTLE_KEYS.iter().map(|k| k.to_string()).collect(), battle_space_chat: true, hotkey_rows: 1, macros: crate::emotes::DEFAULT_MACROS.iter().map(|m| m.to_string()).collect(), screenshot_ui: true, fullscreen: false, exp_messages: false, pad_style: Default::default(), vibration: 1.0, touchpad: true, light_bar: true, dualsense_hd: true, vibration_test: false, pad_tuning: Default::default(), pad_live: None }
     }
 }
 
@@ -235,6 +240,16 @@ impl Settings {
         ui.end_row();
         ui.label("Performance");
         ui.checkbox(&mut self.perf_overlay, "Frame rate, frame times and ping (F10)");
+        ui.end_row();
+        ui.label("Layout");
+        ui.horizontal(|ui| {
+            if ui.button("Arrange…").on_hover_text("Move and resize the character status, chat, shortcut bar, menu, minimap and the rest").clicked() {
+                self.arrange = true;
+            }
+            if ui.add_enabled(!self.hud_layout.is_empty(), egui::Button::new("Reset")).clicked() {
+                self.hud_layout.clear();
+            }
+        });
         ui.end_row();
         ui.label("UI scale");
         // Applied on release, so the slider doesn't move under the pointer while dragging.

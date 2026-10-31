@@ -60,6 +60,7 @@ mod padglyph;
 mod perf;
 mod haptics;
 mod hidpad;
+mod hudlayout;
 mod shortcuts;
 mod skilltree;
 mod status_icons;
@@ -1328,6 +1329,8 @@ struct App {
     fps: FpsCounter,
     /// The performance overlay's measurements (F10), and the map server's last round trip.
     perf: perf::Perf,
+    /// The interface layout editor (Settings > Game > Interface > Arrange).
+    arrange: hudlayout::Editor,
     ping: Option<f32>,
     egui_ctx: egui::Context,
     egui_state: Option<egui_winit::State>,
@@ -4620,7 +4623,13 @@ impl App {
                         let mid = |a: (f64, f64), b: (f64, f64)| ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
                         let span = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1);
                         let (m0, m1) = (mid(a0.1, b0.1), mid(a1.1, b1.1));
-                        if let Some(r) = self.renderer.as_mut() {
+                        // Arranging the interface: the pinch resizes the selected element.
+                        if self.arrange.open {
+                            let (s0, s1) = (span(a0.1, b0.1), span(a1.1, b1.1));
+                            if s0 > 1.0 {
+                                self.arrange.pinch *= (s1 / s0) as f32;
+                            }
+                        } else if let Some(r) = self.renderer.as_mut() {
                             let s = 0.005 / r.scale_factor as f32;
                             r.camera.rotate((m1.0 - m0.0) as f32 * s, (m1.1 - m0.1) as f32 * s);
                             r.camera.zoom(((span(a1.1, b1.1) - span(a0.1, b0.1)) / (60.0 * r.scale_factor)) as f32);
@@ -7743,6 +7752,15 @@ impl App {
                 if let Some(feet) = pad_marker {
                     hud::target_marker(ui.ctx(), feet, ppp, self.aiming.is_some());
                 }
+                // Arrange: the layout editor takes over from the settings window.
+                if std::mem::take(&mut self.settings.arrange) {
+                    self.arrange.open = true;
+                    self.windows.settings = false;
+                }
+                if self.arrange.show(ui.ctx(), &mut self.settings.hud_layout) {
+                    self.settings.save();
+                }
+                hudlayout::apply(ui.ctx(), &self.settings.hud_layout);
                 self.settings.pad_live = self.pad.connected().then_some(self.pad.raw);
                 if self.windows.settings && self.settings.show(ui.ctx(), &mut self.windows.settings) {
                     self.ui_scale = self.settings.ui_scale;
@@ -8178,6 +8196,9 @@ impl ApplicationHandler for App {
         let front_blocks = self.front.is_some() && matches!(event, WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::KeyboardInput { .. });
         let function_key = matches!(&event, WindowEvent::KeyboardInput { event: winit::event::KeyEvent { logical_key: winit::keyboard::Key::Named(k), .. }, .. } if hotkey_slot(*k).is_some() || matches!(*k, winit::keyboard::NamedKey::F10 | winit::keyboard::NamedKey::F11 | winit::keyboard::NamedKey::F12));
         let ui_used = ui_used && !function_key;
+        // Arranging the interface: clicks and the wheel are for the layout, not the world.
+        let arranging = self.arrange.open && matches!(event, WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. });
+        let ui_used = ui_used || arranging;
         if (ui_used || front_blocks) && !matches!(event, WindowEvent::Resized(_) | WindowEvent::CloseRequested | WindowEvent::ScaleFactorChanged { .. }) {
             return;
         }
@@ -8570,6 +8591,8 @@ fn start(event_loop: Option<EventLoop<()>>) -> anyhow::Result<()> {
         cursor: None,
         fps: FpsCounter::default(),
         perf: perf::Perf::default(),
+        // --arrange opens the layout editor at once (for captures of it).
+        arrange: hudlayout::Editor::opened(args.iter().any(|a| a == "--arrange")),
         ping: None,
         egui_ctx: egui::Context::default(),
         egui_state: None,
