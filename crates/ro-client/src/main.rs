@@ -135,6 +135,13 @@ struct Config {
     /// The GM slash commands work regardless; the server checks permissions either way.
     #[serde(default)]
     gm: bool,
+    /// As the original's clientinfo.xml <aid>: accounts drawn with the GM sprite, unless their
+    /// GM turned it off with @gmlook (see `gm_sprite`).
+    #[serde(default)]
+    gm_aids: Vec<u32>,
+    /// As clientinfo.xml <yellow>: accounts whose names show in yellow.
+    #[serde(default)]
+    yellow_aids: Vec<u32>,
 }
 
 fn default_grfs() -> Vec<String> {
@@ -703,6 +710,9 @@ struct Mob {
     level: u16,
     /// How long the aura has been showing (its ribbons grow in), ms.
     aura_ms: f32,
+    /// Name font (players), which carries the GM look; and whether the name shows in yellow.
+    font: u16,
+    yellow: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -714,6 +724,11 @@ enum Pose {
     /// Chanting a skill (players only; monsters stand still).
     Cast,
 }
+
+/// @gmlook (npc/custom/gm_look.txt) keeps a GM's choice in their name font, which the server
+/// sends to everyone who sees them: on, or off even where the viewer's lists name them.
+const GM_LOOK_ON: u16 = 200;
+const GM_LOOK_OFF: u16 = 201;
 
 /// Whether a unit object type is an NPC: 1 / 6, or 12 for an NPC drawn with a monster
 /// sprite (rAthena sends that type since 2017-07-26 clients).
@@ -754,6 +769,8 @@ impl Mob {
             anim_rate: 1.0,
             level: 0,
             aura_ms: 0.0,
+            font: 0,
+            yellow: false,
         }
     }
 
@@ -809,6 +826,7 @@ impl Mob {
             return None;
         }
         match self.kind {
+            0 if self.yellow => Some(egui::Color32::from_rgb(255, 255, 0)),
             0 => Some(egui::Color32::WHITE),
             k if is_npc(k) => Some(egui::Color32::from_rgb(160, 225, 255)),
             5 if hovered && self.dying.is_none() => Some(egui::Color32::WHITE),
@@ -1109,6 +1127,9 @@ struct App {
     web_url: String,
     /// Show the GM actions in the player menu (config `gm`).
     gm: bool,
+    /// The clientinfo-style GM lists (see `Config::gm_aids`, `yellow_aids`).
+    gm_aids: std::collections::HashSet<u32>,
+    yellow_aids: std::collections::HashSet<u32>,
     /// The last /ex or /in sent: (name, block).
     ignore_pending: Option<(String, bool)>,
     /// A companion window request, handled after the UI pass.
@@ -1513,11 +1534,48 @@ impl App {
     }
 
     /// Applies a ZC_SPRITE_CHANGE to a player-sprite unit (us or another player).
+    /// Whether a character is drawn with the GM sprite: its GM's @gmlook choice (name font 200
+    /// on, 201 off), else the clientinfo-style `gm_aids` list.
+    fn gm_sprite(&self, aid: u32, font: u16) -> bool {
+        match font {
+            GM_LOOK_ON => true,
+            GM_LOOK_OFF => false,
+            _ => self.gm_aids.contains(&aid),
+        }
+    }
+
+    /// Whether a character's name shows in yellow: with the GM look, else the `yellow_aids` list.
+    fn yellow_name(&self, aid: u32, font: u16) -> bool {
+        match font {
+            GM_LOOK_ON => true,
+            GM_LOOK_OFF => false,
+            _ => self.yellow_aids.contains(&aid),
+        }
+    }
+
+    /// A character's name font changed (ZC_NOTIFY_FONT): redraw it with or without the GM look.
+    fn font_change(&mut self, id: u32, font: u16) {
+        let (gm, yellow) = (self.gm_sprite(id, font), self.yellow_name(id, font));
+        tracing::debug!(id, font, gm, yellow, "name font");
+        let class = if id == self.account_id { self.hud.status.job_id } else { self.units.get(&id).map_or(0, |m| m.class) };
+        let Some(mut look) = self.mob_mut(id).map(|m| {
+            (m.font, m.yellow) = (font, yellow);
+            m.look.clone()
+        }).flatten() else { return };
+        look.job = if gm { jobs::GM_SPRITE.to_string() } else { job_sprite(class).to_string() };
+        let Some(fresh) = self.player_actor(&look) else { return };
+        if let Some(m) = self.mob_mut(id) {
+            (m.actor.body, m.actor.head, m.actor.headgear, m.actor.weapon) = (fresh.body, fresh.head, fresh.headgear, fresh.weapon);
+            m.look = Some(look);
+        }
+    }
+
     fn look_change(&mut self, id: u32, kind: u8, value: u32, value2: u32) {
         let Some(mut look) = self.mob_mut(id).and_then(|m| m.look.clone()) else { return };
         match kind {
             0 => {
-                look.job = job_sprite(value as i16).to_string();
+                let font = self.mob_mut(id).map_or(0, |m| m.font);
+                look.job = if self.gm_sprite(id, font) { jobs::GM_SPRITE.to_string() } else { job_sprite(value as i16).to_string() };
                 if id == self.account_id {
                     self.hud.status.job = job_title(value as i16).to_string();
                     self.hud.status.job_id = value as i16;
@@ -1571,8 +1629,9 @@ impl App {
             111 | 139 | 32767 => return,
             _ => {}
         }
+        let gm = self.gm_sprite(info.id, info.font);
         let look = is_player_class(info.job).then(|| Look {
-            job: job_sprite(info.job).to_string(),
+            job: if gm { jobs::GM_SPRITE.to_string() } else { job_sprite(info.job).to_string() },
             male: info.sex == 1,
             hair: info.hair.max(1),
             hair_color: info.hair_color.max(0) as u16,
@@ -1596,6 +1655,8 @@ impl App {
         mob.actor.alpha = option_alpha(info.option, false);
         mob.human = is_player_class(info.job);
         mob.look = look;
+        mob.font = info.font;
+        mob.yellow = self.yellow_name(info.id, info.font);
         if let ro_net::UnitPos::Walking { from, to } = info.pos {
             let gat = self.world.as_ref().and_then(|w| w.gat.as_ref());
             mob.walk(gat, from, to);
@@ -1739,7 +1800,7 @@ impl App {
             }
         }
         match event {
-            Entered { map, x, y, dir, character, account_id } => {
+            Entered { map, x, y, dir, character, account_id, font } => {
                 tracing::info!(%map, x, y, name = %character.name, job = character.job, "entered");
                 self.account_id = account_id;
                 self.char_id = character.char_id;
@@ -1752,7 +1813,7 @@ impl App {
                 self.warps.clear();
                 self.enter_map(&map);
                 let look = Look {
-                    job: job_sprite(character.job).to_string(),
+                    job: if self.gm_sprite(account_id, font) { jobs::GM_SPRITE.to_string() } else { job_sprite(character.job).to_string() },
                     male: character.sex == 1,
                     hair: character.head.max(1) as u16,
                     hair_color: character.hair_color as u16,
@@ -1768,6 +1829,10 @@ impl App {
                 s.base_exp = character.base_exp;
                 s.zeny = character.zeny as i64;
                 self.spawn_player(&look, (x, y), dir as usize, character.speed);
+                let yellow = self.yellow_name(account_id, font);
+                if let Some(p) = self.player.as_mut() {
+                    (p.font, p.yellow) = (font, yellow);
+                }
                 if let Some(text) = self.say_on_enter.take() {
                     // Several lines separated by "|" (e.g. a batch of GM commands).
                     for line in text.split('|') {
@@ -3277,6 +3342,7 @@ impl App {
                 }
                 self.skill_fx(skill, self.cell_pos(cell), true);
             }
+            Font { id, font } => self.font_change(id, font),
             UnitOption { id, option } => {
                 let me = id == self.account_id;
                 if let Some(m) = self.mob_mut(id) {
@@ -3475,6 +3541,7 @@ impl App {
                         guild: m.guild,
                         emblem: 0,
                         level: m.level,
+                        font: m.font,
                     };
                     self.unit(info);
                 }
@@ -7341,8 +7408,12 @@ impl App {
                 {
                     let me = self.hud.status.name.clone();
                     let leader = self.social.party.as_ref().is_some_and(|p| p.members.iter().any(|m| m.leader && m.name == me));
+                    self.game_opts.gm_look = self.gm.then(|| self.player.as_ref().is_some_and(|p| p.font == GM_LOOK_ON));
                     for r in self.game_opts.show(ui.ctx(), leader) {
                         self.queued_commands.push(ro_net::Command::Option(r));
+                    }
+                    if let Some(on) = self.game_opts.gm_look_asked.take() {
+                        self.queued_chat.push(format!("@gmlook {}", if on { "on" } else { "off" }));
                     }
                 }
                 if let Some(k) = self.ranking.show(ui.ctx()) {
@@ -8216,6 +8287,8 @@ fn run() -> anyhow::Result<()> {
         agency: Default::default(),
         web_url: web_url(cfg.web_addr.as_deref(), &cfg.login_addr),
         gm: cfg.gm,
+        gm_aids: cfg.gm_aids.iter().copied().collect(),
+        yellow_aids: cfg.yellow_aids.iter().copied().collect(),
         ignore_pending: None,
         companion_action: None,
         follow_at: std::time::Instant::now(),

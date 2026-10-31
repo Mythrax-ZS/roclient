@@ -177,6 +177,10 @@ pub struct Appearance {
     pub attachments: bool,
 }
 
+/// The Game Master body (data\sprite\인간족\몸통\{sex}\운영자_{sex}), drawn for GMs in place of their
+/// job's (see `App::gm_sprite`).
+pub const GM_SPRITE: &str = "운영자";
+
 pub fn appearance(sprite: &str, male: bool) -> Option<Appearance> {
     if sprite == crate::samurai::SPRITE {
         // This package contains the male artwork only. The job-change NPC enforces it.

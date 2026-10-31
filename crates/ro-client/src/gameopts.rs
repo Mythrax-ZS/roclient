@@ -14,6 +14,10 @@ pub struct GameOptions {
     pub call: bool,
     /// Party sharing, once the server has said: (exp, pickup, item).
     pub party: Option<(bool, bool, bool)>,
+    /// GM accounts (config `gm`): whether our GM look is on, shown as a toggle; and the
+    /// change asked for (sent as @gmlook on / off).
+    pub gm_look: Option<bool>,
+    pub gm_look_asked: Option<bool>,
 }
 
 impl GameOptions {
@@ -45,6 +49,13 @@ impl GameOptions {
             toggle(ui, &mut self.homun_autofeed, "Feed my homunculus automatically", &|v| OptionRequest::Config { kind: 3, on: v });
             toggle(ui, &mut self.hide_costumes, "Hide other players' costumes", &|v| OptionRequest::Config { kind: 5, on: v });
             toggle(ui, &mut self.call, "Allow being summoned by my spouse (/call)", &|v| OptionRequest::Config { kind: 1, on: v });
+            if let Some(mut on) = self.gm_look {
+                ui.separator();
+                ui.label(RichText::new("Game Master").strong());
+                if ui.checkbox(&mut on, "GM look (GM sprite and yellow name, seen by everyone)").changed() {
+                    self.gm_look_asked = Some(on);
+                }
+            }
             if let Some((mut exp, mut pickup, mut item)) = self.party {
                 ui.separator();
                 ui.label(RichText::new("Party").strong());

@@ -219,7 +219,9 @@ pub async fn enter_map(zone: &ZoneServer, auth: &AcceptLogin) -> anyhow::Result<
 #[derive(Debug, Clone)]
 pub enum Event {
     /// Entered a map with this character.
-    Entered { map: String, x: u16, y: u16, dir: u8, account_id: u32, character: CharInfo },
+    Entered { map: String, x: u16, y: u16, dir: u8, account_id: u32, character: CharInfo, font: u16 },
+    /// ZC_NOTIFY_FONT: a character's name font changed (us included).
+    Font { id: u32, font: u16 },
     /// The web server's token for this login, and the char server's name (its WorldName).
     WebAuth { account_id: u32, token: String, world: String },
     /// Our walk was accepted: walk from -> to.
@@ -950,6 +952,7 @@ pub fn spawn_session(cfg: SessionConfig) -> (tokio::sync::mpsc::UnboundedSender<
                                 dir: map.spawn.dir,
                                 account_id: auth.account_id,
                                 character: character.clone(),
+                                font: map.spawn.font,
                             }
                         } else {
                             Event::MapMove { map: name, x: map.spawn.x, y: map.spawn.y }
@@ -1453,6 +1456,7 @@ impl MapSession {
                         }
                         0x0add | 0x009d => parse_floor_item(opcode, &data).map(Event::FloorItem),
                         0x00a1 => Some(Event::FloorItemGone(parse_item_disappear(&data))),
+                        0x02ef if data.len() >= 8 => Some(Event::Font { id: l(&data, 2), font: u16::from_le_bytes([data[6], data[7]]) }),
                         0x01d7 => {
                             let (id, kind, value, value2) = parse_sprite_change(&data);
                             Some(Event::LookChange { id, kind, value, value2 })

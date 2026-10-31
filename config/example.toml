@@ -12,6 +12,12 @@ login_addr = "127.0.0.1:6900"
 # /shift, /item, /monster, /rc, /check, /killall, /resetstate, /resetcooltime,
 # /changemaptype) work either way; the server checks the account's group permissions.
 # gm = true
+# Game Master accounts as the original's clientinfo.xml lists them: drawn with the GM sprite
+# (<aid>) and with yellow names (<yellow>). A GM can also switch the look on or off for
+# everyone with @gmlook (rAthena npc/custom/gm_look.txt; Game Options shows a toggle with
+# gm = true), which overrides these lists.
+# gm_aids = [2000000]
+# yellow_aids = [2000000]
 username = "test"
 password = "test"
 char_slot = 0

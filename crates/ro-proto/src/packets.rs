@@ -461,9 +461,11 @@ pub struct AcceptEnter {
     pub x: u16,
     pub y: u16,
     pub dir: u8,
+    /// Our name font (ZC_ACCEPT_ENTER2/3), 0 when not sent.
+    pub font: u16,
 }
 
-/// 0x02eb. posDir packs x:10, y:10, dir:4.
+/// 0x02eb / 0x0a18. posDir packs x:10, y:10, dir:4; the font follows the two size bytes.
 pub fn parse_accept_enter(data: &[u8]) -> AcceptEnter {
     let mut b = &data[2..];
     let start_time = b.get_u32_le();
@@ -473,6 +475,7 @@ pub fn parse_accept_enter(data: &[u8]) -> AcceptEnter {
         x: (p[0] << 2) | (p[1] >> 6),
         y: ((p[1] & 0x3f) << 4) | (p[2] >> 4),
         dir: server_dir((p[2] & 0x0f) as u8),
+        font: if data.len() >= 13 { u16::from_le_bytes([data[11], data[12]]) } else { 0 },
     }
 }
 
@@ -607,6 +610,8 @@ pub struct UnitInfo {
     /// Base level as the server reports it (clif_setlevel); players at 99 or more show
     /// the level aura. NPCs and pets report 0.
     pub level: u16,
+    /// Name font (players; 0 for others). Tenseiga reads its GM look from it (see gm_look).
+    pub font: u16,
 }
 
 /// ZC packets packet_idle_unit (0x09ff), packet_spawn_unit (0x09fe) and
@@ -658,6 +663,7 @@ pub fn parse_unit(opcode: u16, data: &[u8]) -> Option<UnitInfo> {
         emblem: if data.len() >= palette_at + 14 { u16_at(palette_at + 12) } else { 0 },
         // clevel sits 15 bytes before the name (font, maxHP, HP, isBoss and body follow it).
         level: u16_at(name_at - 15),
+        font: u16_at(name_at - 13),
     })
 }
 
