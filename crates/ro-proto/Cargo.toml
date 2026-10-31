@@ -2,6 +2,7 @@
 name = "ro-proto"
 edition.workspace = true
 version.workspace = true
+license.workspace = true
 
 [dependencies]
 bytes.workspace = true

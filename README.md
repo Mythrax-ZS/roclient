@@ -91,3 +91,9 @@ QuestInfoList = {
 
 An item or quest the client has no entry for still works; it shows as `Item #id` /
 `Quest id` with no icon.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Code ported from other projects keeps its own notice in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The licence covers this code only: Ragnarok
+Online game data (GRFs, texture packs built from them) belongs to Gravity and is not included.

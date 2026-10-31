@@ -2,6 +2,7 @@
 name = "texpack"
 edition.workspace = true
 version.workspace = true
+license.workspace = true
 
 [dependencies]
 ro-vfs = { path = "../../crates/ro-vfs" }
