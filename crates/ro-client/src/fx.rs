@@ -127,6 +127,21 @@ pub fn ground_str(kind: u32) -> Option<&'static str> {
     })
 }
 
+/// The light pillar a drop falls with, by ZC_ITEM_FALL_ENTRY5's drop effect mode: the
+/// pillar, its glow on the ground, and its sound. Mode 0 is the client's own choice, the
+/// pink pillar of cards.
+pub fn drop_pillar(mode: u16) -> Option<(&'static str, &'static str, &'static str)> {
+    Some(match mode {
+        0 => ("new_dropitem\\dropitem_pink\\dropitem_pink\\dropitem_pink", "new_dropitem\\dropitem_pink\\dropitem_pink_bottom\\dropitem_pink_bottom", "effect\\drop_pink.wav"),
+        1 => ("new_dropitem\\dropitem_blue\\dropitem_blue\\dropitem_blue", "new_dropitem\\dropitem_blue\\dropitem_blue_bottom\\dropitem_blue_bottom", "effect\\drop_blue.wav"),
+        2 => ("new_dropitem\\dropitem_yellow\\dropitem_yellow\\dropitem_yellow", "new_dropitem\\dropitem_yellow\\dropitem_yellow_bottom\\dropitem_yellow_bottom", "effect\\drop_yellow.wav"),
+        3 => ("new_dropitem\\dropitem_purple\\dropitem_purple\\dropitem_purple", "new_dropitem\\dropitem_purple\\dropitem_purple_bottom\\dropitem_purple_bottom", "effect\\drop_purple.wav"),
+        4 => ("new_dropitem\\dropitem_green\\dropitem_green\\dropitem_green", "new_dropitem\\dropitem_green\\dropitem_green_bottom\\dropitem_green_bottom", "effect\\drop_green.wav"),
+        5 => ("new_dropitem\\dropitem_red\\dropitem_red\\dropitem_red", "new_dropitem\\dropitem_red\\dropitem_red_bottom\\dropitem_red_bottom", "effect\\drop_red.wav"),
+        _ => return None,
+    })
+}
+
 /// Traps (ZC_SKILL_ENTRY unit types) are small models on their cell, not effects: the
 /// original's trap RSMs, under data\model\.
 pub fn trap_model(kind: u32) -> Option<&'static str> {

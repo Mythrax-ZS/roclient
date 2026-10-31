@@ -107,6 +107,9 @@ pub struct FloorItem {
     pub amount: u16,
     /// Sub-cell offset (0..=11, twelfths of a cell).
     pub sub: (u8, u8),
+    /// The light pillar it falls with (ZC_ITEM_FALL_ENTRY5): 0 the client's own (pink, for
+    /// cards), then blue, yellow, purple, green, red. None: no pillar.
+    pub drop_effect: Option<u16>,
 }
 
 /// packet_dropflooritem (0x0add, dropped now) / ZC_ITEM_ENTRY (0x009d, entering view).
@@ -121,7 +124,8 @@ pub fn parse_floor_item(opcode: u16, data: &[u8]) -> Option<FloorItem> {
             let (x, y) = (b.get_i16_le() as u16, b.get_i16_le() as u16);
             let sub = (b.get_u8(), b.get_u8());
             let amount = b.get_i16_le() as u16;
-            FloorItem { id, item, identified, x, y, amount, sub }
+            let drop_effect = (b.remaining() >= 3 && b.get_u8() != 0).then(|| b.get_u16_le());
+            FloorItem { id, item, identified, x, y, amount, sub, drop_effect }
         }
         0x009d => {
             let id = b.get_u32_le();
@@ -130,7 +134,7 @@ pub fn parse_floor_item(opcode: u16, data: &[u8]) -> Option<FloorItem> {
             let (x, y) = (b.get_u16_le(), b.get_u16_le());
             let amount = b.get_u16_le();
             let sub = (b.get_u8(), b.get_u8());
-            FloorItem { id, item, identified, x, y, amount, sub }
+            FloorItem { id, item, identified, x, y, amount, sub, drop_effect: None }
         }
         _ => return None,
     })

@@ -79,6 +79,7 @@ epute*.bson)
 - [x] ZC_BAN_LIST
 
 ## Found while testing
+- [x] Drop light pillars (ZC_ITEM_FALL_ENTRY5 drop effect): cards fall with the pink pillar and its sound, other modes blue / yellow / purple / green / red; gone when the item is picked up
 - [x] Traps (Hunter and 3rd-job trap units) are the original's trap models (data\model\외부소품\트랩*, event\3차트랩_*) on their cell, not a looping effect; Fire Pillar's waiting unit shows its red column. Others' hunter traps stay hidden, as rAthena's renewal traps_setting sends them as invisible units
 - [x] Identified items kept their unidentified icon (icons were cached per item id); unidentified looks are now kept apart
 - [x] NPCs drawn with a monster sprite (object type 12, e.g. the Twin Flames fox Kohaku) were not clickable and had no name

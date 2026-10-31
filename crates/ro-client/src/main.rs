@@ -2902,12 +2902,26 @@ impl App {
                 }
             }
             FloorItem(f) => {
-                tracing::debug!(id = f.id, item = f.item, x = f.x, y = f.y, "floor item");
+                tracing::debug!(id = f.id, item = f.item, x = f.x, y = f.y, effect = ?f.drop_effect, "floor item");
+                // Cards and rare drops fall with a light pillar that stays until picked up.
+                if let Some((pillar, glow, sound)) = f.drop_effect.and_then(fx::drop_pillar) {
+                    let (fx, fy) = floor_cell(&f);
+                    let (x, z) = (fx * ro_render::CELL, fy * ro_render::CELL);
+                    if let Some(w) = self.world.as_ref() {
+                        let pos = glam::Vec3::new(x, w.ground.height_at(x, z), z);
+                        self.play_fx_tagged(glow, pos, f.id);
+                        self.play_fx_tagged(pillar, pos, f.id);
+                        if let (Some(audio), Some(vfs)) = (self.audio.as_ref(), self.vfs.as_ref()) {
+                            audio.play(vfs, sound);
+                        }
+                    }
+                }
                 let actor = self.item_actor(f.item, f.identified);
                 self.floor.insert(f.id, (f, actor));
             }
             FloorItemGone(id) => {
                 self.floor.remove(&id);
+                self.stop_fx(id);
                 if self.pending_pickup == Some(id) {
                     self.pending_pickup = None;
                 }
