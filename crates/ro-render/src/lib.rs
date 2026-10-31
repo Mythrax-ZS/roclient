@@ -552,7 +552,7 @@ impl Renderer {
         );
 
         let ui_renderer = egui_wgpu::Renderer::new(&device, config.format.remove_srgb_suffix(), Default::default());
-        let targets = Self::make_targets(&device, (config.width, config.height), samples);
+        let targets = Self::make_targets(&device, (config.width, config.height), samples, config.format);
         let water_screen = water::ScreenCopies::new(&device, &water_screen_layout, config.width, config.height);
         let water_detail = scene::upload_texture(&device, &queue, &water::detail_texture(), true);
         let post = post::Post::new(&device, config.format);
@@ -891,7 +891,7 @@ impl Renderer {
         });
     }
 
-    fn make_targets(device: &wgpu::Device, (width, height): (u32, u32), samples: u32) -> Targets {
+    fn make_targets(device: &wgpu::Device, (width, height): (u32, u32), samples: u32, output: wgpu::TextureFormat) -> Targets {
         let size = wgpu::Extent3d { width: width.max(1), height: height.max(1), depth_or_array_layers: 1 };
         let tex = |label, format| {
             device
@@ -911,7 +911,7 @@ impl Renderer {
             depth: tex("depth", DEPTH_FORMAT),
             msaa: (samples > 1).then(|| tex("msaa", post::HDR_FORMAT)),
             msaa_info: (samples > 1).then(|| tex("msaa info", post::INFO_FORMAT)),
-            post: post::PostTargets::new(device, width, height),
+            post: post::PostTargets::new(device, width, height, output),
         }
     }
 
@@ -926,7 +926,7 @@ impl Renderer {
         if self.relay.is_some() {
             self.relay = Some(Self::make_relay(&self.device, &self.config));
         }
-        self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples);
+        self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples, self.config.format);
         Ok(())
     }
 
@@ -940,7 +940,7 @@ impl Renderer {
         if self.relay.is_some() {
             self.relay = Some(Self::make_relay(&self.device, &self.config));
         }
-        self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples);
+        self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples, self.config.format);
     }
 
     /// The GPU and graphics API in use.
@@ -953,7 +953,7 @@ impl Renderer {
         let scale = (scale.clamp(0.5, 1.0) * 20.0).round() / 20.0;
         if scale != self.render_scale {
             self.render_scale = scale;
-            self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples);
+            self.targets = Self::make_targets(&self.device, self.scene_size(), self.samples, self.config.format);
         }
     }
 
@@ -1039,7 +1039,7 @@ impl Renderer {
         config.height = height;
         // The world at the render scale, as on screen.
         let s = |n: u32| ((n as f32 * self.render_scale).round() as u32).max(1);
-        let targets = Self::make_targets(&self.device, (s(width), s(height)), self.samples);
+        let targets = Self::make_targets(&self.device, (s(width), s(height)), self.samples, config.format);
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("capture"),
             size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
@@ -1463,7 +1463,7 @@ impl Renderer {
                 inv_view_proj: vp.inverse(),
             }
         };
-        self.post.record(&self.device, &self.queue, &mut enc, &targets.post, view, &self.post_settings, &frame);
+        self.post.record(&self.device, &self.queue, &mut enc, &targets.post, view, &self.post_settings, &frame, scene != size);
 
         // The previous frame has been submitted by now; its freed UI textures can go.
         for id in std::mem::take(&mut self.ui_free) {

@@ -7195,6 +7195,12 @@ impl App {
         }
 
         r.post_settings = self.settings.visual.post();
+        if self.settings.visual.render_auto {
+            // About a million world pixels, in the slider's 5% steps (shown there).
+            let (w, h) = r.size();
+            let auto = ((1.0e6 / (w as f32 * h as f32).max(1.0)).sqrt().clamp(0.5, 1.0) * 20.0).floor() / 20.0;
+            self.settings.visual.render_scale = auto;
+        }
         r.set_render_scale(self.settings.visual.render_scale);
         // Catmull-Rom on magnified ground and model textures (the sprite shader never reads it).
         r.upscale_runtime = self.settings.upscale.runtime_bicubic();

@@ -108,8 +108,11 @@ pub struct Visual {
     /// Strength of the underwater look on submerged maps (caustics, murk, shafts, motes).
     pub underwater: f32,
     /// The world's resolution as a share of the screen's (0.5..1); the interface stays sharp.
-    /// Phones default lower: their screens are dense and their GPUs pay per pixel.
     pub render_scale: f32,
+    /// Picks the render scale from the screen: about a million world pixels (a 1080p phone
+    /// at 70%, a 1440p one at 50%), full resolution on smaller screens. On by default on
+    /// Android, where dense screens and per-pixel GPU cost meet.
+    pub render_auto: bool,
 }
 
 impl Default for Visual {
@@ -136,6 +139,7 @@ impl Default for Visual {
             pixel_snap: p.pixel_snap,
             underwater: 1.0,
             render_scale: if cfg!(target_os = "android") { 0.7 } else { 1.0 },
+            render_auto: cfg!(target_os = "android"),
         }
     }
 }
@@ -410,11 +414,14 @@ impl Settings {
         section(ui, "Performance");
         ui.label("Render resolution");
         // Applied on release, so the world isn't rebuilt at every step of a drag.
-        let mut scale = self.visual.render_scale;
-        let slider = ui.add(egui::Slider::new(&mut scale, 0.5..=1.0).step_by(0.05).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
-        if slider.drag_stopped() || (slider.changed() && !slider.dragged()) {
-            self.visual.render_scale = scale;
-        }
+        ui.horizontal(|ui| {
+            let mut scale = self.visual.render_scale;
+            let slider = ui.add_enabled(!self.visual.render_auto, egui::Slider::new(&mut scale, 0.5..=1.0).step_by(0.05).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
+            if slider.drag_stopped() || (slider.changed() && !slider.dragged()) {
+                self.visual.render_scale = scale;
+            }
+            ui.checkbox(&mut self.visual.render_auto, "Auto").on_hover_text("Chosen from the screen's size: about a million pixels of world");
+        });
         ui.end_row();
         section(ui, "HD-2D");
         ui.label("Enabled");

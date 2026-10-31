@@ -148,6 +148,9 @@ pub struct PostTargets {
     bloom: [wgpu::TextureView; 2],
     dof: [wgpu::TextureView; 2],
     rays: wgpu::TextureView,
+    /// The graded frame at the scene's size, when the world renders smaller than the window:
+    /// grading runs per scene pixel and one plain pass scales the result up.
+    graded: wgpu::TextureView,
     size: (u32, u32),
 }
 
@@ -183,7 +186,7 @@ fn target(device: &wgpu::Device, label: &str, w: u32, h: u32, format: wgpu::Text
 }
 
 impl PostTargets {
-    pub fn new(device: &wgpu::Device, w: u32, h: u32) -> Self {
+    pub fn new(device: &wgpu::Device, w: u32, h: u32, output: wgpu::TextureFormat) -> Self {
         let (hw, hh, qw, qh) = (w / 2, h / 2, w / 4, h / 4);
         let hdr = |label, w, h| target(device, label, w, h, HDR_FORMAT);
         let (hdr_tex, hdr_view) = copyable(device, "hdr scene", w, h, HDR_FORMAT);
@@ -199,6 +202,7 @@ impl PostTargets {
             bloom: [hdr("bloom a", qw, qh), hdr("bloom b", qw, qh)],
             dof: [hdr("dof a", qw, qh), hdr("dof b", qw, qh)],
             rays: hdr("god rays", qw, qh),
+            graded: target(device, "graded", w, h, output),
             size: (w.max(1), h.max(1)),
         }
     }
@@ -313,7 +317,8 @@ impl Post {
         }
     }
 
-    /// Runs the chain from `t.hdr` (and `t.info`) into `out`.
+    /// Runs the chain from `t.hdr` (and `t.info`) into `out`; `scaled` when `out` is larger
+    /// than the targets (a render scale below 1).
     #[allow(clippy::too_many_arguments)]
     pub fn record(
         &self,
@@ -324,6 +329,7 @@ impl Post {
         out: &wgpu::TextureView,
         s: &PostSettings,
         frame: &FrameInfo,
+        scaled: bool,
     ) {
         let (w, h) = (t.size.0 as f32, t.size.1 as f32);
         let base = Params {
@@ -402,7 +408,11 @@ impl Post {
         pass(enc, &self.blur, &t.dof[1], &t.dof[0], [qw, qh, 0.0, qh], none);
         // Ambient occlusion from the depth info, at half size.
         pass(enc, &self.ao, &t.hdr, &t.ao, full, none);
-        pass(enc, &self.composite, &t.hdr, out, full, [&t.dof[0], &t.bloom[0], &t.info, &t.ao, &t.rays]);
+        let graded = if scaled { &t.graded } else { out };
+        pass(enc, &self.composite, &t.hdr, graded, full, [&t.dof[0], &t.bloom[0], &t.info, &t.ao, &t.rays]);
+        if scaled {
+            pass(enc, &self.copy, &t.graded, out, [0.0; 4], none);
+        }
     }
 }
 
